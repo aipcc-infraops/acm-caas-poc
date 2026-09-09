@@ -153,6 +153,97 @@ Lists cluster resource summaries from ManagedClusterInfo (nodes, CPU, memory).
 
 Shows detailed resource info for a specific cluster.
 
+### Lifecycle
+
+#### `acmlab lifecycle hibernate <cluster-name>`
+
+Hibernates a Hive-provisioned cluster by setting `spec.powerState` to `Hibernating`. Idempotent — if already hibernating, does nothing.
+
+Options:
+- `--namespace`, `-n` — cluster namespace (defaults to cluster name)
+- `--wait` — wait for hibernation to complete
+- `--timeout` — timeout for wait operation (default: 10m)
+
+```
+$ acmlab lifecycle hibernate spoke2
+Cluster spoke2/spoke2 is hibernating
+```
+
+#### `acmlab lifecycle resume <cluster-name>`
+
+Resumes a hibernated cluster by setting `spec.powerState` to `Running`. Idempotent.
+
+When used with `--wait`, after the cluster reaches Running state, automatically connects to the spoke cluster and approves any expired kubelet certificates. OpenShift kubelet client certs rotate every ~24h — if the cluster was hibernated during a rotation window, the certs expire and nodes cannot start pods until the CSRs are approved. This recovery step handles that automatically.
+
+Options:
+- `--namespace`, `-n` — cluster namespace (defaults to cluster name)
+- `--wait` — wait for resume to complete, then recover expired certificates
+- `--timeout` — timeout for wait operation (default: 15m)
+
+```
+$ acmlab lifecycle resume spoke2 --wait
+Cluster spoke2/spoke2 is resuming
+Waiting for cluster to resume (timeout: 15m0s)...
+Cluster successfully resumed
+Checking for expired kubelet certificates...
+Approved 20 expired kubelet certificate(s)
+  - csr-2k2ct
+  - csr-5ft9t
+  ...
+```
+
+#### `acmlab lifecycle status <cluster-name>`
+
+Shows cluster power state — both desired (spec) and actual (status). Indicates when a transition is in progress.
+
+```
+$ acmlab lifecycle status spoke2
+Cluster: spoke2/spoke2
+Desired State (spec):  Hibernating
+Actual State (status): WaitingForMachinesToStop
+
+Note: Power state transition in progress
+```
+
+#### `acmlab lifecycle diagnose <cluster-name>`
+
+Runs diagnostic checks that cross-reference Hive ClusterDeployment state with ACM ManagedCluster conditions. Detects inconsistencies like a cluster that Hive reports as Running but ACM shows as unavailable (klusterlet issue). Outputs actionable suggestions when problems are found.
+
+Options:
+- `--namespace`, `-n` — cluster namespace (defaults to cluster name)
+- `--json` — output report as JSON
+
+```
+$ acmlab lifecycle diagnose spoke2
+Cluster: spoke2/spoke2
+Platform: ibmcloud
+Hive Power (spec):   Running
+Hive Power (status): Running
+ACM Available: Unknown
+ACM Joined:    True
+
+  [OK]      Power state consistent: Running
+  [ERROR]   Hive power=Running but ACM Available=Unknown
+            Registration agent stopped updating its lease — klusterlet may need restart
+
+Suggestions:
+  - Restart klusterlet agent pods: kubectl delete pods -n open-cluster-management-agent -l app=klusterlet-agent --context <spoke>
+  - Check klusterlet logs: kubectl logs -n open-cluster-management-agent -l app=klusterlet-agent --tail=50 --context <spoke>
+
+Issues detected. Review suggestions above.
+```
+
+#### `acmlab lifecycle list`
+
+Lists all clusters that support lifecycle operations (Hive-provisioned). Imported clusters are excluded.
+
+```
+$ acmlab lifecycle list
+Clusters with lifecycle support (2):
+  - spoke1/spoke1
+  - spoke2/spoke2
+```
+
 ### MCP Server
 
 #### `acmlab mcp serve`
@@ -181,13 +272,16 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_provision_status` | UC-01 | ClusterDeployment provisioning status |
 | `acm_provision_list` | UC-01 | Lists clusters provisioned via acmlab |
 | `acm_list_image_sets` | UC-01 | Lists available ClusterImageSets |
+| `acm_hibernate_cluster` | UC-05 | Sets powerState to Hibernating (Hive-only) |
+| `acm_resume_cluster` | UC-05 | Sets powerState to Running (Hive-only) |
+| `acm_lifecycle_status` | UC-05 | Shows spec vs status power state and transition flag |
+| `acm_lifecycle_diagnose` | UC-05 | Cross-references Hive + ACM state, detects inconsistencies, suggests fixes |
+| `acm_lifecycle_recover_certs` | UC-05 | Approves expired kubelet CSRs on spoke after resume from hibernation |
+| `acm_list_lifecycle_clusters` | UC-05 | Lists all Hive-provisioned clusters |
 
 ### Planned
 
 | Tool | UC | Description |
 |------|-----|-------------|
-| `acm_hibernate_cluster` | UC-05 | Sets powerState to Hibernating (Hive-only) |
-| `acm_resume_cluster` | UC-05 | Sets powerState to Running (Hive-only) |
-| `acm_cluster_power_state` | UC-05 | Shows current power state |
 | `acm_import_cluster` | UC-07 | Imports external cluster via kubeconfig |
 | `acm_detach_cluster` | UC-07 | Detaches an imported cluster |

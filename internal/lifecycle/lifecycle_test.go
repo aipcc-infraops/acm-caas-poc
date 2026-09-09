@@ -315,7 +315,153 @@ func TestListClustersWithLifecycleReturnsAllClusterDeployments(t *testing.T) {
 	}
 }
 
-// Helper function
+func TestCheckHiveTransitionReportsSync(t *testing.T) {
+	check := checkHiveTransition(PowerStateRunning, PowerStateRunning)
+	if check.Severity != SeverityOK {
+		t.Errorf("expected OK severity, got %s", check.Severity)
+	}
+}
+
+func TestCheckHiveTransitionReportsTransitioning(t *testing.T) {
+	check := checkHiveTransition(PowerStateHibernating, PowerStateRunning)
+	if check.Severity != SeverityWarning {
+		t.Errorf("expected Warning severity, got %s", check.Severity)
+	}
+}
+
+func TestCheckACMHealthDetectsKlusterletIssue(t *testing.T) {
+	checks := checkACMHealth(PowerStateRunning, "Unknown", "True")
+	if len(checks) == 0 {
+		t.Fatal("expected at least one check, got none")
+	}
+	if checks[0].Severity != SeverityError {
+		t.Errorf("expected Error severity for Running+Available=Unknown, got %s", checks[0].Severity)
+	}
+	if checks[0].Name != "acm-available-mismatch" {
+		t.Errorf("expected acm-available-mismatch, got %s", checks[0].Name)
+	}
+}
+
+func TestCheckACMHealthOKWhenConsistent(t *testing.T) {
+	checks := checkACMHealth(PowerStateRunning, "True", "True")
+	if len(checks) != 1 {
+		t.Fatalf("expected 1 check, got %d", len(checks))
+	}
+	if checks[0].Severity != SeverityOK {
+		t.Errorf("expected OK severity, got %s", checks[0].Severity)
+	}
+}
+
+func TestCheckACMHealthHibernatingWithAvailableTrue(t *testing.T) {
+	checks := checkACMHealth(PowerStateHibernating, "True", "True")
+	if len(checks) == 0 {
+		t.Fatal("expected at least one check, got none")
+	}
+	if checks[0].Name != "acm-available-during-hibernate" {
+		t.Errorf("expected acm-available-during-hibernate, got %s", checks[0].Name)
+	}
+}
+
+func TestDeriveSuggestionsForKlusterletIssue(t *testing.T) {
+	checks := []DiagnosticCheck{
+		{Name: "acm-available-mismatch", Severity: SeverityError, Message: "test"},
+	}
+	suggestions := deriveSuggestions(checks)
+	if len(suggestions) < 2 {
+		t.Fatalf("expected at least 2 suggestions for klusterlet issue, got %d", len(suggestions))
+	}
+}
+
+func TestDeriveSuggestionsEmptyForHealthy(t *testing.T) {
+	checks := []DiagnosticCheck{
+		{Name: "hive-power-sync", Severity: SeverityOK, Message: "ok"},
+		{Name: "acm-health", Severity: SeverityOK, Message: "ok"},
+	}
+	suggestions := deriveSuggestions(checks)
+	if len(suggestions) != 0 {
+		t.Errorf("expected 0 suggestions for healthy cluster, got %d", len(suggestions))
+	}
+}
+
+func TestDiagnoseIntegratesHiveAndACM(t *testing.T) {
+	cd := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "hive.openshift.io/v1",
+			"kind":       "ClusterDeployment",
+			"metadata": map[string]interface{}{
+				"name":      "cluster1",
+				"namespace": "test-ns",
+				"labels": map[string]interface{}{
+					"hive.openshift.io/cluster-platform": "ibmcloud",
+				},
+			},
+			"spec": map[string]interface{}{
+				"powerState": "Running",
+			},
+			"status": map[string]interface{}{
+				"powerState": "Running",
+				"conditions": []interface{}{
+					map[string]interface{}{
+						"type":   "Unreachable",
+						"status": "False",
+					},
+				},
+			},
+		},
+	}
+	mc := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": "cluster1",
+			},
+			"status": map[string]interface{}{
+				"conditions": []interface{}{
+					map[string]interface{}{
+						"type":   "ManagedClusterConditionAvailable",
+						"status": "Unknown",
+					},
+					map[string]interface{}{
+						"type":   "ManagedClusterJoined",
+						"status": "True",
+					},
+				},
+			},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, mc)
+	c := &client.Client{Dynamic: fakeDynamic}
+	m := New(c, config.Config{})
+
+	report, err := m.Diagnose(context.Background(), "test-ns", "cluster1")
+	if err != nil {
+		t.Fatalf("Diagnose() error = %v", err)
+	}
+
+	if report.Platform != "ibmcloud" {
+		t.Errorf("expected platform ibmcloud, got %s", report.Platform)
+	}
+	if report.ACMAvailable != "Unknown" {
+		t.Errorf("expected ACM Available=Unknown, got %s", report.ACMAvailable)
+	}
+	if len(report.Suggestions) == 0 {
+		t.Error("expected suggestions for klusterlet issue, got none")
+	}
+
+	hasError := false
+	for _, check := range report.Checks {
+		if check.Name == "acm-available-mismatch" && check.Severity == SeverityError {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Error("expected acm-available-mismatch error check in report")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || findSubstring(s, substr)))
 }

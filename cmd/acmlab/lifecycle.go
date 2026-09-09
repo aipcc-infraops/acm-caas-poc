@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,7 +21,7 @@ func lifecycleCmd() *cobra.Command {
 Only works with Hive-provisioned clusters. Imported clusters do not support
 lifecycle operations.`,
 	}
-	cmd.AddCommand(hibernateCmd(), resumeCmd(), lifecycleStatusCmd(), lifecycleListCmd())
+	cmd.AddCommand(hibernateCmd(), resumeCmd(), lifecycleStatusCmd(), lifecycleDiagnoseCmd(), lifecycleListCmd())
 	return cmd
 }
 
@@ -122,6 +124,17 @@ func resumeCmd() *cobra.Command {
 					return fmt.Errorf("waiting for resume: %w", err)
 				}
 				fmt.Println("Cluster successfully resumed")
+
+				fmt.Println("Checking for expired kubelet certificates...")
+				recovery, err := m.PostResumeRecovery(ctx, namespace, clusterName)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: certificate recovery failed: %v\n", err)
+				} else {
+					fmt.Println(recovery.Message)
+					for _, name := range recovery.CSRNames {
+						fmt.Printf("  - %s\n", name)
+					}
+				}
 			}
 
 			return nil
@@ -187,6 +200,94 @@ func lifecycleStatusCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Cluster namespace (defaults to cluster name)")
+
+	return cmd
+}
+
+func lifecycleDiagnoseCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "diagnose <cluster-name>",
+		Short: "Diagnose cluster health by cross-referencing Hive and ACM state",
+		Long: `Run diagnostic checks that compare ClusterDeployment (Hive) power state
+with ManagedCluster (ACM) conditions. Detects inconsistencies like a cluster
+that Hive reports as Running but ACM shows as unavailable (klusterlet issue).
+
+Outputs actionable suggestions when problems are found.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clusterName := args[0]
+			if namespace == "" {
+				namespace = clusterName
+			}
+
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+
+			m := lifecycle.New(c, cfg)
+			ctx := context.Background()
+
+			report, err := m.Diagnose(ctx, namespace, clusterName)
+			if err != nil {
+				return fmt.Errorf("diagnosing cluster: %w", err)
+			}
+
+			if outputJSON {
+				data, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+
+			fmt.Printf("Cluster: %s\n", report.Cluster)
+			if report.Platform != "" {
+				fmt.Printf("Platform: %s\n", report.Platform)
+			}
+			fmt.Printf("Hive Power (spec):   %s\n", report.HivePowerSpec)
+			fmt.Printf("Hive Power (status): %s\n", report.HivePowerStatus)
+			fmt.Printf("ACM Available: %s\n", report.ACMAvailable)
+			fmt.Printf("ACM Joined:    %s\n", report.ACMJoined)
+			fmt.Println()
+
+			hasIssues := false
+			for _, check := range report.Checks {
+				switch check.Severity {
+				case lifecycle.SeverityOK:
+					fmt.Printf("  [OK]      %s\n", check.Message)
+				case lifecycle.SeverityWarning:
+					fmt.Fprintf(os.Stderr, "  [WARNING] %s\n", check.Message)
+					hasIssues = true
+				case lifecycle.SeverityError:
+					fmt.Fprintf(os.Stderr, "  [ERROR]   %s\n", check.Message)
+					hasIssues = true
+				}
+				if check.Detail != "" {
+					fmt.Printf("            %s\n", check.Detail)
+				}
+			}
+
+			if len(report.Suggestions) > 0 {
+				fmt.Println()
+				fmt.Println("Suggestions:")
+				for _, s := range report.Suggestions {
+					fmt.Printf("  - %s\n", s)
+				}
+			}
+
+			if hasIssues {
+				fmt.Println()
+				fmt.Fprintln(os.Stderr, "Issues detected. Review suggestions above.")
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Cluster namespace (defaults to cluster name)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output report as JSON")
 
 	return cmd
 }
