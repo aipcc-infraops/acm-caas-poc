@@ -12,7 +12,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-02 | Governance policy management (image registry) | ✅ Implemented | `internal/policy/` |
 | UC-03 | Tenant RBAC isolation via ManifestWork | ✅ Implemented | `internal/tenant/` |
 | UC-04 | Fleet status and cross-cluster search | ✅ Implemented | `internal/fleet/` |
-| UC-05 | Hibernate/resume lifecycle (Hive-only) | 📋 Planned | `internal/lifecycle/` |
+| UC-05 | Hibernate/resume lifecycle (Hive-only) | ✅ Implemented | `internal/lifecycle/` |
 | UC-06 | Cluster resource monitoring & observability (Thanos) | ✅ Implemented | `internal/monitoring/`, `internal/observability/` |
 | UC-07 | External cluster import | 📋 In Progress | `internal/importing/` |
 | UC-08 | Legacy cluster decommissioning | 📋 Planned | `internal/decommission/` |
@@ -68,6 +68,14 @@ bin/acmlab provision create spoke2 --platform aws --pull-secret ~/pull-secret.js
 bin/acmlab provision status spoke1
 bin/acmlab provision list
 bin/acmlab provision destroy spoke1
+
+# 9. Cluster lifecycle (hibernate/resume)
+bin/acmlab lifecycle list
+bin/acmlab lifecycle status spoke2
+bin/acmlab lifecycle hibernate spoke2 --wait
+bin/acmlab lifecycle resume spoke2 --wait      # auto-recovers expired kubelet certs
+bin/acmlab lifecycle diagnose spoke2
+bin/acmlab lifecycle diagnose spoke2 --json
 ```
 
 ## MCP Server
@@ -92,7 +100,7 @@ Register in Claude Code's MCP config:
 }
 ```
 
-Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`.
+Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`, `acm_hibernate_cluster`, `acm_resume_cluster`, `acm_lifecycle_status`, `acm_lifecycle_diagnose`, `acm_lifecycle_recover_certs`, `acm_list_lifecycle_clusters`.
 
 See [docs/acmlab-commands.md](docs/acmlab-commands.md) for the full command and tool reference.
 
