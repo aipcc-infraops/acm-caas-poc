@@ -12,6 +12,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 	"github.com/pablofelix/acm-caas-poc/internal/fleet"
+	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
 	"github.com/pablofelix/acm-caas-poc/internal/monitoring"
 	"github.com/pablofelix/acm-caas-poc/internal/policy"
 	"github.com/pablofelix/acm-caas-poc/internal/provisioning"
@@ -40,6 +41,9 @@ func NewServer(c *client.Client, cfg config.Config) *server.MCPServer {
 
 	prov := provisioning.New(c, cfg)
 	registerProvisioningTools(s, prov, cfg)
+
+	lc := lifecycle.New(c, cfg)
+	registerLifecycleTools(s, lc)
 
 	return s
 }
@@ -461,6 +465,146 @@ func registerHealthTool(s *server.MCPServer, c *client.Client) {
 			result := map[string]interface{}{
 				"healthy": allOK,
 				"checks":  checks,
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+}
+
+func registerLifecycleTools(s *server.MCPServer, lc *lifecycle.Manager) {
+	s.AddTool(
+		mcp.NewTool("acm_hibernate_cluster",
+			mcp.WithDescription("Hibernate a Hive-provisioned cluster to save costs. Sets ClusterDeployment powerState to Hibernating. Returns immediately — poll with acm_lifecycle_status to track progress. Only works with Hive-provisioned clusters, not imported ones."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("namespace", mcp.Description("Cluster namespace (defaults to cluster name)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.RequireString("name")
+			namespace := name
+			if ns, err := req.RequireString("namespace"); err == nil && ns != "" {
+				namespace = ns
+			}
+
+			supported, err := lc.ClusterSupportsLifecycle(ctx, namespace, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("checking lifecycle support: %v", err)), nil
+			}
+			if !supported {
+				return mcp.NewToolResultError(fmt.Sprintf("cluster %s/%s does not support lifecycle operations (no ClusterDeployment found — may be imported)", namespace, name)), nil
+			}
+
+			if err := lc.Hibernate(ctx, namespace, name); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("hibernating cluster: %v", err)), nil
+			}
+
+			state, _ := lc.GetPowerState(ctx, namespace, name)
+			result := map[string]interface{}{
+				"cluster":   fmt.Sprintf("%s/%s", namespace, name),
+				"action":    "hibernate",
+				"status":    "initiated",
+				"powerState": string(state),
+				"next":      "Use acm_lifecycle_status to track progress",
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_resume_cluster",
+			mcp.WithDescription("Resume a hibernated Hive-provisioned cluster. Sets ClusterDeployment powerState to Running. Returns immediately — poll with acm_lifecycle_status to track progress."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("namespace", mcp.Description("Cluster namespace (defaults to cluster name)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.RequireString("name")
+			namespace := name
+			if ns, err := req.RequireString("namespace"); err == nil && ns != "" {
+				namespace = ns
+			}
+
+			supported, err := lc.ClusterSupportsLifecycle(ctx, namespace, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("checking lifecycle support: %v", err)), nil
+			}
+			if !supported {
+				return mcp.NewToolResultError(fmt.Sprintf("cluster %s/%s does not support lifecycle operations (no ClusterDeployment found — may be imported)", namespace, name)), nil
+			}
+
+			if err := lc.Resume(ctx, namespace, name); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("resuming cluster: %v", err)), nil
+			}
+
+			state, _ := lc.GetPowerState(ctx, namespace, name)
+			result := map[string]interface{}{
+				"cluster":   fmt.Sprintf("%s/%s", namespace, name),
+				"action":    "resume",
+				"status":    "initiated",
+				"powerState": string(state),
+				"next":      "Use acm_lifecycle_status to track progress",
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_lifecycle_status",
+			mcp.WithDescription("Get the power state of a cluster (spec and status). Shows desired state vs actual state to track transitions."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("namespace", mcp.Description("Cluster namespace (defaults to cluster name)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.RequireString("name")
+			namespace := name
+			if ns, err := req.RequireString("namespace"); err == nil && ns != "" {
+				namespace = ns
+			}
+
+			supported, err := lc.ClusterSupportsLifecycle(ctx, namespace, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("checking lifecycle support: %v", err)), nil
+			}
+			if !supported {
+				return mcp.NewToolResultError(fmt.Sprintf("cluster %s/%s does not support lifecycle operations (no ClusterDeployment found — may be imported)", namespace, name)), nil
+			}
+
+			specState, err := lc.GetPowerState(ctx, namespace, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("getting power state: %v", err)), nil
+			}
+
+			statusState, err := lc.GetPowerStateStatus(ctx, namespace, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("getting power state status: %v", err)), nil
+			}
+
+			transitioning := specState != statusState
+			result := map[string]interface{}{
+				"cluster":       fmt.Sprintf("%s/%s", namespace, name),
+				"desiredState":  string(specState),
+				"actualState":   string(statusState),
+				"transitioning": transitioning,
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_list_lifecycle_clusters",
+			mcp.WithDescription("List all Hive-provisioned clusters that support lifecycle operations (hibernate/resume). Imported clusters are excluded."),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			clusters, err := lc.ListClustersWithLifecycle(ctx)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("listing clusters: %v", err)), nil
+			}
+
+			result := map[string]interface{}{
+				"count":    len(clusters),
+				"clusters": clusters,
 			}
 			data, _ := json.MarshalIndent(result, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil

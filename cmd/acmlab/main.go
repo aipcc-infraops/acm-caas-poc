@@ -37,6 +37,7 @@ func main() {
 	root.AddCommand(policyCmd())
 	root.AddCommand(tenantCmd())
 	root.AddCommand(provisionCmd())
+	root.AddCommand(lifecycleCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {
