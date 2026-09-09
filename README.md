@@ -4,15 +4,31 @@ PoC that validates Red Hat ACM 2.17 capabilities for a Containers-as-a-Service p
 
 ## Use Cases
 
-| UC | Description | Status |
-|----|-------------|--------|
-| UC-01 | Cluster provisioning via ClusterDeployment (multi-platform) | Implemented |
-| UC-02 | Governance policy management | Implemented |
-| UC-03 | Tenant RBAC isolation via ManifestWork | Implemented |
-| UC-04 | Fleet status and observability | Implemented |
-| UC-05 | Hibernate/resume lifecycle (Hive-only) | Planned |
-| UC-06 | Cluster resource monitoring & observability | Implemented |
-| UC-07 | External cluster import | Planned |
+Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc.md](docs/acm-use-cases-caas-poc.md)
+
+| UC | Description | Status | Package |
+|----|-------------|--------|---------|
+| UC-01 | Cluster provisioning via ClusterDeployment (multi-platform) | ✅ Implemented | `internal/provisioning/` |
+| UC-02 | Governance policy management (image registry) | ✅ Implemented | `internal/policy/` |
+| UC-03 | Tenant RBAC isolation via ManifestWork | ✅ Implemented | `internal/tenant/` |
+| UC-04 | Fleet status and cross-cluster search | ✅ Implemented | `internal/fleet/` |
+| UC-05 | Hibernate/resume lifecycle (Hive-only) | 📋 Planned | `internal/lifecycle/` |
+| UC-06 | Cluster resource monitoring & observability (Thanos) | ✅ Implemented | `internal/monitoring/`, `internal/observability/` |
+| UC-07 | External cluster import | 📋 In Progress | `internal/importing/` |
+| UC-08 | Legacy cluster decommissioning | 📋 Planned | `internal/decommission/` |
+| UC-09 | Cluster upgrades (Day-2 operations) | 📋 Planned | `internal/upgrades/` |
+| UC-10 | Cluster scaling (add/remove workers) | 📋 Planned | `internal/scaling/` |
+| UC-11 | Cost tracking and chargeback | 📋 Planned | `internal/cost/` |
+| UC-12 | Identity Provider management (GitHub IdP, htpasswd rotation) | 📋 Planned | `internal/idp/` |
+
+### PoC Priority Areas
+
+The PoC validates ACM value in 4 areas:
+
+1. **Provisioning clusters** (UC-01, UC-10) ✅
+2. **Managing imported clusters** (UC-07, UC-08, UC-09) 🔄
+3. **Policy management & enforcement** (UC-02, UC-12) ⚠️ UC-12 needed
+4. **Monitor and alert** (UC-04, UC-06) ✅
 
 ## Quick Start
 
