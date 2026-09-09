@@ -513,7 +513,7 @@ func registerLifecycleTools(s *server.MCPServer, lc *lifecycle.Manager) {
 
 	s.AddTool(
 		mcp.NewTool("acm_resume_cluster",
-			mcp.WithDescription("Resume a hibernated Hive-provisioned cluster. Sets ClusterDeployment powerState to Running. Returns immediately — poll with acm_lifecycle_status to track progress."),
+			mcp.WithDescription("Resume a hibernated Hive-provisioned cluster. Sets ClusterDeployment powerState to Running. Returns immediately — poll with acm_lifecycle_status to track progress. After resume completes, use acm_lifecycle_recover_certs to approve any expired kubelet certificates."),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
 			mcp.WithString("namespace", mcp.Description("Cluster namespace (defaults to cluster name)")),
 		),
@@ -587,6 +587,52 @@ func registerLifecycleTools(s *server.MCPServer, lc *lifecycle.Manager) {
 				"actualState":   string(statusState),
 				"transitioning": transitioning,
 			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_lifecycle_diagnose",
+			mcp.WithDescription("Diagnose cluster health by cross-referencing Hive ClusterDeployment state with ACM ManagedCluster conditions. Detects inconsistencies (e.g., Hive says Running but ACM reports unavailable), checks for problem conditions, and returns actionable suggestions."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("namespace", mcp.Description("Cluster namespace (defaults to cluster name)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.RequireString("name")
+			namespace := name
+			if ns, err := req.RequireString("namespace"); err == nil && ns != "" {
+				namespace = ns
+			}
+
+			report, err := lc.Diagnose(ctx, namespace, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("diagnosing cluster: %v", err)), nil
+			}
+
+			data, _ := json.MarshalIndent(report, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_lifecycle_recover_certs",
+			mcp.WithDescription("Approve expired kubelet certificates on a spoke cluster after resume from hibernation. Kubelet certs rotate every ~24h in OpenShift — if the cluster was hibernated during rotation, certs expire and nodes cannot start pods until CSRs are approved. This tool connects to the spoke via its admin kubeconfig and approves pending kubelet CSRs automatically."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("namespace", mcp.Description("Cluster namespace (defaults to cluster name)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.RequireString("name")
+			namespace := name
+			if ns, err := req.RequireString("namespace"); err == nil && ns != "" {
+				namespace = ns
+			}
+
+			result, err := lc.PostResumeRecovery(ctx, namespace, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("recovering certificates: %v", err)), nil
+			}
+
 			data, _ := json.MarshalIndent(result, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil
 		},

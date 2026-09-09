@@ -14,7 +14,6 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
 
-// PowerState represents the power state of a Hive-managed cluster
 type PowerState string
 
 const (
@@ -24,6 +23,32 @@ const (
 	PowerStateResuming    PowerState = "Resuming"
 	PowerStateUnknown     PowerState = "Unknown"
 )
+
+type Severity string
+
+const (
+	SeverityOK      Severity = "ok"
+	SeverityWarning Severity = "warning"
+	SeverityError   Severity = "error"
+)
+
+type DiagnosticCheck struct {
+	Name     string   `json:"name"`
+	Severity Severity `json:"severity"`
+	Message  string   `json:"message"`
+	Detail   string   `json:"detail,omitempty"`
+}
+
+type DiagnosticReport struct {
+	Cluster         string            `json:"cluster"`
+	HivePowerSpec   PowerState        `json:"hivePowerSpec"`
+	HivePowerStatus PowerState        `json:"hivePowerStatus"`
+	ACMAvailable    string            `json:"acmAvailable"`
+	ACMJoined       string            `json:"acmJoined"`
+	Platform        string            `json:"platform,omitempty"`
+	Checks          []DiagnosticCheck `json:"checks"`
+	Suggestions     []string          `json:"suggestions,omitempty"`
+}
 
 // Manager handles cluster lifecycle operations (hibernate/resume)
 type Manager struct {
@@ -146,7 +171,6 @@ func (m *Manager) ClusterSupportsLifecycle(ctx context.Context, namespace, name 
 	return true, nil
 }
 
-// ListClustersWithLifecycle returns all clusters that support lifecycle operations
 func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, error) {
 	cds, err := m.client.List(ctx, client.GVRClusterDeployment, "", "")
 	if err != nil {
@@ -160,4 +184,243 @@ func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, erro
 		names = append(names, fmt.Sprintf("%s/%s", namespace, name))
 	}
 	return names, nil
+}
+
+func (m *Manager) Diagnose(ctx context.Context, namespace, name string) (*DiagnosticReport, error) {
+	report := &DiagnosticReport{
+		Cluster: fmt.Sprintf("%s/%s", namespace, name),
+	}
+
+	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, fmt.Errorf("no ClusterDeployment found for cluster %s/%s: this cluster may be imported (not Hive-provisioned)", namespace, name)
+		}
+		return nil, fmt.Errorf("getting ClusterDeployment: %w", err)
+	}
+
+	specPower, _, _ := unstructured.NestedString(cd.Object, "spec", "powerState")
+	statusPower, _, _ := unstructured.NestedString(cd.Object, "status", "powerState")
+	report.HivePowerSpec = PowerState(specPower)
+	report.HivePowerStatus = PowerState(statusPower)
+	if report.HivePowerSpec == "" {
+		report.HivePowerSpec = PowerStateUnknown
+	}
+	if report.HivePowerStatus == "" {
+		report.HivePowerStatus = PowerStateUnknown
+	}
+
+	platform, _, _ := unstructured.NestedString(cd.Object, "metadata", "labels", "hive.openshift.io/cluster-platform")
+	report.Platform = platform
+
+	report.Checks = append(report.Checks, checkHiveTransition(report.HivePowerSpec, report.HivePowerStatus))
+	report.Checks = append(report.Checks, checkHiveConditions(cd, report.HivePowerStatus)...)
+
+	mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			report.ACMAvailable = "not found"
+			report.ACMJoined = "not found"
+			report.Checks = append(report.Checks, DiagnosticCheck{
+				Name:     "managedcluster-exists",
+				Severity: SeverityWarning,
+				Message:  "No ManagedCluster resource found",
+				Detail:   "ClusterDeployment exists but ManagedCluster does not — cluster may not be registered with ACM",
+			})
+		} else {
+			return nil, fmt.Errorf("getting ManagedCluster: %w", err)
+		}
+	} else {
+		available, joined := extractMCConditions(mc)
+		report.ACMAvailable = available
+		report.ACMJoined = joined
+		report.Checks = append(report.Checks, checkACMHealth(report.HivePowerSpec, available, joined)...)
+	}
+
+	report.Suggestions = deriveSuggestions(report.Checks)
+	return report, nil
+}
+
+func checkHiveTransition(spec, status PowerState) DiagnosticCheck {
+	if spec == status {
+		return DiagnosticCheck{
+			Name:     "hive-power-sync",
+			Severity: SeverityOK,
+			Message:  fmt.Sprintf("Power state consistent: %s", spec),
+		}
+	}
+	return DiagnosticCheck{
+		Name:     "hive-power-sync",
+		Severity: SeverityWarning,
+		Message:  fmt.Sprintf("Power state transitioning: spec=%s, status=%s", spec, status),
+		Detail:   "Hive has not yet reached the desired power state",
+	}
+}
+
+func checkHiveConditions(cd *unstructured.Unstructured, currentPower PowerState) []DiagnosticCheck {
+	var checks []DiagnosticCheck
+	conditions, found, _ := unstructured.NestedSlice(cd.Object, "status", "conditions")
+	if !found {
+		return checks
+	}
+
+	problemConditions := map[string]bool{
+		"Unreachable":           true,
+		"ProvisionFailed":       true,
+		"SyncSetFailed":         true,
+		"InstallLaunchError":    true,
+		"AuthenticationFailure": true,
+	}
+
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		condType, _, _ := unstructured.NestedString(cond, "type")
+		condStatus, _, _ := unstructured.NestedString(cond, "status")
+
+		if !problemConditions[condType] {
+			continue
+		}
+		if condStatus != "True" {
+			continue
+		}
+
+		// Unreachable is expected when the cluster is hibernating or stopping
+		if condType == "Unreachable" && (currentPower == PowerStateHibernating || currentPower == PowerStateStopping) {
+			msg, _, _ := unstructured.NestedString(cond, "message")
+			checks = append(checks, DiagnosticCheck{
+				Name:     fmt.Sprintf("hive-%s", condType),
+				Severity: SeverityOK,
+				Message:  fmt.Sprintf("Unreachable (expected — cluster is %s)", currentPower),
+				Detail:   msg,
+			})
+			continue
+		}
+
+		msg, _, _ := unstructured.NestedString(cond, "message")
+		checks = append(checks, DiagnosticCheck{
+			Name:     fmt.Sprintf("hive-%s", condType),
+			Severity: SeverityError,
+			Message:  fmt.Sprintf("Hive condition %s is True", condType),
+			Detail:   msg,
+		})
+	}
+	return checks
+}
+
+func extractMCConditions(mc *unstructured.Unstructured) (available, joined string) {
+	conditions, found, _ := unstructured.NestedSlice(mc.Object, "status", "conditions")
+	if !found {
+		return "Unknown", "Unknown"
+	}
+	available = "Unknown"
+	joined = "Unknown"
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		condType, _, _ := unstructured.NestedString(cond, "type")
+		condStatus, _, _ := unstructured.NestedString(cond, "status")
+		switch condType {
+		case "ManagedClusterConditionAvailable":
+			available = condStatus
+		case "ManagedClusterJoined":
+			joined = condStatus
+		}
+	}
+	return available, joined
+}
+
+func checkACMHealth(hivePower PowerState, available, joined string) []DiagnosticCheck {
+	var checks []DiagnosticCheck
+	isHibernated := hivePower == PowerStateHibernating || hivePower == PowerStateStopping
+
+	if hivePower == PowerStateRunning && available != "True" {
+		sev := SeverityWarning
+		if available == "Unknown" {
+			sev = SeverityError
+		}
+		detail := "Hive says Running but ACM agent is not reporting as available"
+		if available == "Unknown" {
+			detail = "Registration agent stopped updating its lease — klusterlet may need restart"
+		}
+		checks = append(checks, DiagnosticCheck{
+			Name:     "acm-available-mismatch",
+			Severity: sev,
+			Message:  fmt.Sprintf("Hive power=Running but ACM Available=%s", available),
+			Detail:   detail,
+		})
+	}
+
+	if isHibernated && available == "True" {
+		checks = append(checks, DiagnosticCheck{
+			Name:     "acm-available-during-hibernate",
+			Severity: SeverityWarning,
+			Message:  "ACM reports Available=True while cluster is hibernating",
+			Detail:   "Cluster is hibernating but ACM agent lease has not expired yet — will resolve when lease times out",
+		})
+	}
+
+	if isHibernated && (available == "Unknown" || available == "False") {
+		checks = append(checks, DiagnosticCheck{
+			Name:     "acm-health",
+			Severity: SeverityOK,
+			Message:  fmt.Sprintf("ACM Available=%s (expected — cluster is %s)", available, hivePower),
+		})
+	}
+
+	if joined != "True" && joined != "Unknown" {
+		checks = append(checks, DiagnosticCheck{
+			Name:     "acm-not-joined",
+			Severity: SeverityError,
+			Message:  fmt.Sprintf("ManagedCluster Joined=%s", joined),
+			Detail:   "Cluster has not joined the hub — check klusterlet installation on the spoke",
+		})
+	}
+
+	if len(checks) == 0 {
+		checks = append(checks, DiagnosticCheck{
+			Name:     "acm-health",
+			Severity: SeverityOK,
+			Message:  fmt.Sprintf("ACM health consistent: Available=%s, Joined=%s", available, joined),
+		})
+	}
+
+	return checks
+}
+
+func deriveSuggestions(checks []DiagnosticCheck) []string {
+	var suggestions []string
+	for _, c := range checks {
+		switch c.Name {
+		case "acm-available-mismatch":
+			if c.Severity == SeverityError {
+				suggestions = append(suggestions,
+					"Restart klusterlet agent pods: kubectl delete pods -n open-cluster-management-agent -l app=klusterlet-agent --context <spoke>",
+					"Check klusterlet logs: kubectl logs -n open-cluster-management-agent -l app=klusterlet-agent --tail=50 --context <spoke>",
+				)
+			}
+		case "hive-Unreachable":
+			suggestions = append(suggestions,
+				"Check cloud credentials and network connectivity to the cluster's API server",
+			)
+		case "hive-ProvisionFailed":
+			suggestions = append(suggestions,
+				"Review ClusterDeployment conditions: kubectl get clusterdeployment -n <namespace> <name> -o yaml",
+				"Check Hive install logs: kubectl logs -n <namespace> -l hive.openshift.io/cluster-deployment-name=<name>",
+			)
+		case "acm-not-joined":
+			suggestions = append(suggestions,
+				"Re-import the cluster from ACM console or recreate the klusterlet",
+			)
+		case "managedcluster-exists":
+			suggestions = append(suggestions,
+				"Import the cluster into ACM: create a ManagedCluster resource matching the ClusterDeployment name",
+			)
+		}
+	}
+	return suggestions
 }
