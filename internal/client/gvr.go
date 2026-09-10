@@ -60,4 +60,7 @@ var (
 	GVRManagedClusterSetBinding = schema.GroupVersionResource{
 		Group: "cluster.open-cluster-management.io", Version: "v1beta2", Resource: "managedclustersetbindings",
 	}
+	GVRManagedClusterImageRegistry = schema.GroupVersionResource{
+		Group: "imageregistry.open-cluster-management.io", Version: "v1alpha1", Resource: "managedclusterimageregistries",
+	}
 )

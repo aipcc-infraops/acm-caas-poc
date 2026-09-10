@@ -244,6 +244,61 @@ Clusters with lifecycle support (2):
   - spoke2/spoke2
 ```
 
+### Import
+
+#### `acmlab import cluster <name>`
+
+Imports an external cluster into ACM by creating a ManagedCluster, namespace, and KlusterletAddonConfig. If `--kubeconfig-path` is provided, creates an auto-import secret so ACM installs the klusterlet automatically.
+
+Options:
+- `--kubeconfig-path` — path to spoke cluster kubeconfig for auto-import
+- `--label`, `-l` — labels for the ManagedCluster (key=value, repeatable)
+- `--cluster-set` — ManagedClusterSet to assign (default: "default")
+- `--wait` — wait for import to complete (only with auto-import)
+- `--timeout` — timeout for wait operation (default: 10m)
+
+```
+$ acmlab import cluster import-test --kubeconfig-path /tmp/import-test.kubeconfig --label cloud=IBM --label vendor=OpenShift --wait
+Cluster import-test registered for import (auto-import enabled)
+Waiting for cluster to become available (timeout: 10m0s)...
+Cluster successfully imported and available
+```
+
+#### `acmlab import detach <name>`
+
+Detaches a cluster from ACM management. Does NOT destroy the underlying cluster — only removes the ACM registration. ACM cleanup controllers remove the klusterlet from the spoke.
+
+```
+$ acmlab import detach import-test
+Cluster import-test detached from ACM
+```
+
+#### `acmlab import status <name>`
+
+Shows import status: availability, join state, creation method, and auto-import status.
+
+Options:
+- `--json` — output as JSON
+
+```
+$ acmlab import status import-test
+Cluster: import-test
+Available: True
+Joined: True
+Created via: other
+Auto-import: true
+```
+
+#### `acmlab import list`
+
+Lists all imported (non-Hive) clusters with availability and join status.
+
+```
+$ acmlab import list
+Imported clusters (1):
+  - import-test  Available=True  Joined=True
+```
+
 ### MCP Server
 
 #### `acmlab mcp serve`
@@ -278,10 +333,7 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_lifecycle_diagnose` | UC-05 | Cross-references Hive + ACM state, detects inconsistencies, suggests fixes |
 | `acm_lifecycle_recover_certs` | UC-05 | Approves expired kubelet CSRs on spoke after resume from hibernation |
 | `acm_list_lifecycle_clusters` | UC-05 | Lists all Hive-provisioned clusters |
-
-### Planned
-
-| Tool | UC | Description |
-|------|-----|-------------|
-| `acm_import_cluster` | UC-07 | Imports external cluster via kubeconfig |
-| `acm_detach_cluster` | UC-07 | Detaches an imported cluster |
+| `acm_import_cluster` | UC-07 | Imports external cluster, optional auto-import via kubeconfig |
+| `acm_detach_cluster` | UC-07 | Detaches a cluster from ACM (does not destroy it) |
+| `acm_import_status` | UC-07 | Import status: availability, join state, auto-import |
+| `acm_list_imported_clusters` | UC-07 | Lists all imported (non-Hive) clusters |
