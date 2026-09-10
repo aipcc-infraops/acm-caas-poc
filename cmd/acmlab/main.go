@@ -38,6 +38,8 @@ func main() {
 	root.AddCommand(tenantCmd())
 	root.AddCommand(provisionCmd())
 	root.AddCommand(lifecycleCmd())
+	root.AddCommand(importCmd())
+	root.AddCommand(registryCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {

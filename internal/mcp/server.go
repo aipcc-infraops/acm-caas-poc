@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -12,7 +13,9 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 	"github.com/pablofelix/acm-caas-poc/internal/fleet"
+	"github.com/pablofelix/acm-caas-poc/internal/importing"
 	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
+	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/monitoring"
 	"github.com/pablofelix/acm-caas-poc/internal/policy"
 	"github.com/pablofelix/acm-caas-poc/internal/provisioning"
@@ -44,6 +47,12 @@ func NewServer(c *client.Client, cfg config.Config) *server.MCPServer {
 
 	lc := lifecycle.New(c, cfg)
 	registerLifecycleTools(s, lc)
+
+	imp := importing.New(c, cfg)
+	registerImportTools(s, imp)
+
+	reg := registry.New(c, cfg)
+	registerRegistryTools(s, reg)
 
 	return s
 }
@@ -648,12 +657,208 @@ func registerLifecycleTools(s *server.MCPServer, lc *lifecycle.Manager) {
 				return mcp.NewToolResultError(fmt.Sprintf("listing clusters: %v", err)), nil
 			}
 
-			result := map[string]interface{}{
+			resultMap := map[string]interface{}{
 				"count":    len(clusters),
 				"clusters": clusters,
 			}
+			data, _ := json.MarshalIndent(resultMap, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+}
+
+func registerImportTools(s *server.MCPServer, imp *importing.Manager) {
+	s.AddTool(
+		mcp.NewTool("acm_import_cluster",
+			mcp.WithDescription("Import an external cluster into ACM. Creates ManagedCluster, namespace, and KlusterletAddonConfig. If kubeconfig is provided (base64-encoded), creates an auto-import secret for automatic klusterlet installation."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Name for the imported cluster")),
+			mcp.WithString("kubeconfig", mcp.Description("Base64-encoded kubeconfig of the spoke cluster for auto-import")),
+			mcp.WithString("labels", mcp.Description("Comma-separated labels (key=value,key=value)")),
+			mcp.WithString("cluster_set", mcp.Description("ManagedClusterSet to assign (default: 'default')")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.GetArguments()["name"].(string)
+			if name == "" {
+				return mcp.NewToolResultError("name is required"), nil
+			}
+
+			opts := importing.ImportOptions{Name: name}
+
+			if ks, ok := req.GetArguments()["kubeconfig"].(string); ok && ks != "" {
+				decoded, err := base64.StdEncoding.DecodeString(ks)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("decoding kubeconfig: %v", err)), nil
+				}
+				opts.Kubeconfig = decoded
+			}
+
+			if ls, ok := req.GetArguments()["labels"].(string); ok && ls != "" {
+				opts.Labels = make(map[string]string)
+				for _, pair := range strings.Split(ls, ",") {
+					parts := strings.SplitN(pair, "=", 2)
+					if len(parts) == 2 {
+						opts.Labels[parts[0]] = parts[1]
+					}
+				}
+			}
+
+			if cs, ok := req.GetArguments()["cluster_set"].(string); ok && cs != "" {
+				opts.ClusterSet = cs
+			}
+
+			result, err := imp.Import(ctx, opts)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("importing cluster: %v", err)), nil
+			}
+
 			data, _ := json.MarshalIndent(result, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_detach_cluster",
+			mcp.WithDescription("Detach a cluster from ACM management. Does NOT destroy the cluster — only removes it from ACM. The klusterlet on the spoke is cleaned up automatically by ACM."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Name of the cluster to detach")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.GetArguments()["name"].(string)
+			if name == "" {
+				return mcp.NewToolResultError("name is required"), nil
+			}
+
+			if err := imp.Detach(ctx, name); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("detaching cluster: %v", err)), nil
+			}
+
+			return mcp.NewToolResultText(fmt.Sprintf("Cluster %s detached from ACM", name)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_import_status",
+			mcp.WithDescription("Get import status of a cluster — availability, join state, auto-import status, and labels."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.GetArguments()["name"].(string)
+			if name == "" {
+				return mcp.NewToolResultError("name is required"), nil
+			}
+
+			status, err := imp.GetImportStatus(ctx, name)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("getting status: %v", err)), nil
+			}
+
+			data, _ := json.MarshalIndent(status, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_list_imported_clusters",
+			mcp.WithDescription("List all imported (non-Hive) clusters with their availability and join status."),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			clusters, err := imp.ListImported(ctx)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("listing imported clusters: %v", err)), nil
+			}
+
+			importedResult := map[string]interface{}{
+				"count":    len(clusters),
+				"clusters": clusters,
+			}
+			data, _ := json.MarshalIndent(importedResult, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+}
+
+func registerRegistryTools(s *server.MCPServer, reg *registry.Manager) {
+	s.AddTool(
+		mcp.NewTool("acm_registry_list_images",
+			mcp.WithDescription("List container images required by ACM on a spoke cluster. Extracts images from ManifestWorks — useful for identifying what to mirror for restricted-registry clusters."),
+			mcp.WithString("cluster", mcp.Description("Name of the managed cluster"), mcp.Required()),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+
+			images, err := reg.ListRequiredImages(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("listing images: %v", err)), nil
+			}
+
+			data, _ := json.MarshalIndent(images, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_registry_configure_mirror",
+			mcp.WithDescription("Configure image registry mirror for a cluster using ManagedClusterImageRegistry. Creates Placement + pull secret + registry config on the hub so ACM rewrites image references in klusterlet manifests."),
+			mcp.WithString("cluster", mcp.Description("Name of the managed cluster"), mcp.Required()),
+			mcp.WithString("mirror", mcp.Description("Mirror registry (e.g., quay.io/myorg)"), mcp.Required()),
+			mcp.WithString("pull_secret_path", mcp.Description("Path to pull secret JSON for the mirror registry")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			cluster := args["cluster"].(string)
+			mirror := args["mirror"].(string)
+
+			opts := registry.MirrorConfig{
+				ClusterName:    cluster,
+				MirrorRegistry: mirror,
+			}
+			if ps, ok := args["pull_secret_path"].(string); ok && ps != "" {
+				opts.PullSecretPath = ps
+			}
+
+			if err := reg.ConfigureMirror(ctx, opts); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("configuring mirror: %v", err)), nil
+			}
+
+			return mcp.NewToolResultText(fmt.Sprintf("Image registry mirror configured for cluster %s (mirror: %s)", cluster, mirror)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_registry_mirror_status",
+			mcp.WithDescription("Check if an image registry mirror is configured for a cluster."),
+			mcp.WithString("cluster", mcp.Description("Name of the managed cluster"), mcp.Required()),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+
+			status, err := reg.GetMirrorStatus(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("getting mirror status: %v", err)), nil
+			}
+
+			data, _ := json.MarshalIndent(status, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_registry_generate_mirror_script",
+			mcp.WithDescription("Generate a bash script with skopeo commands to mirror ACM images to a target registry."),
+			mcp.WithString("cluster", mcp.Description("Name of the managed cluster"), mcp.Required()),
+			mcp.WithString("target", mcp.Description("Target mirror registry (e.g., quay.io/myorg)"), mcp.Required()),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			cluster := args["cluster"].(string)
+			target := args["target"].(string)
+
+			images, err := reg.ListRequiredImages(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("listing images: %v", err)), nil
+			}
+
+			script := registry.GenerateMirrorScript(images, target)
+			return mcp.NewToolResultText(script), nil
 		},
 	)
 }
