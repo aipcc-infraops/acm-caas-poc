@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	certificatesv1 "k8s.io/api/certificates/v1"
@@ -81,7 +82,10 @@ func (m *Manager) getSpokeRESTConfig(ctx context.Context, namespace, name string
 
 	secretName, found, _ := unstructured.NestedString(cd.Object, "status", "adminKubeconfigSecretRef", "name")
 	if !found || secretName == "" {
-		return nil, fmt.Errorf("ClusterDeployment %s/%s has no adminKubeconfigSecretRef", namespace, name)
+		secretName, err = m.findAdminKubeconfigSecret(ctx, namespace)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterDeployment %s/%s has no adminKubeconfigSecretRef and fallback search failed: %w", namespace, name, err)
+		}
 	}
 
 	secret, err := m.client.Get(ctx, client.GVRSecret, namespace, secretName)
@@ -100,6 +104,20 @@ func (m *Manager) getSpokeRESTConfig(ctx context.Context, namespace, name string
 	}
 
 	return clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+}
+
+func (m *Manager) findAdminKubeconfigSecret(ctx context.Context, namespace string) (string, error) {
+	secrets, err := m.client.List(ctx, client.GVRSecret, namespace, "")
+	if err != nil {
+		return "", fmt.Errorf("listing secrets in %s: %w", namespace, err)
+	}
+	for _, s := range secrets.Items {
+		name := s.GetName()
+		if strings.HasSuffix(name, "-admin-kubeconfig") {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no *-admin-kubeconfig secret found in namespace %s", namespace)
 }
 
 func approveExpiredCSRs(ctx context.Context, clientset kubernetes.Interface) (*RecoveryResult, error) {

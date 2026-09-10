@@ -856,6 +856,524 @@ ComputeRequest.spec.identityProvider.rotateCredentials = true
 
 ---
 
+## UC-13: Registry mirror for restricted-registry clusters
+
+**Feature**: Image registry mirror for clusters that cannot pull from registry.redhat.io (ROKS, air-gapped, disconnected)
+
+As a platform operator  
+I want to configure image registry mirrors for clusters with restricted network access  
+So that ACM can import and manage clusters that cannot reach public registries
+
+### Scenario: Identify required images for a cluster
+
+**Given** a ManagedCluster has been registered but klusterlet pods are in ImagePullBackOff  
+**When** I run `acmlab registry list-images <cluster>`  
+**Then** I see all images extracted from the cluster's ManifestWorks  
+**And** I know exactly which images must be available on the spoke
+
+### Scenario: Mirror images to a reachable registry
+
+**Given** I have a target registry accessible from the spoke (e.g., us.icr.io, Quay.io)  
+**When** I run `acmlab registry mirror-script <cluster> --target <registry>`  
+**Then** I get a bash script with `skopeo copy` commands for each required image  
+**And** after running the script, all ACM images are available in the target registry
+
+### Scenario: Configure ManagedClusterImageRegistry on the hub
+
+**Given** ACM images are mirrored to a reachable registry  
+**And** I have a pull secret for the target registry  
+**When** I run `acmlab registry configure <cluster> --mirror <registry> --pull-secret <path>`  
+**Then** a ManagedClusterImageRegistry CR is created on the hub  
+**And** ACM rewrites image references in klusterlet ManifestWorks to use the mirror  
+**And** no changes are required on the spoke
+
+### Scenario: Chicken-and-egg on unavailable clusters
+
+**Given** a cluster is not yet imported (Available=Unknown) and images are blocked  
+**When** I configure the registry mirror before the cluster becomes available  
+**Then** the Placement uses tolerations to select unavailable clusters  
+**And** the MCIR takes effect before the klusterlet finishes its first import
+
+### Scenario: Remove registry mirror configuration
+
+**Given** a ManagedClusterImageRegistry is configured for a cluster  
+**When** I run `acmlab registry remove <cluster>`  
+**Then** the ManagedClusterImageRegistry, Placement, and pull secret are deleted  
+**And** ACM reverts to using original image references
+
+### ROKS findings (PoC)
+
+Attempting to import a ROKS cluster revealed a fundamental network restriction: ROKS workers have no outbound access to external registries — not `registry.redhat.io`, not `quay.io`. All image pulls are intercepted and routed through `us.icr.io/armada-extensions/` (IBM's mirror), which does not include ACM/MCE images.
+
+`ManagedClusterImageRegistry` can rewrite references to point at `us.icr.io`, but the IBM Cloud Container Registry Free plan (512 MB/month) is insufficient for the 6 required images (~300 MB amd64-only, ~750 MB all-arch). Workaround: ICR Standard plan or custom ROKS network configuration.
+
+**Conclusion**: Importing ROKS into an external ACM hub is possible in principle but requires either ICR Standard plan or network changes to allow external registry access from ROKS workers.
+
+### ACM Go types
+
+`imageregistry.open-cluster-management.io/v1alpha1.ManagedClusterImageRegistry`  
+`cluster.open-cluster-management.io/v1beta1.Placement`  
+`cluster.open-cluster-management.io/v1beta2.ManagedClusterSetBinding`  
+`v1.Secret` (pull secret for mirror registry)
+
+### CLI commands
+
+```
+acmlab registry list-images <cluster>
+acmlab registry mirror-script <cluster> --target <registry>
+acmlab registry configure <cluster> --mirror <registry> [--pull-secret <path>]
+acmlab registry status <cluster>
+acmlab registry remove <cluster>
+```
+
+### MCP tools
+
+`acm_registry_list_images`, `acm_registry_configure_mirror`, `acm_registry_mirror_status`, `acm_registry_generate_mirror_script`
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.import.restrictedRegistry = true
+ComputeRequest.spec.import.mirrorRegistry = "us.icr.io/acm-mirror"
+ComputeRequest.spec.import.pullSecretRef = "mirror-pull-secret"
+  -> controller calls ListRequiredImages to identify needed images
+  -> controller creates ManagedClusterSetBinding in cluster namespace
+  -> controller creates Placement with tolerations for unavailable clusters
+  -> controller creates ManagedClusterImageRegistry with source→mirror mappings
+  -> controller waits for ClustersUpdated=True on MCIR status
+  -> controller imports cluster via UC-07 flow
+```
+
+---
+
+## UC-14: Automatic cluster reclamation (idle/expired clusters)
+
+**Feature**: Automatic TTL enforcement and zombie cluster detection via ACM governance policies
+
+As a platform operator
+I want clusters to be automatically hibernated or deleted after their lifetime expires
+So that zombie clusters and idle GPUs stop consuming budget
+
+### Scenario: Enforce cluster TTL via governance policy
+
+**Given** a ManagedCluster is labelled with `caas/ttl-hours=48` and `caas/expiry-date=<timestamp>`
+**When** the expiry date passes
+**Then** a `ConfigurationPolicy` marks the cluster NonCompliant
+**And** the lifecycle controller hibernates the cluster (Hive-provisioned) or detaches it (imported)
+**And** the owner and manager receive a notification before reclamation
+
+### Scenario: Detect idle clusters via ACM Search
+
+**Given** a cluster has been running for more than 7 days
+**When** ACM Search shows no workload activity (CPU usage near zero)
+**Then** the cluster is flagged as a zombie candidate
+**And** the owner receives a notification to confirm or extend
+
+### Scenario: Exception workflow
+
+**Given** a cluster is approaching its TTL
+**When** the owner annotates `caas/extend-request=true` with a justification
+**Then** the policy allows a configurable extension period
+**And** the exception is logged in the cluster annotations for audit
+
+### Default TTLs (from InfraOps Strategy Day)
+
+| Cluster type | Default TTL |
+|---|---|
+| GPU cluster | 48 hours |
+| Standard cluster | 36 hours |
+| Long-running CI | configurable, max 7 days |
+
+### ACM types
+
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — detect expired TTL label
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `caas/ttl-hours`, `caas/expiry-date` labels
+ACM Search API — cross-cluster idle workload detection
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.lifecycle.ttlHours = 48
+  -> controller stamps ManagedCluster labels at provision time
+  -> ConfigurationPolicy detects expiry
+  -> controller triggers hibernate (Hive) or detach (imported)
+  -> controller sends notification N hours before expiry
+  -> controller updates ComputeRequest.status.phase = Reclaimed
+```
+
+---
+
+## UC-15: Resource quota gates via governance policy
+
+**Feature**: Enforce resource limits on managed clusters using ACM governance policies
+
+As a platform operator
+I want to detect and alert when clusters exceed approved resource limits
+So that no team can silently consume GPU or node resources beyond their quota
+
+### Scenario: Detect unauthorized GPU nodes
+
+**Given** a cluster was provisioned with a single GPU node via Hive MachinePool
+**When** a user manually adds a MachineSet with additional GPU nodes
+**Then** a `ConfigurationPolicy` detects the MachineSet outside the managed MachinePool
+**And** the cluster is marked NonCompliant
+**And** the owner is notified with a 2-hour window to remove it
+
+### Scenario: Enforce worker node count limit
+
+**Given** a cluster has a label `caas/max-workers=5`
+**When** the cluster's node count exceeds the label value
+**Then** the governance policy marks it NonCompliant and sends an alert
+
+### Scenario: Auto-remove unauthorized resources after timeout
+
+**Given** a cluster has been NonCompliant for 2 hours with no owner response
+**When** the reclamation controller runs
+**Then** the unauthorized nodes are removed via MachinePool patch
+**And** the action is logged in the ManagedCluster annotations
+
+### Enforcement model
+
+Educate, don't regulate (from InfraOps Strategy Day): monitor and notify first, auto-remove only after 2h without response. Exception path: owner submits justification via annotation, whitelist entry created.
+
+### ACM types
+
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — enforce node/GPU limits
+`work.open-cluster-management.io/v1.ManifestWork` — deploy ResourceQuota to spokes
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `caas/max-workers`, `caas/max-gpus` labels
+ACM Search API — cross-cluster node inventory
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.quota.maxWorkers = 5
+ComputeRequest.spec.quota.maxGpuNodes = 1
+  -> controller stamps quota labels on ManagedCluster at provision time
+  -> ConfigurationPolicy monitors node count vs label
+  -> controller notifies on violation, removes after 2h
+  -> controller updates ComputeRequest.status.conditions[QuotaCompliant]
+```
+
+---
+
+## UC-16: Unique identity provider per cluster (security hardening)
+
+**Feature**: Fleet-wide unique credentials and SSO enforcement via ACM ManifestWork and governance policies
+
+As a platform operator
+I want each cluster to have unique credentials
+So that a single credential leak does not require rotating the entire fleet
+
+### Scenario: Deploy SSO as primary IdP to all clusters
+
+**Given** a cluster is registered in ACM (provisioned or imported)
+**When** the IdP controller runs
+**Then** a ManifestWork deploys Red Hat SSO OAuth configuration to the cluster
+**And** a `Policy` monitors compliance — clusters without SSO are NonCompliant
+
+### Scenario: Generate unique static credentials per cluster
+
+**Given** a new cluster is being provisioned
+**When** the provisioning controller creates the ManagedCluster
+**Then** unique htpasswd credentials are generated (not shared with other clusters)
+**And** they are deployed via ManifestWork as a secondary emergency IdP only
+
+### Scenario: Automated credential rotation on leak
+
+**Given** a credential leak is detected or a rotation is requested
+**When** the IdP controller targets the affected cluster
+**Then** new credentials are generated for that cluster only
+**And** the ManifestWork is updated with the new OAuth Secret
+**And** the rotation timestamp is recorded in ManagedCluster annotations
+
+### Security improvement
+
+| Before | After |
+|---|---|
+| 1 credential leak → rotate ALL clusters | 1 credential leak → rotate 1 cluster |
+| Same static credentials across all clusters | Unique credentials per cluster |
+| No SSO compliance monitoring | Policy enforces SSO on all clusters |
+
+### ACM types
+
+`work.open-cluster-management.io/v1.ManifestWork` — deploy OAuth config + unique Secret
+`policy.open-cluster-management.io/v1.Policy` — enforce SSO presence fleet-wide
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — detect missing SSO config
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.security.uniqueCredentials = true
+ComputeRequest.spec.security.ssoRequired = true
+  -> controller generates unique htpasswd at provision time
+  -> controller creates ManifestWork with OAuth config + unique Secret
+  -> Policy enforces SSO compliance fleet-wide
+  -> controller tracks rotation in ComputeRequest.status.security.lastRotation
+```
+
+---
+
+## UC-17: Cost center attribution and budget alerting
+
+**Feature**: Fleet-wide cost attribution via ManagedCluster labels and Thanos budget alerting
+
+As a platform operator
+I want to attribute cloud spend to the team that requested each cluster
+So that we can generate monthly chargeback reports and alert when teams exceed their budget
+
+### Scenario: Stamp cost center at provision time
+
+**Given** a user requests a cluster via the CaaS interface
+**When** the provisioning controller creates the ManagedCluster
+**Then** labels `caas/cost-center`, `caas/team`, `caas/owner`, `caas/business-impact` are set
+**And** cloud resource tags are synchronized via ManifestWork where the provider supports it
+
+### Scenario: Generate monthly chargeback report
+
+**Given** the Thanos observability stack is running (UC-06)
+**When** the monthly report is requested
+**Then** CPU-hours and memory-GiB-hours are aggregated per `caas/cost-center` label
+**And** estimated cloud cost is calculated per team
+**And** the report is exported as CSV/JSON for the finance team
+
+### Scenario: Alert when team exceeds budget threshold
+
+**Given** a team has a label `caas/monthly-budget-usd=5000` on their ManagedClusters
+**When** accumulated cost for the current month exceeds the budget
+**Then** a `Policy` marks the clusters NonCompliant
+**And** the team manager is notified
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `caas/cost-center`, `caas/team`, `caas/owner` labels
+`policy.open-cluster-management.io/v1.Policy` — budget threshold alerting
+`observability.open-cluster-management.io/v1beta2.MultiClusterObservability` — Thanos for usage aggregation
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.billing.costCenter = "rhoai-platform"
+ComputeRequest.spec.billing.monthlyBudgetUSD = 5000
+  -> controller stamps cost center labels on ManagedCluster
+  -> Thanos aggregates usage by cost-center label
+  -> Policy alerts when budget threshold exceeded
+  -> controller exports monthly report to ComputeRequest.status.billing
+```
+
+---
+
+## UC-18: GPU sharing stack deployment fleet-wide (Kueue + Kyverno via ManifestWork)
+
+**Feature**: Deploy and maintain the GPU sharing infrastructure (Kueue + Kyverno) across all GPU clusters via ACM ManifestWork
+
+As a platform operator
+I want the GPU sharing stack to be automatically deployed and maintained on all GPU clusters
+So that teams can share GPU resources without manual operator intervention
+
+### Scenario: Deploy Kueue + Kyverno to a new GPU cluster
+
+**Given** a new GPU cluster is provisioned and labelled `gpu-sharing=enabled`
+**When** the GPU sharing controller detects the new cluster
+**Then** a ManifestWork deploys Kueue CRDs, controller, and initial ClusterQueue configuration
+**And** a ManifestWork deploys Kyverno + admission policies (quota enforcement, GPU type validation, priority ceiling)
+**And** a ConfigurationPolicy monitors that both operators are healthy
+
+### Scenario: Detect and remediate GPU stack drift
+
+**Given** a GPU cluster has `gpu-sharing=enabled` but Kueue is degraded
+**When** the ConfigurationPolicy evaluates compliance
+**Then** the cluster is marked NonCompliant
+**And** the ManifestWork reconciliation redeploys the affected component
+
+### Scenario: Create initial ClusterQueue per GPU type
+
+**Given** a GPU cluster has H100 and L4 nodes
+**When** the GPU sharing stack is deployed
+**Then** separate ClusterQueues and ResourceFlavors are created per GPU type
+**And** teams can submit workloads targeting a specific GPU type
+
+### ACM types
+
+`work.open-cluster-management.io/v1.ManifestWork` — deploy Kueue + Kyverno to GPU clusters
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — enforce stack health fleet-wide
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `gpu-sharing=enabled` label
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.gpu.sharingEnabled = true
+  -> controller stamps ManagedCluster label gpu-sharing=enabled
+  -> ManifestWork deploys Kueue + Kyverno to cluster
+  -> ConfigurationPolicy monitors operator health
+  -> controller updates ComputeRequest.status.gpu.sharingReady = true
+```
+
+---
+
+## UC-19: Multi-cluster GPU workload routing via ACM Placement
+
+**Feature**: Route GPU workloads to the correct cluster based on GPU type, availability, and region using ACM Placement predicates
+
+As a platform engineer
+I want users to request GPUs by type without knowing which cluster has them
+So that the service is transparent and routes automatically to available capacity
+
+### Scenario: Route H100 request to correct cluster
+
+**Given** multiple GPU clusters exist with different GPU types (`gpu-type=H100`, `gpu-type=L4`, `gpu-type=A100`)
+**When** a user requests an H100 GPU
+**Then** a Placement with `gpu-type=H100` and `gpu-available=true` predicates selects the correct cluster
+**And** the PlacementDecision is returned to the API layer for namespace provisioning
+
+### Scenario: Mark cluster unavailable when saturated
+
+**Given** an H100 cluster reaches 90% GPU utilization
+**When** Thanos detects the threshold crossing
+**Then** the cluster label is updated to `gpu-available=false`
+**And** new requests are routed to alternative H100 clusters or queued
+
+### Scenario: Multi-region GPU selection
+
+**Given** GPU clusters exist in `eu-gb` and `us-south`
+**When** a user requests an H100 without region preference
+**Then** Placement selects the cluster with the lowest current utilization across both regions
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1beta1.Placement` — GPU type + availability predicates
+`cluster.open-cluster-management.io/v1beta1.PlacementDecision` — selected cluster for API layer
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `gpu-type`, `gpu-count`, `gpu-region`, `gpu-available` labels
+ACM Search API — cross-cluster GPU inventory query
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.gpu.type = "H100"
+ComputeRequest.spec.gpu.count = 8
+  -> controller creates Placement with gpu-type=H100, gpu-available=true
+  -> Placement selects cluster with matching GPU
+  -> controller reads PlacementDecision -> target cluster
+  -> controller provisions namespace on target cluster (UC-21)
+  -> controller updates ComputeRequest.status.gpu.cluster = "gpu-h100-eugb"
+```
+
+---
+
+## UC-20: OpenShift AI (ROI) version fleet segregation
+
+**Feature**: Manage GPU clusters segregated by ROI version to support multi-version testing without cluster sharing conflicts
+
+As a platform operator
+I want each GPU cluster to run a specific ROI version
+So that teams testing different ROI versions can get dedicated capacity without operator conflicts
+
+### Scenario: Route workload to cluster with specific ROI version
+
+**Given** GPU clusters are labelled `rhoai-version=2.17`, `rhoai-version=2.18`, `rhoai-build=nightly`
+**When** a team requests a GPU environment with ROI 2.18
+**Then** Placement selects only clusters with `rhoai-version=2.18`
+**And** the workload is submitted to the matched cluster
+
+### Scenario: Enforce single ROI version per cluster
+
+**Given** a GPU cluster has `rhoai-version=2.17`
+**When** someone tries to install ROI 2.18 on the same cluster
+**Then** a ConfigurationPolicy detects the version mismatch
+**And** the cluster is marked NonCompliant with remediation instructions
+
+### Scenario: Provision new cluster for new ROI version
+
+**Given** ROI 2.19 is released and no GPU cluster has it
+**When** the first request for ROI 2.19 arrives
+**Then** the controller provisions a new GPU cluster (UC-01)
+**And** deploys ROI 2.19 via ManifestWork
+**And** labels the cluster `rhoai-version=2.19`
+**And** adds it to the GPU routing pool (UC-19)
+
+### Context (from InfraOps Strategy Day)
+
+ROI is a cluster-wide operator — only one version can be installed per cluster. Different testing teams (nightly builds, weekly builds, stable versions) require different versions simultaneously. Segregation by cluster is the only viable approach without operator conflict.
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `rhoai-version`, `rhoai-channel`, `rhoai-build` labels
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — enforce single ROI version per cluster
+`cluster.open-cluster-management.io/v1beta1.Placement` — route by ROI version label
+`work.open-cluster-management.io/v1.ManifestWork` — deploy ROI operator to new GPU cluster
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.gpu.rhoaiVersion = "2.18"
+  -> controller creates Placement with rhoai-version=2.18 predicate
+  -> if no cluster matches: provisions new GPU cluster + deploys ROI 2.18 (UC-01)
+  -> controller labels new cluster and adds to routing pool
+  -> controller routes workload to matched cluster
+```
+
+---
+
+## UC-21: Elastic GPU capacity — automatic on-demand provisioning on saturation
+
+**Feature**: Automatically provision new GPU clusters when shared capacity is saturated, and hibernate them when demand drops
+
+As a platform operator
+I want the GPU pool to scale automatically
+So that teams are not rejected when shared GPU clusters are full
+
+### Scenario: Detect GPU saturation and provision new cluster
+
+**Given** shared GPU cluster utilization exceeds 85% for 30+ minutes
+**When** Thanos triggers a saturation alert via ConfigurationPolicy
+**Then** the elastic controller provisions a new GPU cluster (UC-01) with the same GPU type
+**And** deploys the GPU sharing stack (UC-18)
+**And** labels the cluster and adds it to the GPU routing Placement pool (UC-19)
+**And** sends a cost notification to the team manager (UC-17)
+
+### Scenario: Hibernate on-demand cluster after demand drops
+
+**Given** an on-demand GPU cluster was provisioned and utilization drops below 10% for 2+ hours
+**When** the elastic controller evaluates the fleet
+**Then** the cluster is hibernated (UC-05) to reduce cost
+**And** its `gpu-available=false` label is set in ACM
+
+### Scenario: Spot instance burst for temporary spikes
+
+**Given** reserved GPU inventory is full and a burst is needed
+**When** the elastic controller provisions a spot-instance GPU cluster
+**Then** it is labelled `gpu-cost-tier=spot`
+**And** only queued workloads that explicitly accept spot are routed to it
+
+### GPU capacity tiers (from InfraOps Strategy Day)
+
+| Tier | GPU type | Strategy |
+|---|---|---|
+| Reserved | H100, A100, B300 | Always on — too expensive to stop/start |
+| On-demand | L4, T4 | Provision when needed, hibernate after |
+| Spot burst | Any | Spot instances for spiky load |
+
+### ACM types
+
+`observability.open-cluster-management.io/v1beta2.MultiClusterObservability` — Thanos utilization monitoring
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — detect saturation threshold
+`hive.openshift.io/v1.ClusterDeployment` — provision new GPU cluster on-demand (UC-01)
+`cluster.open-cluster-management.io/v1beta1.Placement` — add new cluster to routing pool
+ACM lifecycle (UC-05) — hibernate/resume on-demand clusters
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.gpu.elasticCapacity = true
+ComputeRequest.spec.gpu.saturationThreshold = 85
+  -> Thanos monitors GPU utilization across fleet
+  -> ConfigurationPolicy triggers at threshold
+  -> controller provisions new GPU cluster (UC-01)
+  -> controller deploys sharing stack (UC-18) + labels + routing (UC-19)
+  -> controller updates ComputeRequest.status.gpu.elasticCluster = "gpu-ondemand-001"
+```
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -872,6 +1390,15 @@ ComputeRequest.spec.identityProvider.rotateCredentials = true
 | UC-10  |  Cluster scaling (workers)  |  `hive/v1.MachinePool` + `ManagedClusterInfo`  |  spec.capacity.workers |
 | UC-11  |  Cost tracking / chargeback  |  `MCO/Thanos` + `ManagedClusterInfo`  |  status.cost |
 | UC-12  |  Identity Provider management  |  `api/work/v1` + `policy/v1`  |  spec.identityProvider |
+| UC-13  |  Registry mirror for restricted clusters (ROKS, air-gapped)  |  `imageregistry.open-cluster-management.io/v1alpha1`  |  spec.import.mirrorRegistry |
+| UC-14  |  Automatic cluster reclamation (idle/expired)  |  `ConfigurationPolicy` + ACM Search + `ManagedCluster` labels  |  spec.lifecycle.ttlHours |
+| UC-15  |  Resource quota gates via governance policy  |  `ConfigurationPolicy` + `ManifestWork` + ACM Search  |  spec.quota.maxWorkers |
+| UC-16  |  Unique IdP per cluster (security hardening)  |  `ManifestWork` + `Policy` (SSO enforcement)  |  spec.security.uniqueCredentials |
+| UC-17  |  Cost center attribution + budget alerting  |  `ManagedCluster` labels + `MCO/Thanos` + `Policy`  |  spec.billing.costCenter |
+| UC-18  |  GPU sharing stack deployment fleet-wide (Kueue + Kyverno)  |  `ManifestWork` + `ConfigurationPolicy`  |  spec.gpu.sharingEnabled |
+| UC-19  |  Multi-cluster GPU workload routing via Placement  |  `Placement` + `PlacementDecision` + `ManagedCluster` labels  |  spec.gpu.type |
+| UC-20  |  OpenShift AI version fleet segregation  |  `Placement` + `ConfigurationPolicy` + `ManifestWork`  |  spec.gpu.rhoaiVersion |
+| UC-21  |  Elastic GPU capacity (auto-provision on saturation)  |  `MCO/Thanos` + `ConfigurationPolicy` + `ClusterDeployment`  |  spec.gpu.elasticCapacity |
 
 ## Go Dependencies (for the lab repo)
 
