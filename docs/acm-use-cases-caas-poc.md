@@ -856,6 +856,96 @@ ComputeRequest.spec.identityProvider.rotateCredentials = true
 
 ---
 
+## UC-13: Registry mirror for restricted-registry clusters
+
+**Feature**: Image registry mirror for clusters that cannot pull from registry.redhat.io (ROKS, air-gapped, disconnected)
+
+As a platform operator  
+I want to configure image registry mirrors for clusters with restricted network access  
+So that ACM can import and manage clusters that cannot reach public registries
+
+### Scenario: Identify required images for a cluster
+
+**Given** a ManagedCluster has been registered but klusterlet pods are in ImagePullBackOff  
+**When** I run `acmlab registry list-images <cluster>`  
+**Then** I see all images extracted from the cluster's ManifestWorks  
+**And** I know exactly which images must be available on the spoke
+
+### Scenario: Mirror images to a reachable registry
+
+**Given** I have a target registry accessible from the spoke (e.g., us.icr.io, Quay.io)  
+**When** I run `acmlab registry mirror-script <cluster> --target <registry>`  
+**Then** I get a bash script with `skopeo copy` commands for each required image  
+**And** after running the script, all ACM images are available in the target registry
+
+### Scenario: Configure ManagedClusterImageRegistry on the hub
+
+**Given** ACM images are mirrored to a reachable registry  
+**And** I have a pull secret for the target registry  
+**When** I run `acmlab registry configure <cluster> --mirror <registry> --pull-secret <path>`  
+**Then** a ManagedClusterImageRegistry CR is created on the hub  
+**And** ACM rewrites image references in klusterlet ManifestWorks to use the mirror  
+**And** no changes are required on the spoke
+
+### Scenario: Chicken-and-egg on unavailable clusters
+
+**Given** a cluster is not yet imported (Available=Unknown) and images are blocked  
+**When** I configure the registry mirror before the cluster becomes available  
+**Then** the Placement uses tolerations to select unavailable clusters  
+**And** the MCIR takes effect before the klusterlet finishes its first import
+
+### Scenario: Remove registry mirror configuration
+
+**Given** a ManagedClusterImageRegistry is configured for a cluster  
+**When** I run `acmlab registry remove <cluster>`  
+**Then** the ManagedClusterImageRegistry, Placement, and pull secret are deleted  
+**And** ACM reverts to using original image references
+
+### ROKS findings (PoC)
+
+Attempting to import a ROKS cluster revealed a fundamental network restriction: ROKS workers have no outbound access to external registries — not `registry.redhat.io`, not `quay.io`. All image pulls are intercepted and routed through `us.icr.io/armada-extensions/` (IBM's mirror), which does not include ACM/MCE images.
+
+`ManagedClusterImageRegistry` can rewrite references to point at `us.icr.io`, but the IBM Cloud Container Registry Free plan (512 MB/month) is insufficient for the 6 required images (~300 MB amd64-only, ~750 MB all-arch). Workaround: ICR Standard plan or custom ROKS network configuration.
+
+**Conclusion**: Importing ROKS into an external ACM hub is possible in principle but requires either ICR Standard plan or network changes to allow external registry access from ROKS workers.
+
+### ACM Go types
+
+`imageregistry.open-cluster-management.io/v1alpha1.ManagedClusterImageRegistry`  
+`cluster.open-cluster-management.io/v1beta1.Placement`  
+`cluster.open-cluster-management.io/v1beta2.ManagedClusterSetBinding`  
+`v1.Secret` (pull secret for mirror registry)
+
+### CLI commands
+
+```
+acmlab registry list-images <cluster>
+acmlab registry mirror-script <cluster> --target <registry>
+acmlab registry configure <cluster> --mirror <registry> [--pull-secret <path>]
+acmlab registry status <cluster>
+acmlab registry remove <cluster>
+```
+
+### MCP tools
+
+`acm_registry_list_images`, `acm_registry_configure_mirror`, `acm_registry_mirror_status`, `acm_registry_generate_mirror_script`
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.import.restrictedRegistry = true
+ComputeRequest.spec.import.mirrorRegistry = "us.icr.io/acm-mirror"
+ComputeRequest.spec.import.pullSecretRef = "mirror-pull-secret"
+  -> controller calls ListRequiredImages to identify needed images
+  -> controller creates ManagedClusterSetBinding in cluster namespace
+  -> controller creates Placement with tolerations for unavailable clusters
+  -> controller creates ManagedClusterImageRegistry with source→mirror mappings
+  -> controller waits for ClustersUpdated=True on MCIR status
+  -> controller imports cluster via UC-07 flow
+```
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -872,6 +962,7 @@ ComputeRequest.spec.identityProvider.rotateCredentials = true
 | UC-10  |  Cluster scaling (workers)  |  `hive/v1.MachinePool` + `ManagedClusterInfo`  |  spec.capacity.workers |
 | UC-11  |  Cost tracking / chargeback  |  `MCO/Thanos` + `ManagedClusterInfo`  |  status.cost |
 | UC-12  |  Identity Provider management  |  `api/work/v1` + `policy/v1`  |  spec.identityProvider |
+| UC-13  |  Registry mirror for restricted clusters (ROKS, air-gapped)  |  `imageregistry.open-cluster-management.io/v1alpha1`  |  spec.import.mirrorRegistry |
 
 ## Go Dependencies (for the lab repo)
 

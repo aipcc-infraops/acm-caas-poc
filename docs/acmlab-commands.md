@@ -252,6 +252,7 @@ Imports an external cluster into ACM by creating a ManagedCluster, namespace, an
 
 Options:
 - `--kubeconfig-path` — path to spoke cluster kubeconfig for auto-import
+- `--kubeconfig-context` — context name in default kubeconfig to use for auto-import (embeds file-based certs automatically)
 - `--label`, `-l` — labels for the ManagedCluster (key=value, repeatable)
 - `--cluster-set` — ManagedClusterSet to assign (default: "default")
 - `--wait` — wait for import to complete (only with auto-import)
@@ -299,6 +300,84 @@ Imported clusters (1):
   - import-test  Available=True  Joined=True
 ```
 
+### Registry
+
+#### `acmlab registry list-images <cluster>`
+
+Lists all container images required by ACM on a spoke cluster, extracted from ManifestWorks. Use this to identify which images must be mirrored for restricted-registry clusters.
+
+```
+$ acmlab registry list-images import-test
+Images required by ACM on import-test (6):
+
+  registry.redhat.io/multicluster-engine/registration-operator-rhel9@sha256:7f8a4fb1...
+    ManifestWork: import-test-klusterlet
+
+  registry.redhat.io/multicluster-engine/managedcluster-import-controller-rhel9@sha256:4d71...
+    ManifestWork: import-test-klusterlet
+
+  registry.redhat.io/multicluster-engine/cluster-proxy-rhel9@sha256:2ccb3...
+    ManifestWork: addon-cluster-proxy-deploy-0
+
+  registry.redhat.io/rhacm2/search-collector-rhel9@sha256:6255...
+    ManifestWork: addon-search-collector-deploy-0
+  ...
+```
+
+#### `acmlab registry mirror-script <cluster>`
+
+Generates a bash script with `skopeo copy` commands to mirror all required images from `registry.redhat.io` to a target registry.
+
+Options:
+- `--target` — target mirror registry (required, e.g., `us.icr.io/acm-mirror`)
+
+```
+$ acmlab registry mirror-script import-test --target us.icr.io/acm-mirror > mirror.sh
+# Generates: skopeo copy --all docker://registry.redhat.io/... docker://us.icr.io/acm-mirror/...
+```
+
+#### `acmlab registry configure <cluster>`
+
+Configures a `ManagedClusterImageRegistry` on the hub so ACM rewrites klusterlet image references before applying them to the spoke. Also creates the required `ManagedClusterSetBinding` and `Placement` (with tolerations for unavailable clusters).
+
+Options:
+- `--mirror` — mirror registry base path (e.g., `us.icr.io/acm-mirror`)
+- `--pull-secret` — path to pull secret JSON for the mirror registry
+- `--registry` — explicit source=mirror mapping (repeatable, overrides `--mirror`)
+
+```
+$ acmlab registry configure import-test \
+    --mirror us.icr.io/acm-mirror \
+    --pull-secret ~/pull-secret.json
+Image registry mirror configured for cluster import-test
+Mirror registry: us.icr.io/acm-mirror
+```
+
+#### `acmlab registry status <cluster>`
+
+Shows whether a `ManagedClusterImageRegistry` is configured and lists the source→mirror mappings.
+
+Options:
+- `--json` — output as JSON
+
+```
+$ acmlab registry status import-test
+Cluster: import-test
+Mirror configured: true
+Registry mappings:
+  registry.redhat.io/multicluster-engine → us.icr.io/acm-mirror/multicluster-engine
+  registry.redhat.io/rhacm2 → us.icr.io/acm-mirror/rhacm2
+```
+
+#### `acmlab registry remove <cluster>`
+
+Removes the `ManagedClusterImageRegistry`, `Placement`, `ManagedClusterSetBinding`, and pull secret created by `configure`.
+
+```
+$ acmlab registry remove import-test
+Image registry mirror removed for cluster import-test
+```
+
 ### MCP Server
 
 #### `acmlab mcp serve`
@@ -337,3 +416,7 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_detach_cluster` | UC-07 | Detaches a cluster from ACM (does not destroy it) |
 | `acm_import_status` | UC-07 | Import status: availability, join state, auto-import |
 | `acm_list_imported_clusters` | UC-07 | Lists all imported (non-Hive) clusters |
+| `acm_registry_list_images` | UC-13 | Lists images required by ACM on a spoke, extracted from ManifestWorks |
+| `acm_registry_configure_mirror` | UC-13 | Creates ManagedClusterImageRegistry + Placement + pull secret on hub |
+| `acm_registry_mirror_status` | UC-13 | Checks if registry mirror is configured for a cluster |
+| `acm_registry_generate_mirror_script` | UC-13 | Generates bash script with skopeo commands to mirror images |
