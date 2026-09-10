@@ -70,6 +70,10 @@ func (c *Client) List(ctx context.Context, gvr schema.GroupVersionResource, name
 	return c.resource(gvr, namespace).List(ctx, opts)
 }
 
+func (c *Client) Update(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	return c.resource(gvr, namespace).Update(ctx, obj, metav1.UpdateOptions{})
+}
+
 func (c *Client) Delete(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
 	return c.resource(gvr, namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }

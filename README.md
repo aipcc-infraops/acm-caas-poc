@@ -12,9 +12,10 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-02 | Governance policy management (image registry) | ✅ Implemented | `internal/policy/` |
 | UC-03 | Tenant RBAC isolation via ManifestWork | ✅ Implemented | `internal/tenant/` |
 | UC-04 | Fleet status and cross-cluster search | ✅ Implemented | `internal/fleet/` |
-| UC-05 | Hibernate/resume lifecycle (Hive-only) | 📋 Planned | `internal/lifecycle/` |
+| UC-05 | Hibernate/resume lifecycle (Hive-only) | ✅ Implemented | `internal/lifecycle/` |
 | UC-06 | Cluster resource monitoring & observability (Thanos) | ✅ Implemented | `internal/monitoring/`, `internal/observability/` |
-| UC-07 | External cluster import | 📋 In Progress | `internal/importing/` |
+| UC-07 | External cluster import | ✅ Implemented | `internal/importing/` |
+| UC-13 | Registry mirror for restricted clusters (ROKS, air-gap) | ✅ Implemented | `internal/registry/` |
 | UC-08 | Legacy cluster decommissioning | 📋 Planned | `internal/decommission/` |
 | UC-09 | Cluster upgrades (Day-2 operations) | 📋 Planned | `internal/upgrades/` |
 | UC-10 | Cluster scaling (add/remove workers) | 📋 Planned | `internal/scaling/` |
@@ -26,7 +27,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 The PoC validates ACM value in 4 areas:
 
 1. **Provisioning clusters** (UC-01, UC-10) ✅
-2. **Managing imported clusters** (UC-07, UC-08, UC-09) 🔄
+2. **Managing imported clusters** (UC-07, UC-08, UC-09, UC-13) 🔄 UC-07, UC-13 done
 3. **Policy management & enforcement** (UC-02, UC-12) ⚠️ UC-12 needed
 4. **Monitor and alert** (UC-04, UC-06) ✅
 
@@ -68,6 +69,27 @@ bin/acmlab provision create spoke2 --platform aws --pull-secret ~/pull-secret.js
 bin/acmlab provision status spoke1
 bin/acmlab provision list
 bin/acmlab provision destroy spoke1
+
+# 9. Cluster lifecycle (hibernate/resume)
+bin/acmlab lifecycle list
+bin/acmlab lifecycle status spoke2
+bin/acmlab lifecycle hibernate spoke2 --wait
+bin/acmlab lifecycle resume spoke2 --wait      # auto-recovers expired kubelet certs
+bin/acmlab lifecycle diagnose spoke2
+bin/acmlab lifecycle diagnose spoke2 --json
+
+# 10. Import external clusters
+bin/acmlab import cluster my-roks --kubeconfig-path /tmp/roks.kubeconfig --label cloud=IBM --wait
+bin/acmlab import status my-roks
+bin/acmlab import list
+bin/acmlab import detach my-roks
+
+# 11. Registry mirror (for ROKS, air-gapped clusters)
+bin/acmlab registry list-images import-test
+bin/acmlab registry mirror-script import-test --target quay.io/myorg > mirror.sh
+bin/acmlab registry configure import-test --mirror quay.io/myorg --pull-secret ~/pull-secret.json
+bin/acmlab registry status import-test
+bin/acmlab registry remove import-test
 ```
 
 ## MCP Server
@@ -92,7 +114,7 @@ Register in Claude Code's MCP config:
 }
 ```
 
-Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`.
+Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`, `acm_hibernate_cluster`, `acm_resume_cluster`, `acm_lifecycle_status`, `acm_lifecycle_diagnose`, `acm_lifecycle_recover_certs`, `acm_list_lifecycle_clusters`, `acm_import_cluster`, `acm_detach_cluster`, `acm_import_status`, `acm_list_imported_clusters`, `acm_registry_list_images`, `acm_registry_configure_mirror`, `acm_registry_mirror_status`, `acm_registry_generate_mirror_script`.
 
 See [docs/acmlab-commands.md](docs/acmlab-commands.md) for the full command and tool reference.
 
