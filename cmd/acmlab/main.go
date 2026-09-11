@@ -40,6 +40,7 @@ func main() {
 	root.AddCommand(lifecycleCmd())
 	root.AddCommand(importCmd())
 	root.AddCommand(registryCmd())
+	root.AddCommand(scalingCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {
