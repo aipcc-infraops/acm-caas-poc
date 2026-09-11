@@ -1403,6 +1403,219 @@ ComputeRequest.spec.gpu.saturationThreshold = 85
 
 ---
 
+## UC-22: ClusterSet management — team isolation and multi-tenancy
+
+**Feature**: Lifecycle management of ManagedClusterSets for team-based fleet isolation
+
+As a platform operator
+I want to create and manage ClusterSets per team
+So that each team can only see and manage their own clusters
+
+### Scenario: Create a team ClusterSet
+
+**Given** a new engineering team needs cluster access
+**When** I run `acmlab clusterset create team-serving --teams serving-ns`
+**Then** a ManagedClusterSet is created
+**And** a ManagedClusterSetBinding is created in the serving-ns namespace
+**And** teams in that namespace can now use Placements scoped to their ClusterSet
+
+### Scenario: Assign a cluster to a team ClusterSet
+
+**Given** cluster spoke3 was provisioned to the default ClusterSet
+**When** I run `acmlab clusterset assign spoke3 --to team-serving`
+**Then** the cluster's `cluster.open-cluster-management.io/clusterset` label is updated
+**And** the cluster moves to the team-serving ClusterSet
+**And** it is no longer visible to other teams' Placements
+
+### Scenario: Enforce every cluster belongs to a named ClusterSet
+
+**Given** a ConfigurationPolicy is active
+**When** a cluster is found with label `clusterset=default`
+**Then** the cluster is marked NonCompliant
+**And** an alert is sent to the platform team to assign it
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1beta2.ManagedClusterSet`
+`cluster.open-cluster-management.io/v1beta2.ManagedClusterSetBinding`
+`cluster.open-cluster-management.io/v1.ManagedCluster` — label `cluster.open-cluster-management.io/clusterset`
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.team = "serving"
+  -> controller creates ManagedClusterSet if not exists
+  -> controller creates ManagedClusterSetBinding in team namespace
+  -> controller stamps cluster label at provision time
+  -> controller updates ComputeRequest.status.clusterSet = "team-serving"
+```
+
+---
+
+## UC-23: Multi-architecture cluster matrix provisioning (QA)
+
+**Feature**: Automated provisioning of a version × architecture × ROI matrix of clusters for QA regression testing
+
+As a QA engineer
+I want to provision a full test matrix of clusters with one command
+So that I can run regression tests across all supported combinations
+
+### Scenario: Provision a version × architecture matrix
+
+**Given** a matrix.yaml specifying OCP versions [4.18, 4.19], architectures [amd64, ppc64le], and ROI versions [3.4, 3.5]
+**When** I run `acmlab matrix provision --from-file matrix.yaml`
+**Then** all combinations are provisioned in parallel (8 clusters)
+**And** each cluster is labelled with `ocp-version`, `arch`, `rhoai-version`
+**And** a summary table shows per-combination status
+
+### Scenario: Route a test workload to a specific combination
+
+**Given** the matrix clusters are Running
+**When** a Placement specifies `ocp-version=4.19`, `arch=amd64`, `rhoai-version=3.5`
+**Then** the Placement selects exactly the matching cluster
+**And** the test workload is dispatched to that cluster
+
+### Scenario: Destroy the full matrix after testing
+
+**Given** the test run is complete
+**When** I run `acmlab matrix destroy --from-file matrix.yaml`
+**Then** all matrix clusters are destroyed in parallel
+
+### ACM types
+
+`hive.openshift.io/v1.ClusterDeployment` — one per matrix cell (reuses UC-01)
+`cluster.open-cluster-management.io/v1.ManagedCluster` — labels: `ocp-version`, `arch`, `rhoai-version`
+`cluster.open-cluster-management.io/v1beta1.Placement` — combined label predicate routing
+
+### Package
+
+`internal/matrix/` (to be created, wraps UC-01 + batch operations)
+
+---
+
+## UC-24: Per-team compliance reporting via ClusterSet-scoped policies
+
+**Feature**: Governance policies scoped per ClusterSet with per-team compliance reporting
+
+As a platform operator
+I want to see compliance status per team
+So that I know which team's clusters are violating security or operational policies
+
+### Scenario: Apply a policy scoped to a team ClusterSet
+
+**Given** the team-serving ClusterSet exists
+**When** I run `acmlab policy apply gpu-driver-policy --cluster-set team-serving`
+**Then** the policy is bound to a Placement scoped to team-serving clusters only
+**And** compliance state is reported per cluster in that set
+
+### Scenario: Generate a fleet-wide per-team compliance report
+
+**Given** multiple ClusterSets exist (team-serving, team-training, ci-matrix)
+**When** I run `acmlab compliance report --all`
+**Then** a table shows per-ClusterSet: total clusters, compliant count, non-compliant count
+**And** drill-down shows which policy each cluster is violating
+
+### ACM types
+
+`policy.open-cluster-management.io/v1.Policy`
+`policy.open-cluster-management.io/v1.PlacementBinding` — scoped to ClusterSet Placement
+`cluster.open-cluster-management.io/v1beta1.Placement` — `clusterSets: [team-set]`
+
+### Package
+
+Extends `internal/policy/` (UC-02)
+
+---
+
+## UC-25: ClusterPool and ClusterClaim — pre-warmed cluster self-service
+
+**Feature**: Hive ClusterPool management for instant cluster access (seconds vs 10+ minutes)
+
+As a developer or QA engineer
+I want to claim a pre-warmed cluster instantly
+So that I don't wait 10 minutes for provisioning every time I need a cluster
+
+### Scenario: Create a cluster pool
+
+**Given** I need a pool of 3 always-ready IBM Cloud clusters with OCP 4.19
+**When** I run `acmlab pool create amd64-419 --size 3 --image-set img4.19-multi --platform ibmcloud`
+**Then** Hive provisions 3 clusters and keeps them in the Hibernating state
+**And** `acmlab pool list` shows 3 clusters ready to claim
+
+### Scenario: Claim a cluster instantly
+
+**Given** the amd64-419 pool has at least 1 ready cluster
+**When** I run `acmlab claim amd64-419 --ttl 48h`
+**Then** a ClusterClaim is created and bound in seconds
+**And** a kubeconfig is returned immediately
+**And** Hive automatically provisions a replacement cluster to maintain pool size
+
+### Scenario: Release a claim back to the pool
+
+**Given** I'm done with my claimed cluster
+**When** I run `acmlab claim release my-claim`
+**Then** the cluster is returned to the pool (or destroyed if pool is full)
+**And** another team member can claim it immediately
+
+### Why this matters
+
+Current flow: provision → wait 10min → use → destroy. With ClusterPool: claim → use instantly → release. For QA running hundreds of test cycles per week, this is the single highest-impact improvement.
+
+### ACM/Hive types
+
+`hive.openshift.io/v1.ClusterPool`
+`hive.openshift.io/v1.ClusterClaim`
+
+### Package
+
+`internal/pool/` (to be created)
+
+---
+
+## UC-26: Multi-cluster networking (Submariner) for distributed training
+
+**Feature**: Enable cross-cluster pod networking for distributed training workloads via ACM Submariner Add-On
+
+As a training infrastructure engineer
+I want pods in different GPU clusters to communicate directly by IP
+So that distributed training jobs (PyTorch distributed, Ray, Kueue multi-cluster) can span multiple clusters
+
+### Scenario: Enable Submariner on a ClusterSet
+
+**Given** two GPU clusters exist in the team-training ClusterSet
+**When** I run `acmlab submariner enable --cluster-set team-training`
+**Then** ACM deploys the Submariner gateway and route-agent on each cluster
+**And** pods in cluster A can reach pods in cluster B by ClusterIP
+
+### Scenario: Verify cross-cluster connectivity
+
+**Given** Submariner is enabled on team-training
+**When** I run `acmlab submariner status --cluster-set team-training`
+**Then** gateway tunnel health and latency per cluster pair is shown
+
+### Scenario: Distributed training job spanning two GPU clusters
+
+**Given** Submariner is active and Kueue multi-cluster is configured
+**When** a PyTorch distributed training job requests 16 GPUs
+**Then** Kueue schedules 8 GPUs on cluster-gpu-1 and 8 on cluster-gpu-2
+**And** the workers communicate via Submariner tunnels transparently
+
+### Spike required
+
+Before implementation, validate: submariner-addon is installed on hub, IBM Cloud VPC firewall allows IPSec/VXLAN ports, existing RHOAI Submariner usage.
+
+### ACM types
+
+`addon.open-cluster-management.io/v1alpha1.ManagedClusterAddOn` — name: submariner
+`submariner.io/v1alpha1.SubmarinerConfig`
+`cluster.open-cluster-management.io/v1beta2.ManagedClusterSet` — Submariner scopes to a ClusterSet
+
+### Package
+
+`internal/submariner/` (to be created after spike)
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -1428,6 +1641,11 @@ ComputeRequest.spec.gpu.saturationThreshold = 85
 | UC-19  |  Multi-cluster GPU workload routing via Placement  |  `Placement` + `PlacementDecision` + `ManagedCluster` labels  |  spec.gpu.type |
 | UC-20  |  OpenShift AI version fleet segregation  |  `Placement` + `ConfigurationPolicy` + `ManifestWork`  |  spec.gpu.rhoaiVersion |
 | UC-21  |  Elastic GPU capacity (auto-provision on saturation)  |  `MCO/Thanos` + `ConfigurationPolicy` + `ClusterDeployment`  |  spec.gpu.elasticCapacity |
+| UC-22  |  ClusterSet management (team isolation)  |  `ManagedClusterSet` + `ManagedClusterSetBinding`  |  spec.team |
+| UC-23  |  Multi-architecture cluster matrix (QA)  |  `ClusterDeployment` + `ManagedCluster` labels + `Placement`  |  spec.matrix |
+| UC-24  |  Per-team compliance reporting  |  `Policy` + `PlacementBinding` scoped to ClusterSet  |  spec.compliance.clusterSet |
+| UC-25  |  ClusterPool + ClusterClaim (pre-warmed)  |  `hive/v1.ClusterPool` + `hive/v1.ClusterClaim`  |  spec.pool |
+| UC-26  |  Multi-cluster networking (Submariner)  |  `ManagedClusterAddOn` + `SubmarinerConfig`  |  spec.submariner |
 
 ## Go Dependencies (for the lab repo)
 
