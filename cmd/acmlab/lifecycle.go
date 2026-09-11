@@ -13,6 +13,30 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
 )
 
+// lifecycleSupportErr returns a clear, actionable error when a cluster does not
+// support the requested lifecycle operation. Returns nil when support is full.
+// Keeping the logic here (not in the lifecycle package) avoids coupling the
+// package to CLI-specific formatting.
+func lifecycleSupportErr(clusterName, op string, r *lifecycle.LifecycleSupportReason) error {
+	switch r.Support {
+	case lifecycle.LifecycleFull:
+		return nil
+	case lifecycle.LifecycleNotYetImplemented:
+		msg := fmt.Sprintf(
+			"cluster %s is a Kubernetes cluster — %s is not yet implemented for Kubernetes.\n"+
+				"To save costs, scale workers to 0 instead:\n"+
+				"  %s",
+			clusterName, op, r.Alternative,
+		)
+		return fmt.Errorf("%s", msg)
+	default:
+		return fmt.Errorf(
+			"cluster %s does not support lifecycle operations (no ClusterDeployment found — may be an imported cluster)",
+			clusterName,
+		)
+	}
+}
+
 func lifecycleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "lifecycle",
@@ -67,12 +91,12 @@ func hibernateCmd() *cobra.Command {
 					ns = clusterName
 				}
 
-				supported, err := m.ClusterSupportsLifecycle(ctx, ns, clusterName)
+				support, err := m.CheckLifecycleSupport(ctx, ns, clusterName)
 				if err != nil {
 					return fmt.Errorf("checking lifecycle support: %w", err)
 				}
-				if !supported {
-					return fmt.Errorf("cluster %s/%s does not support lifecycle operations (no ClusterDeployment found — may be imported)", ns, clusterName)
+				if err := lifecycleSupportErr(clusterName, "hibernate", support); err != nil {
+					return err
 				}
 
 				if err := m.Hibernate(ctx, ns, clusterName); err != nil {
@@ -100,12 +124,12 @@ func hibernateCmd() *cobra.Command {
 					Name: item.Name,
 					Run: func(ctx context.Context) (string, error) {
 						ns := item.Name
-						supported, err := m.ClusterSupportsLifecycle(ctx, ns, item.Name)
+						support, err := m.CheckLifecycleSupport(ctx, ns, item.Name)
 						if err != nil {
 							return "", err
 						}
-						if !supported {
-							return "", fmt.Errorf("no ClusterDeployment found — may be an imported cluster")
+						if err2 := lifecycleSupportErr(item.Name, "hibernate", support); err2 != nil {
+							return "", err2
 						}
 						if err := m.Hibernate(ctx, ns, item.Name); err != nil {
 							return "", err
@@ -188,12 +212,12 @@ func resumeCmd() *cobra.Command {
 					ns = clusterName
 				}
 
-				supported, err := m.ClusterSupportsLifecycle(ctx, ns, clusterName)
+				support, err := m.CheckLifecycleSupport(ctx, ns, clusterName)
 				if err != nil {
 					return fmt.Errorf("checking lifecycle support: %w", err)
 				}
-				if !supported {
-					return fmt.Errorf("cluster %s/%s does not support lifecycle operations (no ClusterDeployment found — may be imported)", ns, clusterName)
+				if err := lifecycleSupportErr(clusterName, "resume", support); err != nil {
+					return err
 				}
 
 				if err := m.Resume(ctx, ns, clusterName); err != nil {
@@ -232,12 +256,12 @@ func resumeCmd() *cobra.Command {
 					Name: item.Name,
 					Run: func(ctx context.Context) (string, error) {
 						ns := item.Name
-						supported, err := m.ClusterSupportsLifecycle(ctx, ns, item.Name)
+						support, err := m.CheckLifecycleSupport(ctx, ns, item.Name)
 						if err != nil {
 							return "", err
 						}
-						if !supported {
-							return "", fmt.Errorf("no ClusterDeployment found — may be an imported cluster")
+						if err2 := lifecycleSupportErr(item.Name, "hibernate", support); err2 != nil {
+							return "", err2
 						}
 						if err := m.Resume(ctx, ns, item.Name); err != nil {
 							return "", err
@@ -318,12 +342,12 @@ func lifecycleStatusCmd() *cobra.Command {
 					ns = clusterName
 				}
 
-				supported, err := m.ClusterSupportsLifecycle(ctx, ns, clusterName)
+				support, err := m.CheckLifecycleSupport(ctx, ns, clusterName)
 				if err != nil {
 					return fmt.Errorf("checking lifecycle support: %w", err)
 				}
-				if !supported {
-					return fmt.Errorf("cluster %s/%s does not support lifecycle operations (no ClusterDeployment found — may be imported)", ns, clusterName)
+				if err := lifecycleSupportErr(clusterName, "status", support); err != nil {
+					return err
 				}
 
 				specState, err := m.GetPowerState(ctx, ns, clusterName)
@@ -355,11 +379,11 @@ func lifecycleStatusCmd() *cobra.Command {
 					Name: item.Name,
 					Run: func(ctx context.Context) (string, error) {
 						ns := item.Name
-						supported, err := m.ClusterSupportsLifecycle(ctx, ns, item.Name)
+						support, err := m.CheckLifecycleSupport(ctx, ns, item.Name)
 						if err != nil {
 							return "", err
 						}
-						if !supported {
+						if err2 := lifecycleSupportErr(item.Name, "hibernate", support); err2 != nil {
 							return "no ClusterDeployment — imported cluster", nil
 						}
 						specState, err := m.GetPowerState(ctx, ns, item.Name)

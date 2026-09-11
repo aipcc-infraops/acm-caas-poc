@@ -18,19 +18,21 @@ import (
 type ErrNoMachinePool struct {
 	ClusterName string
 	IsHive      bool
+	VendorType  string // distributionInfo.type — provider-independent detection
 	WorkerCount int
 	WorkerType  string
 }
 
 func (e *ErrNoMachinePool) Error() string {
 	if !e.IsHive {
+		// Provider-independent message: use VendorType to give the best hint,
+		// but don't hardcode provider-specific commands as the cluster may run
+		// on any Kubernetes distribution.
 		return fmt.Sprintf(
-			"cluster %s was not provisioned by Hive — MachinePool scaling is not available.\n"+
-				"Use your cloud provider's native scaling instead:\n"+
-				"  IBM Cloud: ibmcloud ks worker-pool resize --cluster %s --size-per-zone N --worker-pool default\n"+
-				"  AWS:       aws autoscaling set-desired-capacity\n"+
-				"  GCP:       gcloud container node-pools update",
-			e.ClusterName, e.ClusterName,
+			"cluster %s (%s) was not provisioned by Hive — MachinePool scaling is not available.\n"+
+				"Use acmlab scaling init to adopt existing workers, or your cloud provider's\n"+
+				"native scaling tools (e.g., ibmcloud ks, aws eks, gcloud container).",
+			e.ClusterName, coalesce(e.VendorType, "unknown type"),
 		)
 	}
 	return fmt.Sprintf(
@@ -103,7 +105,13 @@ func (m *Manager) GetCurrentWorkerInfo(ctx context.Context, clusterName string) 
 func (m *Manager) noMachinePoolErr(ctx context.Context, clusterName string) error {
 	isHive, _ := m.ClusterSupportsScaling(ctx, clusterName)
 	if !isHive {
-		return &ErrNoMachinePool{ClusterName: clusterName, IsHive: false}
+		// Use distributionInfo.type for a provider-independent error message.
+		clusterType, _ := m.client.GetClusterType(ctx, clusterName)
+		return &ErrNoMachinePool{
+			ClusterName: clusterName,
+			IsHive:      false,
+			VendorType:  string(clusterType),
+		}
 	}
 	count, workerType, _ := m.GetCurrentWorkerInfo(ctx, clusterName)
 	return &ErrNoMachinePool{
@@ -238,6 +246,13 @@ func (m *Manager) ListMachinePools(ctx context.Context) ([]MachinePoolInfo, erro
 		infos = append(infos, machinePoolInfoFromUnstructured(&list.Items[i]))
 	}
 	return infos, nil
+}
+
+func coalesce(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }
 
 func machinePoolInfoFromUnstructured(mp *unstructured.Unstructured) MachinePoolInfo {
