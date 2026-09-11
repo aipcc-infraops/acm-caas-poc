@@ -78,11 +78,21 @@ bin/acmlab lifecycle resume spoke2 --wait      # auto-recovers expired kubelet c
 bin/acmlab lifecycle diagnose spoke2
 bin/acmlab lifecycle diagnose spoke2 --json
 
+# Batch lifecycle
+bin/acmlab lifecycle hibernate spoke1 spoke2 --wait
+bin/acmlab lifecycle resume --from-file clusters.yaml
+
 # 10. Import external clusters
 bin/acmlab import cluster my-roks --kubeconfig-path /tmp/roks.kubeconfig --label cloud=IBM --wait
 bin/acmlab import status my-roks
 bin/acmlab import list
 bin/acmlab import detach my-roks
+
+# Batch import
+bin/acmlab import cluster c1 c2 c3 --wait
+bin/acmlab import cluster --from-file clusters.yaml
+bin/acmlab import detach c1 c2 c3
+bin/acmlab import status c1 c2 c3 --json
 
 # 11. Registry mirror (for ROKS, air-gapped clusters)
 bin/acmlab registry list-images import-test
