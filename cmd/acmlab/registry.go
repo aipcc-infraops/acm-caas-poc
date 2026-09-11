@@ -240,6 +240,11 @@ Example:
 				fmt.Println(string(data))
 			} else {
 				batch.PrintSummary(results, os.Stdout)
+				for _, r := range results {
+					if !r.OK {
+						os.Exit(1)
+					}
+				}
 			}
 			return nil
 		},
@@ -314,6 +319,11 @@ func registryRemoveCmd() *cobra.Command {
 				fmt.Println(string(data))
 			} else {
 				batch.PrintSummary(results, os.Stdout)
+				for _, r := range results {
+					if !r.OK {
+						os.Exit(1)
+					}
+				}
 			}
 			return nil
 		},
@@ -414,6 +424,7 @@ func registryMirrorScriptCmd() *cobra.Command {
 	var targetRegistry string
 	var fromFile string
 	var concurrency int
+	var outputJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "mirror-script [cluster...]",
@@ -475,13 +486,22 @@ Example:
 							return "", err
 						}
 						script := registry.GenerateMirrorScript(images, targetRegistry)
-						fmt.Printf("# === %s ===\n%s", item.Name, script)
-						return fmt.Sprintf("%d images", len(images)), nil
+						return fmt.Sprintf("# === %s ===\n%s", item.Name, script), nil
 					},
 				}
 			}
 
-			batch.Execute(ctx, work, concurrency, os.Stdout)
+			results := batch.Execute(ctx, work, concurrency, os.Stdout)
+			if outputJSON {
+				data, _ := batch.ToJSON(results)
+				fmt.Println(string(data))
+			} else {
+				for _, r := range results {
+					if r.OK {
+						fmt.Println(r.Message)
+					}
+				}
+			}
 			return nil
 		},
 	}
@@ -489,5 +509,6 @@ Example:
 	cmd.Flags().StringVar(&targetRegistry, "target", "", "Target mirror registry (e.g., quay.io/myorg)")
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "YAML file with cluster list")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 5, "Max parallel operations (max 20)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output results as JSON array")
 	return cmd
 }
