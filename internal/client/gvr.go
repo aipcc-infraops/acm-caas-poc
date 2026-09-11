@@ -63,4 +63,7 @@ var (
 	GVRManagedClusterImageRegistry = schema.GroupVersionResource{
 		Group: "imageregistry.open-cluster-management.io", Version: "v1alpha1", Resource: "managedclusterimageregistries",
 	}
+	GVRMachinePool = schema.GroupVersionResource{
+		Group: "hive.openshift.io", Version: "v1", Resource: "machinepools",
+	}
 )
