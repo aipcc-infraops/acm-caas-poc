@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/pablofelix/acm-caas-poc/internal/batch"
 	"github.com/pablofelix/acm-caas-poc/internal/provisioning"
 )
 
@@ -99,57 +101,153 @@ func provisionCreateCmd() *cobra.Command {
 }
 
 func provisionDestroyCmd() *cobra.Command {
+	var fromFile string
+	var concurrency int
+	var outputJSON bool
+
 	cmd := &cobra.Command{
-		Use:   "destroy <cluster-name>",
-		Short: "Destroy a spoke cluster — deletes ClusterDeployment, Hive deprovisions infrastructure",
-		Args:  cobra.ExactArgs(1),
+		Use:   "destroy [name...]",
+		Short: "Destroy one or more provisioned clusters",
+		Args:  cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var fileItems []batch.ClusterItem
+			if fromFile != "" {
+				var err error
+				fileItems, err = batch.LoadFile(fromFile)
+				if err != nil {
+					return err
+				}
+			}
+			items, err := batch.NamesFromArgs(args, fileItems)
+			if err != nil {
+				return err
+			}
+
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := provisioning.New(c, cfg)
-			fmt.Printf("Destroying cluster %s...\n", args[0])
-			if err := mgr.Destroy(context.Background(), args[0]); err != nil {
-				return err
+			ctx := context.Background()
+
+			work := make([]batch.Work, len(items))
+			for i, item := range items {
+				item := item
+				work[i] = batch.Work{
+					Name: item.Name,
+					Run: func(ctx context.Context) (string, error) {
+						if err := mgr.Destroy(ctx, item.Name); err != nil {
+							return "", err
+						}
+						return "destruction initiated", nil
+					},
+				}
 			}
-			fmt.Println("ClusterDeployment deleted. Hive will deprovision the infrastructure.")
+
+			results := batch.Execute(ctx, work, concurrency, os.Stdout)
+			if outputJSON {
+				data, _ := batch.ToJSON(results)
+				fmt.Println(string(data))
+			} else {
+				batch.PrintSummary(results, os.Stdout)
+			}
+			for _, r := range results {
+				if !r.OK {
+					os.Exit(1)
+				}
+			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "YAML file with cluster list")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 5, "Max parallel operations (max 20)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output results as JSON array")
 	return cmd
 }
 
 func provisionStatusCmd() *cobra.Command {
+	var fromFile string
+	var concurrency int
+	var outputJSON bool
+
 	cmd := &cobra.Command{
-		Use:   "status <cluster-name>",
-		Short: "Show ClusterDeployment provisioning status",
-		Args:  cobra.ExactArgs(1),
+		Use:   "status [name...]",
+		Short: "Show provisioning status of one or more clusters",
+		Args:  cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var fileItems []batch.ClusterItem
+			if fromFile != "" {
+				var err error
+				fileItems, err = batch.LoadFile(fromFile)
+				if err != nil {
+					return err
+				}
+			}
+			items, err := batch.NamesFromArgs(args, fileItems)
+			if err != nil {
+				return err
+			}
+
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := provisioning.New(c, cfg)
-			info, err := mgr.Status(context.Background(), args[0])
-			if err != nil {
-				return err
+			ctx := context.Background()
+
+			// single-item: preserve existing detailed output
+			if len(items) == 1 && fromFile == "" {
+				info, err := mgr.Status(ctx, items[0].Name)
+				if err != nil {
+					return err
+				}
+				if outputJSON {
+					data, _ := json.MarshalIndent(info, "", "  ")
+					fmt.Println(string(data))
+					return nil
+				}
+				fmt.Printf("Cluster:      %s\n", info.Name)
+				fmt.Printf("BaseDomain:   %s\n", info.BaseDomain)
+				fmt.Printf("Region:       %s\n", info.Region)
+				fmt.Printf("ImageSet:     %s\n", info.ImageSet)
+				fmt.Printf("Installed:    %v\n", info.Installed)
+				fmt.Printf("Provisioned:  %v\n", info.Provisioned)
+				if info.FailureReason != "" {
+					fmt.Printf("Failure:      %s\n", info.FailureReason)
+				}
+				if len(info.Conditions) > 0 {
+					fmt.Printf("Conditions:   %v\n", info.Conditions)
+				}
+				return nil
 			}
-			fmt.Printf("Cluster:      %s\n", info.Name)
-			fmt.Printf("BaseDomain:   %s\n", info.BaseDomain)
-			fmt.Printf("Region:       %s\n", info.Region)
-			fmt.Printf("ImageSet:     %s\n", info.ImageSet)
-			fmt.Printf("Installed:    %v\n", info.Installed)
-			fmt.Printf("Provisioned:  %v\n", info.Provisioned)
-			if info.FailureReason != "" {
-				fmt.Printf("Failure:      %s\n", info.FailureReason)
+
+			work := make([]batch.Work, len(items))
+			for i, item := range items {
+				item := item
+				work[i] = batch.Work{
+					Name: item.Name,
+					Run: func(ctx context.Context) (string, error) {
+						s, err := mgr.Status(ctx, item.Name)
+						if err != nil {
+							return "", err
+						}
+						return fmt.Sprintf("Installed=%v Provisioned=%v", s.Installed, s.Provisioned), nil
+					},
+				}
 			}
-			if len(info.Conditions) > 0 {
-				fmt.Printf("Conditions:   %v\n", info.Conditions)
+			results := batch.Execute(ctx, work, concurrency, os.Stdout)
+			if outputJSON {
+				data, _ := batch.ToJSON(results)
+				fmt.Println(string(data))
+			} else {
+				batch.PrintSummary(results, os.Stdout)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "YAML file with cluster list")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 5, "Max parallel operations (max 20)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
