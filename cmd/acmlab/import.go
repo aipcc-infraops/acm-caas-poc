@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 
+	"github.com/pablofelix/acm-caas-poc/internal/batch"
 	"github.com/pablofelix/acm-caas-poc/internal/importing"
 )
 
@@ -34,163 +35,275 @@ func importClusterCmd() *cobra.Command {
 	var clusterSet string
 	var doWait bool
 	var timeout time.Duration
+	var fromFile string
+	var concurrency int
+	var outputJSON bool
 
 	cmd := &cobra.Command{
-		Use:   "cluster <name>",
-		Short: "Import an external cluster into ACM",
-		Long: `Registers a cluster in ACM by creating a ManagedCluster, namespace,
-and KlusterletAddonConfig.
-
-Auto-import (recommended): provide the spoke kubeconfig via --kubeconfig-path
-or --kubeconfig-context. ACM installs the klusterlet automatically.
-
-Manual import: without kubeconfig flags, you must apply the import manifests
-on the spoke yourself (instructions shown after creation).`,
-		Args: cobra.ExactArgs(1),
+		Use:   "cluster [name...]",
+		Short: "Import one or more external clusters into ACM",
+		Long: `Registers clusters in ACM. Provide names as arguments or via --from-file.
+Global --kubeconfig-path / --kubeconfig-context apply to all clusters when
+no per-item kubeconfig is set in the file.`,
+		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			labelMap := make(map[string]string, len(labels))
+			for _, l := range labels {
+				parts := strings.SplitN(l, "=", 2)
+				if len(parts) != 2 {
+					return fmt.Errorf("invalid label format %q, expected key=value", l)
+				}
+				labelMap[parts[0]] = parts[1]
+			}
+
+			var fileItems []batch.ClusterItem
+			if fromFile != "" {
+				var err error
+				fileItems, err = batch.LoadFile(fromFile)
+				if err != nil {
+					return err
+				}
+			}
+			items, err := batch.NamesFromArgs(args, fileItems)
+			if err != nil {
+				return err
+			}
 
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
-
-			opts := importing.ImportOptions{
-				Name:       name,
-				ClusterSet: clusterSet,
-			}
-
-			if len(labels) > 0 {
-				opts.Labels = make(map[string]string, len(labels))
-				for _, l := range labels {
-					parts := strings.SplitN(l, "=", 2)
-					if len(parts) != 2 {
-						return fmt.Errorf("invalid label format %q, expected key=value", l)
-					}
-					opts.Labels[parts[0]] = parts[1]
-				}
-			}
-
-			if kubeconfigPath != "" {
-				data, err := os.ReadFile(kubeconfigPath)
-				if err != nil {
-					return fmt.Errorf("reading kubeconfig %s: %w", kubeconfigPath, err)
-				}
-				opts.Kubeconfig = data
-			} else if kubeconfigContext != "" {
-				data, err := extractKubeconfigForContext(kubeconfigContext)
-				if err != nil {
-					return fmt.Errorf("extracting kubeconfig for context %s: %w", kubeconfigContext, err)
-				}
-				opts.Kubeconfig = data
-			}
-
 			m := importing.New(c, cfg)
 			ctx := context.Background()
 
-			result, err := m.Import(ctx, opts)
-			if err != nil {
-				return fmt.Errorf("importing cluster: %w", err)
-			}
+			work := make([]batch.Work, len(items))
+			for i, item := range items {
+				item := item
+				work[i] = batch.Work{
+					Name: item.Name,
+					Run: func(ctx context.Context) (string, error) {
+						opts := importing.ImportOptions{
+							Name:       item.Name,
+							ClusterSet: clusterSet,
+							Labels:     labelMap,
+						}
+						if item.ClusterSet != "" {
+							opts.ClusterSet = item.ClusterSet
+						}
+						if item.Labels != nil {
+							opts.Labels = item.Labels
+						}
+						// resolve kubeconfig: per-item overrides global flags
+						switch {
+						case item.KubeconfigPath != "":
+							data, err := os.ReadFile(item.KubeconfigPath)
+							if err != nil {
+								return "", fmt.Errorf("reading kubeconfig: %w", err)
+							}
+							opts.Kubeconfig = data
+						case item.KubeconfigContext != "":
+							data, err := extractKubeconfigForContext(item.KubeconfigContext)
+							if err != nil {
+								return "", err
+							}
+							opts.Kubeconfig = data
+						case kubeconfigPath != "":
+							data, err := os.ReadFile(kubeconfigPath)
+							if err != nil {
+								return "", fmt.Errorf("reading kubeconfig: %w", err)
+							}
+							opts.Kubeconfig = data
+						case kubeconfigContext != "":
+							data, err := extractKubeconfigForContext(kubeconfigContext)
+							if err != nil {
+								return "", err
+							}
+							opts.Kubeconfig = data
+						}
 
-			fmt.Println(result.Message)
-
-			if doWait && result.AutoImport {
-				fmt.Printf("Waiting for cluster to become available (timeout: %v)...\n", timeout)
-				if err := m.WaitForImport(ctx, name, timeout); err != nil {
-					return fmt.Errorf("waiting for import: %w", err)
+						result, err := m.Import(ctx, opts)
+						if err != nil {
+							return "", err
+						}
+						msg := result.Message
+						if doWait && result.AutoImport {
+							if err := m.WaitForImport(ctx, item.Name, timeout); err != nil {
+								return "", fmt.Errorf("waiting: %w", err)
+							}
+							msg = "imported and available"
+						}
+						return msg, nil
+					},
 				}
-				fmt.Println("Cluster successfully imported and available")
 			}
 
+			results := batch.Execute(ctx, work, concurrency, os.Stdout)
+			if outputJSON {
+				data, _ := batch.ToJSON(results)
+				fmt.Println(string(data))
+			} else {
+				batch.PrintSummary(results, os.Stdout)
+			}
+			for _, r := range results {
+				if !r.OK {
+					os.Exit(1)
+				}
+			}
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig-path", "", "Path to spoke cluster kubeconfig for auto-import")
-	cmd.Flags().StringVar(&kubeconfigContext, "kubeconfig-context", "", "Context name in default kubeconfig to use for auto-import")
-	cmd.Flags().StringSliceVarP(&labels, "label", "l", nil, "Labels for the ManagedCluster (key=value)")
+	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig-path", "", "Path to spoke kubeconfig (applies to all)")
+	cmd.Flags().StringVar(&kubeconfigContext, "kubeconfig-context", "", "Context name in default kubeconfig (applies to all)")
+	cmd.Flags().StringSliceVarP(&labels, "label", "l", nil, "Labels for ManagedCluster (key=value, applies to all)")
 	cmd.Flags().StringVar(&clusterSet, "cluster-set", "default", "ManagedClusterSet to assign")
 	cmd.Flags().BoolVar(&doWait, "wait", false, "Wait for import to complete")
-	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Timeout for wait operation")
-
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Timeout for --wait")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "YAML file with cluster list")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 5, "Max parallel operations (max 20)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output results as JSON array")
 	return cmd
 }
 
 func detachClusterCmd() *cobra.Command {
+	var fromFile string
+	var concurrency int
+	var outputJSON bool
+
 	cmd := &cobra.Command{
-		Use:   "detach <name>",
-		Short: "Detach a cluster from ACM (does not destroy the cluster)",
-		Long: `Removes a ManagedCluster from ACM management. The underlying
-cluster continues to run — only the ACM registration is removed.
-ACM's cleanup controllers handle removing the klusterlet from the spoke.`,
-		Args: cobra.ExactArgs(1),
+		Use:   "detach [name...]",
+		Short: "Detach one or more clusters from ACM (does not destroy the clusters)",
+		Args:  cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			var fileItems []batch.ClusterItem
+			if fromFile != "" {
+				var err error
+				fileItems, err = batch.LoadFile(fromFile)
+				if err != nil {
+					return err
+				}
+			}
+			items, err := batch.NamesFromArgs(args, fileItems)
+			if err != nil {
+				return err
+			}
 
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
-
 			m := importing.New(c, cfg)
 			ctx := context.Background()
 
-			if err := m.Detach(ctx, name); err != nil {
-				return fmt.Errorf("detaching cluster: %w", err)
+			work := make([]batch.Work, len(items))
+			for i, item := range items {
+				item := item
+				work[i] = batch.Work{
+					Name: item.Name,
+					Run: func(ctx context.Context) (string, error) {
+						if err := m.Detach(ctx, item.Name); err != nil {
+							return "", err
+						}
+						return "detached from ACM", nil
+					},
+				}
 			}
 
-			fmt.Printf("Cluster %s detached from ACM\n", name)
+			results := batch.Execute(ctx, work, concurrency, os.Stdout)
+			if outputJSON {
+				data, _ := batch.ToJSON(results)
+				fmt.Println(string(data))
+			} else {
+				batch.PrintSummary(results, os.Stdout)
+			}
+			for _, r := range results {
+				if !r.OK {
+					os.Exit(1)
+				}
+			}
 			return nil
 		},
 	}
-
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "YAML file with cluster list")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 5, "Max parallel operations (max 20)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output results as JSON array")
 	return cmd
 }
 
 func importStatusCmd() *cobra.Command {
 	var outputJSON bool
+	var fromFile string
+	var concurrency int
 
 	cmd := &cobra.Command{
-		Use:   "status <name>",
-		Short: "Show import status of a cluster",
-		Args:  cobra.ExactArgs(1),
+		Use:   "status [name...]",
+		Short: "Show import status of one or more clusters",
+		Args:  cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			var fileItems []batch.ClusterItem
+			if fromFile != "" {
+				var err error
+				fileItems, err = batch.LoadFile(fromFile)
+				if err != nil {
+					return err
+				}
+			}
+			items, err := batch.NamesFromArgs(args, fileItems)
+			if err != nil {
+				return err
+			}
 
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
-
 			m := importing.New(c, cfg)
 			ctx := context.Background()
 
-			status, err := m.GetImportStatus(ctx, name)
-			if err != nil {
-				return fmt.Errorf("getting import status: %w", err)
-			}
-
-			if outputJSON {
-				data, _ := json.MarshalIndent(status, "", "  ")
-				fmt.Println(string(data))
+			// single cluster with no file: keep existing detailed output
+			if len(items) == 1 && fromFile == "" {
+				status, err := m.GetImportStatus(ctx, items[0].Name)
+				if err != nil {
+					return fmt.Errorf("getting import status: %w", err)
+				}
+				if outputJSON {
+					data, _ := json.MarshalIndent(status, "", "  ")
+					fmt.Println(string(data))
+					return nil
+				}
+				fmt.Printf("Cluster: %s\nAvailable: %s\nJoined: %s\nAuto-import: %v\n",
+					status.Name, status.Available, status.Joined, status.AutoImport)
 				return nil
 			}
 
-			fmt.Printf("Cluster: %s\n", status.Name)
-			fmt.Printf("Available: %s\n", status.Available)
-			fmt.Printf("Joined: %s\n", status.Joined)
-			if status.CreatedVia != "" {
-				fmt.Printf("Created via: %s\n", status.CreatedVia)
+			work := make([]batch.Work, len(items))
+			for i, item := range items {
+				item := item
+				work[i] = batch.Work{
+					Name: item.Name,
+					Run: func(ctx context.Context) (string, error) {
+						s, err := m.GetImportStatus(ctx, item.Name)
+						if err != nil {
+							return "", err
+						}
+						return fmt.Sprintf("Available=%s Joined=%s", s.Available, s.Joined), nil
+					},
+				}
 			}
-			fmt.Printf("Auto-import: %v\n", status.AutoImport)
 
+			results := batch.Execute(ctx, work, concurrency, os.Stdout)
+			if outputJSON {
+				data, _ := batch.ToJSON(results)
+				fmt.Println(string(data))
+			} else {
+				batch.PrintSummary(results, os.Stdout)
+			}
 			return nil
 		},
 	}
-
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
-
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "YAML file with cluster list")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 5, "Max parallel operations (max 20)")
 	return cmd
 }
 
