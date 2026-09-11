@@ -1,6 +1,5 @@
 # ACM CaaS PoC — Design Spec
 
-> **AIPCC-29876** — Epic: AIPCC-29817
 >
 > A Go project to validate ACM capabilities for CaaS via executable
 > Gherkin use cases, with an MCP server for interactive testing from Claude.
@@ -122,7 +121,7 @@ IBMCLOUD_API_KEY=                     # IBM Cloud API key
 IBMCLOUD_REGION=us-south              # Default region
 
 # Cluster defaults
-ACM_BASE_DOMAIN=infraops1.ibm.rh-ods.com
+ACM_BASE_DOMAIN=<your-base-domain>
 ACM_CLUSTER_IMAGE_SET=img4.22.9-multi-appsub
 ACM_DEFAULT_WORKER_TYPE=bx2-4x16
 ACM_DEFAULT_MASTER_TYPE=bx2-8x32
