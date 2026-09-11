@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -199,6 +200,11 @@ func provisionStatusCmd() *cobra.Command {
 				info, err := mgr.Status(ctx, items[0].Name)
 				if err != nil {
 					return err
+				}
+				if outputJSON {
+					data, _ := json.MarshalIndent(info, "", "  ")
+					fmt.Println(string(data))
+					return nil
 				}
 				fmt.Printf("Cluster:      %s\n", info.Name)
 				fmt.Printf("BaseDomain:   %s\n", info.BaseDomain)
