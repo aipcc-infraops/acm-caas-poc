@@ -1759,6 +1759,79 @@ OADP `DataProtectionApplication` — for object storage backend (S3, IBM COS)
 
 ---
 
+## UC-37: Worker node flavor change via MachinePool rolling replacement
+
+**Feature**: Change worker node instance type post-provisioning via Hive MachinePool platform update
+
+As a platform operator
+I want to change the worker node flavor of a running cluster
+So that I can right-size compute without reprovisioning the cluster
+
+### Scenario: Change worker instance type
+
+**Given** a cluster has workers of type `bx2-4x16` and needs more CPU
+**When** I run `acmlab scaling set-flavor cluster-1 --worker-type cx2-8x16`
+**Then** Hive creates new workers with the new instance type
+**And** old workers are drained and removed
+**And** the cluster remains available throughout the rolling replacement
+
+### Limitations
+
+- Control plane flavor cannot be changed post-provisioning
+- Only works for Hive-provisioned clusters with a MachinePool
+- For clusters using HyperShift (UC-38), use NodePool flavor update instead
+
+### ACM/Hive types
+
+`hive.openshift.io/v1.MachinePool` — patch `spec.platform.<provider>.type`
+
+### Package
+
+Extends `internal/scaling/` (UC-10)
+
+---
+
+## UC-38: HyperShift (HostedCluster) provisioning — control-plane-free clusters
+
+**Feature**: Provision OCP clusters with hosted control planes using HyperShift, eliminating control plane VM costs
+
+As a platform operator
+I want to provision clusters where the control plane runs as pods on the hub
+So that I reduce cost and provisioning time for short-lived clusters
+
+### Scenario: Provision a HyperShift cluster
+
+**Given** the hypershift-addon is enabled on the ACM hub
+**When** I run `acmlab provision create cluster-1 --type hypershift --workers 2 --worker-type bx2-4x16`
+**Then** a HostedCluster and NodePool are created (no control plane VMs)
+**And** the cluster is available in 3-4 minutes (vs 10+ minutes for Hive IPI)
+**And** control plane runs as pods on the hub cluster
+
+### Scenario: Scale HyperShift worker nodes
+
+**Given** a HyperShift cluster exists
+**When** I run `acmlab scaling set cluster-1 --replicas 4`
+**Then** the NodePool replicas are updated (not MachinePool)
+
+### Why this matters
+
+HyperShift eliminates ~30% of cluster cost (no control plane VMs). Ideal for short-lived QA matrix clusters (UC-23) where many clusters are needed simultaneously.
+
+### Prerequisites (spike needed)
+
+Verify `hypershift-addon` is enabled on hub and IBM Cloud NodePool support is available.
+
+### ACM types
+
+`hypershift.openshift.io/v1beta1.HostedCluster`
+`hypershift.openshift.io/v1beta1.NodePool`
+
+### Package
+
+Extends `internal/provisioning/` with HyperShift provisioning path
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -1798,6 +1871,8 @@ OADP `DataProtectionApplication` — for object storage backend (S3, IBM COS)
 | UC-33  |  ManifestWorkReplicaSet progressive rollout  |  `work/v1alpha1.ManifestWorkReplicaSet`  |  spec.rollout |
 | UC-35  |  Credential-free spoke access (ManagedServiceAccount)  |  `ManagedServiceAccount` + `cluster-proxy` addon  |  spec.access |
 | UC-36  |  Hub backup and restore  |  `BackupSchedule` + `Restore` + OADP  |  spec.backup |
+| UC-37  |  Worker node flavor change (rolling replacement)  |  `hive/v1.MachinePool` platform patch  |  spec.workers.type |
+| UC-38  |  HyperShift (HostedCluster) provisioning  |  `hypershift.io/v1beta1.HostedCluster` + `NodePool`  |  spec.type=hypershift |
 
 ## Go Dependencies (for the lab repo)
 
