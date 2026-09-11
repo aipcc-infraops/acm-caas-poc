@@ -240,10 +240,10 @@ Example:
 				fmt.Println(string(data))
 			} else {
 				batch.PrintSummary(results, os.Stdout)
-				for _, r := range results {
-					if !r.OK {
-						os.Exit(1)
-					}
+			}
+			for _, r := range results {
+				if !r.OK {
+					os.Exit(1)
 				}
 			}
 			return nil
@@ -319,10 +319,10 @@ func registryRemoveCmd() *cobra.Command {
 				fmt.Println(string(data))
 			} else {
 				batch.PrintSummary(results, os.Stdout)
-				for _, r := range results {
-					if !r.OK {
-						os.Exit(1)
-					}
+			}
+			for _, r := range results {
+				if !r.OK {
+					os.Exit(1)
 				}
 			}
 			return nil
