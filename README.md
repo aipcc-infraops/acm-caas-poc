@@ -21,6 +21,19 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-10 | Cluster scaling (add/remove workers) | 📋 Planned | `internal/scaling/` |
 | UC-11 | Cost tracking and chargeback | 📋 Planned | `internal/cost/` |
 | UC-12 | Identity Provider management (GitHub IdP, htpasswd rotation) | 📋 Planned | `internal/idp/` |
+| UC-14 | Automatic cluster reclamation (idle/expired) | 📋 Planned | `internal/reclamation/` |
+| UC-15 | Resource quota gates via governance policy | 📋 Planned | `internal/quota/` |
+| UC-16 | Unique IdP per cluster (security hardening) | 📋 Planned | `internal/idp/` |
+| UC-17 | Cost center attribution and budget alerting | 📋 Planned | `internal/cost/` |
+| UC-18 | GPU sharing stack deployment (Kueue + Kyverno) | 📋 Planned | `internal/gpusharing/` |
+| UC-19 | Multi-cluster GPU workload routing via Placement | 📋 Planned | `internal/gpurouting/` |
+| UC-20 | OpenShift AI version fleet segregation | 📋 Planned | `internal/gpurouting/` |
+| UC-21 | Elastic GPU capacity (auto-provision on saturation) | 📋 Planned | `internal/gpuelastic/` |
+| UC-22 | ClusterSet management — team isolation | 📋 Planned | `internal/clusterset/` |
+| UC-23 | Multi-architecture cluster matrix (QA) | 📋 Planned | `internal/matrix/` |
+| UC-24 | Per-team compliance reporting | 📋 Planned | `internal/policy/` |
+| UC-25 | ClusterPool + ClusterClaim (pre-warmed clusters) | 📋 Planned | `internal/pool/` |
+| UC-26 | Multi-cluster networking (Submariner) | 📋 Planned | `internal/submariner/` |
 
 ### PoC Priority Areas
 
@@ -70,6 +83,10 @@ bin/acmlab provision status spoke1
 bin/acmlab provision list
 bin/acmlab provision destroy spoke1
 
+# Batch provision
+bin/acmlab provision destroy spoke1 spoke2 spoke3
+bin/acmlab provision status spoke1 spoke2 --json
+
 # 9. Cluster lifecycle (hibernate/resume)
 bin/acmlab lifecycle list
 bin/acmlab lifecycle status spoke2
@@ -100,6 +117,13 @@ bin/acmlab registry mirror-script import-test --target quay.io/myorg > mirror.sh
 bin/acmlab registry configure import-test --mirror quay.io/myorg --pull-secret ~/pull-secret.json
 bin/acmlab registry status import-test
 bin/acmlab registry remove import-test
+
+# Batch registry
+bin/acmlab registry configure c1 c2 --mirror quay.io/myorg --pull-secret ~/pull-secret.json
+bin/acmlab registry status c1 c2 c3 --json
+
+# 12. Fleet batch
+bin/acmlab fleet status spoke1 spoke2 spoke3 --json
 ```
 
 ## MCP Server
