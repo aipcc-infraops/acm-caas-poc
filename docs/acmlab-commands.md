@@ -454,6 +454,10 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_hub_health` | UC-04 | Checks hub connectivity by listing CRDs |
 | `acm_list_cluster_resources` | UC-06 | Resource summary for all clusters |
 | `acm_cluster_resources` | UC-06 | Detailed node/CPU/memory for a specific cluster |
+| `acm_deploy_tenant` | UC-03 | Deploys tenant isolation (namespace, RBAC, network policy, quota) to a spoke via ManifestWork |
+| `acm_remove_tenant` | UC-03 | Removes tenant isolation from a spoke cluster |
+| `acm_list_tenants` | UC-03 | Lists tenants deployed to a spoke cluster with sync status |
+| `acm_tenant_status` | UC-03 | Detailed tenant ManifestWork sync status with per-resource results |
 | `acm_list_policies` | UC-02 | Lists governance policies |
 | `acm_get_policy` | UC-02 | Gets policy details and compliance |
 | `acm_apply_policy` | UC-02 | Creates/updates image registry policy |
