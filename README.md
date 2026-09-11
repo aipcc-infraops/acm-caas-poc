@@ -18,7 +18,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-13 | Registry mirror for restricted clusters (ROKS, air-gap) | ✅ Implemented | `internal/registry/` |
 | UC-08 | Legacy cluster decommissioning | 📋 Planned | `internal/decommission/` |
 | UC-09 | Cluster upgrades (Day-2 operations) | 📋 Planned | `internal/upgrades/` |
-| UC-10 | Cluster scaling (add/remove workers) | 📋 Planned | `internal/scaling/` |
+| UC-10 | Cluster scaling (add/remove workers) | ✅ Implemented | `internal/scaling/` |
 | UC-11 | Cost tracking and chargeback | 📋 Planned | `internal/cost/` |
 | UC-12 | Identity Provider management (GitHub IdP, htpasswd rotation) | 📋 Planned | `internal/idp/` |
 | UC-14 | Automatic cluster reclamation (idle/expired) | 📋 Planned | `internal/reclamation/` |
@@ -43,6 +43,8 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-33 | ManifestWorkReplicaSet progressive rollout | 📋 Planned | `internal/rollout/` |
 | UC-35 | Credential-free spoke access (ManagedServiceAccount) | 📋 Planned | `internal/access/` |
 | UC-36 | Hub backup and restore | 📋 Planned | `internal/backup/` |
+| UC-37 | Worker node flavor change (rolling replacement) | 📋 Planned | `internal/scaling/` |
+| UC-38 | HyperShift (HostedCluster) provisioning | 📋 Planned | `internal/provisioning/` |
 
 ### PoC Priority Areas
 
@@ -95,6 +97,12 @@ bin/acmlab provision destroy spoke1
 # Batch provision
 bin/acmlab provision destroy spoke1 spoke2 spoke3
 bin/acmlab provision status spoke1 spoke2 --json
+
+# Scaling
+bin/acmlab scaling list
+bin/acmlab scaling get spoke2
+bin/acmlab scaling set spoke2 --replicas 4
+bin/acmlab scaling auto spoke2 --min 2 --max 8
 
 # 9. Cluster lifecycle (hibernate/resume)
 bin/acmlab lifecycle list
