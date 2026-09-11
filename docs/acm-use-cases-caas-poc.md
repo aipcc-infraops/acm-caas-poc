@@ -1,6 +1,5 @@
 # ACM Use Cases — ACM CaaS PoC
 
-> AIPCC-29876 — Epic: AIPCC-29817
 >
 > Use cases to validate ACM capabilities for the CaaS platform.
 > Each use case exercises ACM's Go API (`open-cluster-management.io/api`,
@@ -733,13 +732,13 @@ So that the CaaS platform can charge teams for actual usage
 ### Scenario: Calculate CPU-hours per cluster over a time period
 
 **Given** Thanos metrics are available via the MCO observability stack  
-**When** I query total CPU usage for cluster infraops1 over the last 7 days  
+**When** I query total CPU usage for cluster cluster-1 over the last 7 days  
 **Then** I get the aggregate CPU-hours consumed  
 **And** the result is broken down by day
 
 ### Scenario: Calculate resource usage per tenant namespace
 
-**Given** tenant team-alpha has a namespace on cluster infraops1  
+**Given** tenant team-alpha has a namespace on cluster cluster-1  
 **When** I query CPU and memory usage for namespace team-alpha over the last 30 days  
 **Then** I get CPU-hours and memory-GiB-hours for the tenant  
 **And** I can compare usage against the tenant's ResourceQuota limits
@@ -1181,7 +1180,7 @@ So that we can generate monthly chargeback reports and alert when teams exceed t
 ### ComputeRequest controller equivalent
 
 ```
-ComputeRequest.spec.billing.costCenter = "rhoai-platform"
+ComputeRequest.spec.billing.costCenter = "engineering-platform"
 ComputeRequest.spec.billing.monthlyBudgetUSD = 5000
   -> controller stamps cost center labels on ManagedCluster
   -> Thanos aggregates usage by cost-center label
@@ -1288,54 +1287,54 @@ ComputeRequest.spec.gpu.count = 8
 
 ---
 
-## UC-20: OpenShift AI (ROI) version fleet segregation
+## UC-20: AI platform operator version fleet segregation
 
-**Feature**: Manage GPU clusters segregated by ROI version to support multi-version testing without cluster sharing conflicts
+**Feature**: Manage GPU clusters segregated by operator version to support multi-version testing without cluster sharing conflicts
 
 As a platform operator
-I want each GPU cluster to run a specific ROI version
-So that teams testing different ROI versions can get dedicated capacity without operator conflicts
+I want each GPU cluster to run a specific operator version
+So that teams testing different operator versions can get dedicated capacity without operator conflicts
 
-### Scenario: Route workload to cluster with specific ROI version
+### Scenario: Route workload to cluster with specific operator version
 
-**Given** GPU clusters are labelled `rhoai-version=2.17`, `rhoai-version=2.18`, `rhoai-build=nightly`
-**When** a team requests a GPU environment with ROI 2.18
-**Then** Placement selects only clusters with `rhoai-version=2.18`
+**Given** GPU clusters are labelled `ai-platform-version=2.17`, `ai-platform-version=2.18`, `ai-platform-build=nightly`
+**When** a team requests a GPU environment with operator version 2.18
+**Then** Placement selects only clusters with `ai-platform-version=2.18`
 **And** the workload is submitted to the matched cluster
 
-### Scenario: Enforce single ROI version per cluster
+### Scenario: Enforce single operator version per cluster
 
-**Given** a GPU cluster has `rhoai-version=2.17`
-**When** someone tries to install ROI 2.18 on the same cluster
+**Given** a GPU cluster has `ai-platform-version=2.17`
+**When** someone tries to install operator version 2.18 on the same cluster
 **Then** a ConfigurationPolicy detects the version mismatch
 **And** the cluster is marked NonCompliant with remediation instructions
 
-### Scenario: Provision new cluster for new ROI version
+### Scenario: Provision new cluster for new operator version
 
-**Given** ROI 2.19 is released and no GPU cluster has it
-**When** the first request for ROI 2.19 arrives
+**Given** operator version 2.19 is released and no GPU cluster has it
+**When** the first request for operator version 2.19 arrives
 **Then** the controller provisions a new GPU cluster (UC-01)
-**And** deploys ROI 2.19 via ManifestWork
-**And** labels the cluster `rhoai-version=2.19`
+**And** deploys operator version 2.19 via ManifestWork
+**And** labels the cluster `ai-platform-version=2.19`
 **And** adds it to the GPU routing pool (UC-19)
 
 ### Context (from InfraOps Strategy Day)
 
-ROI is a cluster-wide operator — only one version can be installed per cluster. Different testing teams (nightly builds, weekly builds, stable versions) require different versions simultaneously. Segregation by cluster is the only viable approach without operator conflict.
+The AI platform operator is a cluster-wide operator — only one version can be installed per cluster. Different testing teams (nightly builds, weekly builds, stable versions) require different versions simultaneously. Segregation by cluster is the only viable approach without operator conflict.
 
 ### ACM types
 
-`cluster.open-cluster-management.io/v1.ManagedCluster` — `rhoai-version`, `rhoai-channel`, `rhoai-build` labels
-`policy.open-cluster-management.io/v1.ConfigurationPolicy` — enforce single ROI version per cluster
-`cluster.open-cluster-management.io/v1beta1.Placement` — route by ROI version label
-`work.open-cluster-management.io/v1.ManifestWork` — deploy ROI operator to new GPU cluster
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `ai-platform-version`, `ai-platform-channel`, `ai-platform-build` labels
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — enforce single operator version per cluster
+`cluster.open-cluster-management.io/v1beta1.Placement` — route by operator version label
+`work.open-cluster-management.io/v1.ManifestWork` — deploy the AI platform operator to new GPU cluster
 
 ### ComputeRequest controller equivalent
 
 ```
-ComputeRequest.spec.gpu.rhoaiVersion = "2.18"
-  -> controller creates Placement with rhoai-version=2.18 predicate
-  -> if no cluster matches: provisions new GPU cluster + deploys ROI 2.18 (UC-01)
+ComputeRequest.spec.gpu.aiPlatformVersion = "2.18"
+  -> controller creates Placement with ai-platform-version=2.18 predicate
+  -> if no cluster matches: provisions new GPU cluster + deploys operator version 2.18 (UC-01)
   -> controller labels new cluster and adds to routing pool
   -> controller routes workload to matched cluster
 ```
@@ -1454,7 +1453,7 @@ ComputeRequest.spec.team = "serving"
 
 ## UC-23: Multi-architecture cluster matrix provisioning (QA)
 
-**Feature**: Automated provisioning of a version × architecture × ROI matrix of clusters for QA regression testing
+**Feature**: Automated provisioning of a version × architecture × operator version matrix of clusters for QA regression testing
 
 As a QA engineer
 I want to provision a full test matrix of clusters with one command
@@ -1462,16 +1461,16 @@ So that I can run regression tests across all supported combinations
 
 ### Scenario: Provision a version × architecture matrix
 
-**Given** a matrix.yaml specifying OCP versions [4.18, 4.19], architectures [amd64, ppc64le], and ROI versions [3.4, 3.5]
+**Given** a matrix.yaml specifying OCP versions [4.18, 4.19], architectures [amd64, ppc64le], and operator versions [3.4, 3.5]
 **When** I run `acmlab matrix provision --from-file matrix.yaml`
 **Then** all combinations are provisioned in parallel (8 clusters)
-**And** each cluster is labelled with `ocp-version`, `arch`, `rhoai-version`
+**And** each cluster is labelled with `ocp-version`, `arch`, `ai-platform-version`
 **And** a summary table shows per-combination status
 
 ### Scenario: Route a test workload to a specific combination
 
 **Given** the matrix clusters are Running
-**When** a Placement specifies `ocp-version=4.19`, `arch=amd64`, `rhoai-version=3.5`
+**When** a Placement specifies `ocp-version=4.19`, `arch=amd64`, `ai-platform-version=3.5`
 **Then** the Placement selects exactly the matching cluster
 **And** the test workload is dispatched to that cluster
 
@@ -1484,7 +1483,7 @@ So that I can run regression tests across all supported combinations
 ### ACM types
 
 `hive.openshift.io/v1.ClusterDeployment` — one per matrix cell (reuses UC-01)
-`cluster.open-cluster-management.io/v1.ManagedCluster` — labels: `ocp-version`, `arch`, `rhoai-version`
+`cluster.open-cluster-management.io/v1.ManagedCluster` — labels: `ocp-version`, `arch`, `ai-platform-version`
 `cluster.open-cluster-management.io/v1beta1.Placement` — combined label predicate routing
 
 ### Package
@@ -1602,7 +1601,7 @@ So that distributed training jobs (PyTorch distributed, Ray, Kueue multi-cluster
 
 ### Spike required
 
-Before implementation, validate: submariner-addon is installed on hub, IBM Cloud VPC firewall allows IPSec/VXLAN ports, existing RHOAI Submariner usage.
+Before implementation, validate: submariner-addon is installed on hub, IBM Cloud VPC firewall allows IPSec/VXLAN ports, 
 
 ### ACM types
 
@@ -1639,7 +1638,7 @@ Before implementation, validate: submariner-addon is installed on hub, IBM Cloud
 | UC-17  |  Cost center attribution + budget alerting  |  `ManagedCluster` labels + `MCO/Thanos` + `Policy`  |  spec.billing.costCenter |
 | UC-18  |  GPU sharing stack deployment fleet-wide (Kueue + Kyverno)  |  `ManifestWork` + `ConfigurationPolicy`  |  spec.gpu.sharingEnabled |
 | UC-19  |  Multi-cluster GPU workload routing via Placement  |  `Placement` + `PlacementDecision` + `ManagedCluster` labels  |  spec.gpu.type |
-| UC-20  |  OpenShift AI version fleet segregation  |  `Placement` + `ConfigurationPolicy` + `ManifestWork`  |  spec.gpu.rhoaiVersion |
+| UC-20  |  AI platform operator version fleet segregation  |  `Placement` + `ConfigurationPolicy` + `ManifestWork`  |  spec.gpu.aiPlatformVersion |
 | UC-21  |  Elastic GPU capacity (auto-provision on saturation)  |  `MCO/Thanos` + `ConfigurationPolicy` + `ClusterDeployment`  |  spec.gpu.elasticCapacity |
 | UC-22  |  ClusterSet management (team isolation)  |  `ManagedClusterSet` + `ManagedClusterSetBinding`  |  spec.team |
 | UC-23  |  Multi-architecture cluster matrix (QA)  |  `ClusterDeployment` + `ManagedCluster` labels + `Placement`  |  spec.matrix |

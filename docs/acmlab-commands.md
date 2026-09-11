@@ -365,11 +365,11 @@ Images required by ACM on import-test (6):
 Generates a bash script with `skopeo copy` commands to mirror all required images from `registry.redhat.io` to a target registry.
 
 Options:
-- `--target` — target mirror registry (required, e.g., `us.icr.io/acm-mirror`)
+- `--target` — target mirror registry (required, e.g., `your-registry.example.com/acm-mirror`)
 
 ```
-$ acmlab registry mirror-script import-test --target us.icr.io/acm-mirror > mirror.sh
-# Generates: skopeo copy --all docker://registry.redhat.io/... docker://us.icr.io/acm-mirror/...
+$ acmlab registry mirror-script import-test --target your-registry.example.com/acm-mirror > mirror.sh
+# Generates: skopeo copy --all docker://registry.redhat.io/... docker://your-registry.example.com/acm-mirror/...
 ```
 
 #### `acmlab registry configure <cluster>`
@@ -377,7 +377,7 @@ $ acmlab registry mirror-script import-test --target us.icr.io/acm-mirror > mirr
 Configures a `ManagedClusterImageRegistry` on the hub so ACM rewrites klusterlet image references before applying them to the spoke. Also creates the required `ManagedClusterSetBinding` and `Placement` (with tolerations for unavailable clusters).
 
 Options:
-- `--mirror` — mirror registry base path (e.g., `us.icr.io/acm-mirror`)
+- `--mirror` — mirror registry base path (e.g., `your-registry.example.com/acm-mirror`)
 - `--pull-secret` — path to pull secret JSON for the mirror registry
 - `--registry` — explicit source=mirror mapping (repeatable, overrides `--mirror`)
 - `--from-file` — YAML file with cluster list (per-item `mirror` and `pullSecretPath` override global flags)
@@ -386,10 +386,10 @@ Options:
 
 ```
 $ acmlab registry configure import-test \
-    --mirror us.icr.io/acm-mirror \
+    --mirror your-registry.example.com/acm-mirror \
     --pull-secret ~/pull-secret.json
 Image registry mirror configured for cluster import-test
-Mirror registry: us.icr.io/acm-mirror
+Mirror registry: your-registry.example.com/acm-mirror
 ```
 
 #### `acmlab registry status <cluster>`
@@ -404,8 +404,8 @@ $ acmlab registry status import-test
 Cluster: import-test
 Mirror configured: true
 Registry mappings:
-  registry.redhat.io/multicluster-engine → us.icr.io/acm-mirror/multicluster-engine
-  registry.redhat.io/rhacm2 → us.icr.io/acm-mirror/rhacm2
+  registry.redhat.io/multicluster-engine → your-registry.example.com/acm-mirror/multicluster-engine
+  registry.redhat.io/rhacm2 → your-registry.example.com/acm-mirror/rhacm2
 ```
 
 #### `acmlab registry remove <cluster>`

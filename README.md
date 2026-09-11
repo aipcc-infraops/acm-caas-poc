@@ -27,7 +27,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-17 | Cost center attribution and budget alerting | 📋 Planned | `internal/cost/` |
 | UC-18 | GPU sharing stack deployment (Kueue + Kyverno) | 📋 Planned | `internal/gpusharing/` |
 | UC-19 | Multi-cluster GPU workload routing via Placement | 📋 Planned | `internal/gpurouting/` |
-| UC-20 | OpenShift AI version fleet segregation | 📋 Planned | `internal/gpurouting/` |
+| UC-20 | AI platform operator version fleet segregation | 📋 Planned | `internal/gpurouting/` |
 | UC-21 | Elastic GPU capacity (auto-provision on saturation) | 📋 Planned | `internal/gpuelastic/` |
 | UC-22 | ClusterSet management — team isolation | 📋 Planned | `internal/clusterset/` |
 | UC-23 | Multi-architecture cluster matrix (QA) | 📋 Planned | `internal/matrix/` |
