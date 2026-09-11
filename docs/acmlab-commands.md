@@ -18,7 +18,12 @@ local-cluster     True       True    True      4.21.29
 
 #### `acmlab fleet status <name>`
 
-Shows detailed status for a specific cluster: labels, conditions, version.
+Shows detailed status for a specific cluster: labels, conditions, version. Accepts multiple names or `--from-file` for batch.
+
+Options:
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output as JSON array of results
 
 ```
 $ acmlab fleet status spoke1
@@ -63,7 +68,12 @@ Use 'acmlab provision status' to monitor progress.
 
 #### `acmlab provision destroy <name>`
 
-Deletes a spoke cluster by removing its ClusterDeployment. Hive deprovisions infrastructure. For IBM Cloud, auto-cleans IAM Service IDs. Idempotent.
+Deletes a spoke cluster by removing its ClusterDeployment. Hive deprovisions infrastructure. For IBM Cloud, auto-cleans IAM Service IDs. Idempotent. Accepts multiple names or `--from-file`.
+
+Options:
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 #### `acmlab provision status <name>`
 
@@ -153,6 +163,18 @@ Lists cluster resource summaries from ManagedClusterInfo (nodes, CPU, memory).
 
 Shows detailed resource info for a specific cluster.
 
+#### `acmlab monitor setup`
+
+Deploys the observability stack (MinIO + MultiClusterObservability CR) on the hub.
+
+#### `acmlab monitor teardown`
+
+Removes the observability stack and all associated resources.
+
+#### `acmlab monitor obs-status`
+
+Shows the MultiClusterObservability CR status and spoke collection state.
+
 ### Lifecycle
 
 #### `acmlab lifecycle hibernate <cluster-name>`
@@ -163,6 +185,9 @@ Options:
 - `--namespace`, `-n` — cluster namespace (defaults to cluster name)
 - `--wait` — wait for hibernation to complete
 - `--timeout` — timeout for wait operation (default: 10m)
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab lifecycle hibernate spoke2
@@ -179,6 +204,9 @@ Options:
 - `--namespace`, `-n` — cluster namespace (defaults to cluster name)
 - `--wait` — wait for resume to complete, then recover expired certificates
 - `--timeout` — timeout for wait operation (default: 15m)
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab lifecycle resume spoke2 --wait
@@ -257,6 +285,9 @@ Options:
 - `--cluster-set` — ManagedClusterSet to assign (default: "default")
 - `--wait` — wait for import to complete (only with auto-import)
 - `--timeout` — timeout for wait operation (default: 10m)
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab import cluster import-test --kubeconfig-path /tmp/import-test.kubeconfig --label cloud=IBM --label vendor=OpenShift --wait
@@ -267,7 +298,12 @@ Cluster successfully imported and available
 
 #### `acmlab import detach <name>`
 
-Detaches a cluster from ACM management. Does NOT destroy the underlying cluster — only removes the ACM registration. ACM cleanup controllers remove the klusterlet from the spoke.
+Detaches a cluster from ACM management. Does NOT destroy the underlying cluster — only removes the ACM registration. ACM cleanup controllers remove the klusterlet from the spoke. Accepts multiple names or `--from-file`.
+
+Options:
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab import detach import-test
@@ -344,6 +380,9 @@ Options:
 - `--mirror` — mirror registry base path (e.g., `us.icr.io/acm-mirror`)
 - `--pull-secret` — path to pull secret JSON for the mirror registry
 - `--registry` — explicit source=mirror mapping (repeatable, overrides `--mirror`)
+- `--from-file` — YAML file with cluster list (per-item `mirror` and `pullSecretPath` override global flags)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab registry configure import-test \
