@@ -378,6 +378,25 @@ $ acmlab registry remove import-test
 Image registry mirror removed for cluster import-test
 ```
 
+### Batch Operations
+
+All commands that take a single cluster name also accept multiple names and a `--from-file` flag.
+
+**Flags available on all commands:**
+- `--from-file <file.yaml>` — YAML file with cluster list
+- `--concurrency <n>` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
+
+**YAML file format:**
+```yaml
+clusters:
+  - spoke1          # plain name
+  - name: spoke2    # or object with per-cluster options
+    kubeconfigPath: /tmp/spoke2.kubeconfig
+    labels:
+      cloud: IBM
+```
+
 ### MCP Server
 
 #### `acmlab mcp serve`

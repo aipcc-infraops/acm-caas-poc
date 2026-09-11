@@ -37,6 +37,13 @@ So that the ComputeRequest controller can automate this
 **Then** Hive deprovisions the cloud infrastructure  
 **And** the ManagedCluster is removed from the hub
 
+### Scenario: Destroy multiple clusters in parallel
+
+**Given** I have three provisioned clusters  
+**When** I run `acmlab provision destroy spoke1 spoke2 spoke3`  
+**Then** all three clusters are destroyed in parallel  
+**And** a summary table shows per-cluster results
+
 ### ACM Go types
 
 ```go
@@ -281,6 +288,13 @@ So that the ComputeRequest controller can implement idle reclamation
 **Then** the operation fails because no ClusterDeployment exists  
 **And** the error is reported clearly to the caller
 
+### Scenario: Hibernate multiple clusters in parallel
+
+**Given** I have three running Hive-provisioned clusters  
+**When** I run `acmlab lifecycle hibernate spoke1 spoke2 spoke3 --wait`  
+**Then** all three clusters are hibernated in parallel  
+**And** a summary table shows per-cluster results
+
 ### Important
 
 Hibernate/resume relies on Hive's `ClusterDeployment.spec.powerState`, which only exists for ACM-provisioned clusters. Imported/registered clusters (UC-07) do not have a Hive-managed ClusterDeployment, so lifecycle operations are not available.
@@ -447,6 +461,14 @@ So that the ComputeRequest controller can manage heterogeneous fleets
 **When** I delete the ManagedCluster resource from the hub  
 **Then** the klusterlet agent is removed from the external cluster  
 **And** the cluster operates independently without ACM management
+
+### Scenario: Import multiple clusters in parallel from a file
+
+**Given** I have a clusters.yaml with three cluster entries  
+**When** I run `acmlab import cluster --from-file clusters.yaml --wait`  
+**Then** all three clusters are imported in parallel  
+**And** a summary table shows NAME / STATUS / MESSAGE per cluster  
+**And** the exit code is non-zero if any cluster failed
 
 ### ACM Go types
 
@@ -900,6 +922,13 @@ So that ACM can import and manage clusters that cannot reach public registries
 **When** I run `acmlab registry remove <cluster>`  
 **Then** the ManagedClusterImageRegistry, Placement, and pull secret are deleted  
 **And** ACM reverts to using original image references
+
+### Scenario: Configure registry mirror for multiple clusters in parallel
+
+**Given** I have mirrored the required images  
+**When** I run `acmlab registry configure --from-file clusters.yaml --mirror quay.io/myorg`  
+**Then** the registry mirror is configured on all clusters in parallel  
+**And** a summary table shows per-cluster results
 
 ### ROKS findings (PoC)
 
