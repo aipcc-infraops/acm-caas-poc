@@ -1615,6 +1615,150 @@ Before implementation, validate: submariner-addon is installed on hub, IBM Cloud
 
 ---
 
+## UC-32: GitOps fleet deployment via ACM ApplicationSet integration
+
+**Feature**: GitOps-driven team tooling deployment using ArgoCD ApplicationSet with ACM Placement as cluster selector
+
+As a platform operator
+I want team tooling to be deployed via Git PRs with automatic drift detection
+So that cluster configuration stays reconciled without manual acmlab commands
+
+### Scenario: Deploy team tooling via GitOps across a ClusterSet
+
+**Given** a git repo contains Kueue configuration for the training team's clusters
+**When** an ApplicationSet targeting the training team's ClusterSet is applied
+**Then** ArgoCD creates an Application per cluster automatically
+**And** configuration drift is detected and corrected continuously
+**And** a git PR to update the config triggers a sync across the fleet
+
+### Why different from ManifestWork
+
+ManifestWork (UC-03, UC-18) is imperative raw-manifest push — no drift detection, no rollback history. ApplicationSet is declarative GitOps — drift is continuously reconciled, rollback is a git revert, and sync health is visible in the ArgoCD dashboard.
+
+### ACM types
+
+`argoproj.io/v1alpha1.ApplicationSet` — with clusterDecisionResource generator pointing to Placement
+`cluster.open-cluster-management.io/v1beta1.Placement` — cluster selection
+`cluster.open-cluster-management.io/v1beta1.PlacementDecision` — consumed by ApplicationSet generator
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.gitops.repoURL = "https://github.com/org/cluster-configs"
+ComputeRequest.spec.gitops.path = "teams/training"
+ComputeRequest.spec.gitops.clusterSet = "team-training"
+  -> controller creates ApplicationSet with clusterDecisionResource generator
+  -> ArgoCD deploys and continuously reconciles team config on all clusters
+  -> controller updates ComputeRequest.status.gitops.syncStatus
+```
+
+---
+
+## UC-33: ManifestWorkReplicaSet with progressive rollout for safe fleet updates
+
+**Feature**: Safe rolling updates of fleet-wide manifests using ManifestWorkReplicaSet rollout strategies
+
+As a platform operator
+I want to update the GPU sharing stack across all clusters in a controlled rollout
+So that a bad manifest update does not take down the entire GPU fleet simultaneously
+
+### Scenario: Progressive rollout of GPU sharing stack update
+
+**Given** the GPU sharing stack is deployed on 20 GPU clusters via ManifestWorkReplicaSet
+**When** a new version of the Kueue configuration is applied
+**Then** the rollout proceeds 2 clusters at a time
+**And** stops automatically if more than 10% of clusters report Degraded health
+**And** operators can inspect and roll back before proceeding
+
+### Scenario: Rollout with CEL-based health check
+
+**Given** a ManifestWorkReplicaSet with a progressDeadline of 5 minutes
+**When** a cluster does not report healthy within the deadline
+**Then** the rollout pauses and alerts the operator
+**And** no additional clusters are updated until the issue is resolved
+
+### Why this matters
+
+Without ManifestWorkReplicaSet, UC-18 (GPU sharing stack) pushes to all clusters simultaneously with no rollback. A bad manifest takes all GPU clusters offline at once. ManifestWorkReplicaSet's Progressive strategy is the production-safe alternative.
+
+### ACM types
+
+`work.open-cluster-management.io/v1alpha1.ManifestWorkReplicaSet` — with RolloutStrategy
+`cluster.open-cluster-management.io/v1beta1.Placement` — cluster selection
+
+### Package
+
+Replaces `work.open-cluster-management.io/v1.ManifestWork` in UC-18 and UC-03 for production use
+
+---
+
+## UC-35: ManagedServiceAccount + cluster-proxy for credential-free spoke access
+
+**Feature**: Automatic short-lived credential provisioning for hub-to-spoke API access without static kubeconfigs
+
+As a platform operator
+I want the hub to access spoke clusters using auto-rotated credentials
+So that no static kubeconfig or long-lived credentials need to be managed per cluster
+
+### Scenario: Hub-initiated spoke access without static credentials
+
+**Given** the ManagedServiceAccount addon is enabled on a spoke cluster
+**When** a hub-side operation needs spoke API access (diagnose, cert recovery, policy automation)
+**Then** the hub authenticates using an automatically rotated short-lived token
+**And** no static kubeconfig for that spoke is required on the hub
+
+### Scenario: Policy automation with auto-provisioned spoke credentials
+
+**Given** PolicyAutomation (UC-30) triggers an Ansible job to remediate a NonCompliant cluster
+**When** the playbook needs to run kubectl commands against the spoke
+**Then** ManagedServiceAccount provides a fresh rotated token to the playbook
+**And** the token expires after the job completes
+
+### ACM types
+
+`authentication.open-cluster-management.io/v1beta1.ManagedServiceAccount`
+`addon.open-cluster-management.io/v1alpha1.ManagedClusterAddOn` — name: managed-serviceaccount, cluster-proxy
+
+### Package
+
+`internal/access/` (to be created; enhances lifecycle, importing, and policyautomation packages)
+
+---
+
+## UC-36: ACM hub backup and restore for disaster recovery
+
+**Feature**: Scheduled backup of all ACM hub state (clusters, policies, manifests) with automated restore
+
+As a platform operator
+I want the ACM hub state to be backed up regularly
+So that the entire fleet can be recovered in minutes if the hub cluster is lost
+
+### Scenario: Hub backup and restore after disaster
+
+**Given** daily hub backups are scheduled to object storage
+**When** the hub cluster is accidentally destroyed
+**Then** restoring the backup on a new cluster reconnects all Hive-provisioned clusters automatically
+**And** imported clusters are flagged for re-import via acmlab batch import
+
+### Scenario: Verify backup completeness
+
+**Given** a hub backup exists
+**When** `acmlab hub backup verify --from <backup>` is run
+**Then** all critical resources (ManagedClusters, ClusterDeployments, Policies, ManifestWorks) are confirmed present
+**And** the backup age and storage location are reported
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1beta1.BackupSchedule`
+`cluster.open-cluster-management.io/v1beta1.Restore`
+OADP `DataProtectionApplication` — for object storage backend (S3, IBM COS)
+
+### Package
+
+`internal/backup/` (to be created)
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -1645,6 +1789,15 @@ Before implementation, validate: submariner-addon is installed on hub, IBM Cloud
 | UC-24  |  Per-team compliance reporting  |  `Policy` + `PlacementBinding` scoped to ClusterSet  |  spec.compliance.clusterSet |
 | UC-25  |  ClusterPool + ClusterClaim (pre-warmed)  |  `hive/v1.ClusterPool` + `hive/v1.ClusterClaim`  |  spec.pool |
 | UC-26  |  Multi-cluster networking (Submariner)  |  `ManagedClusterAddOn` + `SubmarinerConfig`  |  spec.submariner |
+| UC-27  |  Operator version pinning (OperatorPolicy)  |  `policy/v1beta1.OperatorPolicy`  |  spec.operatorPolicy |
+| UC-28  |  Certificate expiry detection fleet-wide  |  `policy/v1.CertificatePolicy`  |  spec.certPolicy |
+| UC-29  |  Security baseline via Gatekeeper/OPA  |  `ManifestWork` + `ConfigurationPolicy` + OPA constraints  |  spec.securityBaseline |
+| UC-30  |  Policy automation (Ansible auto-remediation)  |  `policy/v1beta1.PolicyAutomation`  |  spec.policyAutomation |
+| UC-31  |  SCAP scanning via Compliance Operator  |  `ManifestWork` + `ConfigurationPolicy` + ComplianceScan  |  spec.compliance |
+| UC-32  |  GitOps fleet deployment via ApplicationSet  |  `ApplicationSet` + `Placement` + `PlacementDecision`  |  spec.gitops |
+| UC-33  |  ManifestWorkReplicaSet progressive rollout  |  `work/v1alpha1.ManifestWorkReplicaSet`  |  spec.rollout |
+| UC-35  |  Credential-free spoke access (ManagedServiceAccount)  |  `ManagedServiceAccount` + `cluster-proxy` addon  |  spec.access |
+| UC-36  |  Hub backup and restore  |  `BackupSchedule` + `Restore` + OADP  |  spec.backup |
 
 ## Go Dependencies (for the lab repo)
 
