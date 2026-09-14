@@ -95,6 +95,11 @@ func clusterDeployment(name string) *unstructured.Unstructured {
 				"name":      name,
 				"namespace": name,
 			},
+			"spec": map[string]interface{}{
+				"platform": map[string]interface{}{
+					"aws": map[string]interface{}{},
+				},
+			},
 		},
 	}
 	return obj

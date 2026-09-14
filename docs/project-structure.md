@@ -95,7 +95,18 @@ acm-caas-poc/
 │       └── server_test.go
 │
 ├── features/                      # Gherkin .feature files (for godog)
-│   └── fleet.feature              # UC-04 scenarios
+│   ├── provisioning.feature       # UC-01 scenarios
+│   ├── policy.feature             # UC-02 scenarios
+│   ├── tenant.feature             # UC-03 scenarios
+│   ├── fleet.feature              # UC-04 scenarios
+│   ├── lifecycle.feature          # UC-05 scenarios
+│   ├── monitoring.feature         # UC-06 scenarios
+│   ├── importing.feature          # UC-07 scenarios
+│   ├── scaling.feature            # UC-10 scenarios
+│   └── registry.feature           # UC-13 scenarios
+│
+├── integration/                   # Godog step definitions (//go:build integration)
+│   └── *_steps.go                 # Step defs per UC + test runner
 │
 ├── docs/
 │   ├── specs/
@@ -110,8 +121,25 @@ acm-caas-poc/
 │   │   ├── 006-idempotent-operations.md
 │   │   ├── 007-minio-for-observability-object-storage.md
 │   │   └── 008-configmap-state-machine-for-workflows.md
+│   ├── demos/                      # Interactive demo scripts (phase-based for long ops)
+│   │   ├── demo-uc01-provision.sh
+│   │   ├── demo-uc02-policy.sh
+│   │   ├── demo-uc03-tenant.sh
+│   │   ├── demo-uc04-fleet.sh
+│   │   ├── demo-uc05-lifecycle.sh
+│   │   ├── demo-uc06-monitoring.sh
+│   │   ├── demo-uc07-import.sh
+│   │   ├── demo-uc10-scaling.sh
+│   │   └── demo-uc13-registry.sh
 │   ├── manual/                     # Kubectl/curl manual reference scripts per UC
+│   │   ├── uc-01-provision.sh
+│   │   ├── uc-02-policy.sh
+│   │   ├── uc-03-tenant.sh
+│   │   ├── uc-04-fleet.sh
+│   │   ├── uc-05-lifecycle.sh
+│   │   ├── uc-06-monitoring.sh
 │   │   ├── uc-07-import-detach.sh
+│   │   ├── uc-10-scaling.sh
 │   │   └── uc-13-registry-mirror.sh
 │   ├── project-structure.md        # This file
 │   └── acmlab-commands.md          # CLI + MCP command reference
