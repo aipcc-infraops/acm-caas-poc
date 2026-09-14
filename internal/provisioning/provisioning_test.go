@@ -2,14 +2,19 @@ package provisioning
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -350,3 +355,447 @@ func TestCreateWithSSHKey(t *testing.T) {
 		t.Fatalf("SSH private key secret not created: %v", err)
 	}
 }
+
+func TestWaitForProvisionInstalled(t *testing.T) {
+	c := fakeClient()
+	fakeD := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+
+	watcher := watch.NewFake()
+	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	cfg := testConfig()
+	cfg.ProvisionTimeout = 5 * time.Second
+	m := New(c, cfg)
+
+	go func() {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+		})
+		obj.SetName("spoke1")
+		obj.SetNamespace("spoke1")
+		obj.Object["status"] = map[string]interface{}{
+			"installed": true,
+		}
+		watcher.Modify(obj)
+	}()
+
+	err := m.WaitForProvision(context.Background(), "spoke1", 0)
+	if err != nil {
+		t.Fatalf("WaitForProvision failed: %v", err)
+	}
+}
+
+func TestWaitForProvisionFailure(t *testing.T) {
+	c := fakeClient()
+	fakeD := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+
+	watcher := watch.NewFake()
+	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	m := New(c, testConfig())
+
+	go func() {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+		})
+		obj.SetName("spoke1")
+		obj.SetNamespace("spoke1")
+		obj.Object["status"] = map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{
+					"type":   "ProvisionFailed",
+					"status": "True",
+					"reason": "QuotaExceeded",
+				},
+			},
+		}
+		watcher.Modify(obj)
+	}()
+
+	err := m.WaitForProvision(context.Background(), "spoke1", 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for provision failure")
+	}
+	if !strings.Contains(err.Error(), "QuotaExceeded") {
+		t.Errorf("expected QuotaExceeded in error, got: %v", err)
+	}
+}
+
+func TestWaitForProvisionTimeout(t *testing.T) {
+	c := fakeClient()
+	fakeD := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+
+	watcher := watch.NewFake()
+	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	m := New(c, testConfig())
+
+	err := m.WaitForProvision(context.Background(), "spoke1", 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+}
+
+func TestWaitForProvisionChannelClosed(t *testing.T) {
+	c := fakeClient()
+	fakeD := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+
+	watcher := watch.NewFake()
+	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	m := New(c, testConfig())
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		watcher.Stop()
+	}()
+
+	err := m.WaitForProvision(context.Background(), "spoke1", 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for closed channel")
+	}
+	if !strings.Contains(err.Error(), "watch channel closed") {
+		t.Errorf("expected channel closed error, got: %v", err)
+	}
+}
+
+func TestWaitForProvisionDefaultTimeout(t *testing.T) {
+	c := fakeClient()
+	fakeD := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+
+	watcher := watch.NewFake()
+	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	cfg := testConfig()
+	cfg.ProvisionTimeout = 100 * time.Millisecond
+	m := New(c, cfg)
+
+	// timeout=0 should use cfg.ProvisionTimeout
+	err := m.WaitForProvision(context.Background(), "spoke1", 0)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+}
+
+func TestWaitForProvisionNotYetInstalled(t *testing.T) {
+	c := fakeClient()
+	fakeD := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+
+	watcher := watch.NewFake()
+	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	cfg := testConfig()
+	cfg.ProvisionTimeout = 5 * time.Second
+	m := New(c, cfg)
+
+	go func() {
+		// First event: not yet installed
+		obj1 := &unstructured.Unstructured{}
+		obj1.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+		})
+		obj1.SetName("spoke1")
+		obj1.Object["status"] = map[string]interface{}{
+			"installed": false,
+		}
+		watcher.Modify(obj1)
+
+		// Second event: installed
+		time.Sleep(50 * time.Millisecond)
+		obj2 := &unstructured.Unstructured{}
+		obj2.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+		})
+		obj2.SetName("spoke1")
+		obj2.Object["status"] = map[string]interface{}{
+			"installed": true,
+		}
+		watcher.Modify(obj2)
+	}()
+
+	err := m.WaitForProvision(context.Background(), "spoke1", 0)
+	if err != nil {
+		t.Fatalf("WaitForProvision failed: %v", err)
+	}
+}
+
+func TestCreateUnsupportedPlatform(t *testing.T) {
+	c := fakeClient()
+	m := New(c, config.Config{})
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "spoke1",
+		Platform:   "vmware",
+		PullSecret: `{"auths":{}}`,
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported platform")
+	}
+	if !strings.Contains(err.Error(), "unsupported platform") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateAWSPlatform(t *testing.T) {
+	c := fakeClient()
+	cfg := testConfig()
+	cfg.Platform = "aws"
+	cfg.IBMCloudAPIKey = ""
+	m := New(c, cfg)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "aws1",
+		Platform:   "aws",
+		PullSecret: `{"auths":{}}`,
+		Region:     "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	cd, err := c.Get(context.Background(), client.GVRClusterDeployment, "aws1", "aws1")
+	if err != nil {
+		t.Fatalf("ClusterDeployment not created: %v", err)
+	}
+	spec, _ := cd.Object["spec"].(map[string]interface{})
+	platform, _ := spec["platform"].(map[string]interface{})
+	if _, ok := platform["aws"]; !ok {
+		t.Error("expected aws platform block")
+	}
+	// Verify no manifests secret created for non-ibmcloud
+	_, err = c.Get(context.Background(), client.GVRSecret, "aws1", "aws1-manifests")
+	if err == nil {
+		t.Error("AWS should not create manifests secret")
+	}
+}
+
+func TestCreateGCPPlatform(t *testing.T) {
+	c := fakeClient()
+	cfg := testConfig()
+	cfg.Platform = "gcp"
+	cfg.IBMCloudAPIKey = ""
+	m := New(c, cfg)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "gcp1",
+		Platform:   "gcp",
+		PullSecret: `{"auths":{}}`,
+		Region:     "us-central1",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+}
+
+func TestCreateAzurePlatform(t *testing.T) {
+	c := fakeClient()
+	cfg := testConfig()
+	cfg.Platform = "azure"
+	cfg.IBMCloudAPIKey = ""
+	m := New(c, cfg)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "azure1",
+		Platform:   "azure",
+		PullSecret: `{"auths":{}}`,
+		Region:     "eastus",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+}
+
+func TestStatusNotFound(t *testing.T) {
+	c := fakeClient()
+	m := New(c, testConfig())
+
+	_, err := m.Status(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent cluster")
+	}
+}
+
+func TestListEmpty(t *testing.T) {
+	c := fakeClient()
+	m := New(c, testConfig())
+
+	clusters, err := m.List(context.Background())
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(clusters) != 0 {
+		t.Errorf("expected 0 clusters, got %d", len(clusters))
+	}
+}
+
+func TestListImageSetsEmpty(t *testing.T) {
+	c := fakeClient()
+	m := New(c, testConfig())
+
+	sets, err := m.ListImageSets(context.Background())
+	if err != nil {
+		t.Fatalf("ListImageSets failed: %v", err)
+	}
+	if len(sets) != 0 {
+		t.Errorf("expected 0 image sets, got %d", len(sets))
+	}
+}
+
+func TestParseClusterInfoInstalledTimestamp(t *testing.T) {
+	obj := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "test",
+			"namespace": "test",
+		},
+		"spec": map[string]interface{}{},
+		"status": map[string]interface{}{
+			"installed":          false,
+			"installedTimestamp": "2024-01-01T00:00:00Z",
+		},
+	}
+	info := parseClusterInfo(obj)
+	if !info.Installed {
+		t.Error("expected Installed = true when installedTimestamp is present")
+	}
+}
+
+func TestParseClusterInfoEmptyObject(t *testing.T) {
+	info := parseClusterInfo(map[string]interface{}{})
+	if info.Name != "" {
+		t.Errorf("expected empty name, got %s", info.Name)
+	}
+	if info.Installed {
+		t.Error("expected Installed = false")
+	}
+}
+
+func TestParseClusterInfoMultipleConditions(t *testing.T) {
+	obj := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name": "test",
+		},
+		"spec": map[string]interface{}{
+			"platform": map[string]interface{}{
+				"aws": map[string]interface{}{
+					"region": "us-east-1",
+				},
+			},
+		},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+				map[string]interface{}{"type": "Provisioned", "status": "False"},
+				"not-a-map",
+			},
+		},
+	}
+	info := parseClusterInfo(obj)
+	if len(info.Conditions) != 2 {
+		t.Errorf("expected 2 conditions, got %d", len(info.Conditions))
+	}
+	if info.Provisioned {
+		t.Error("expected Provisioned = false")
+	}
+}
+
+func TestParseImageSetInfoEmpty(t *testing.T) {
+	info := parseImageSetInfo(map[string]interface{}{})
+	if info.Name != "" || info.ReleaseImage != "" {
+		t.Error("expected empty ImageSetInfo for empty object")
+	}
+}
+
+func TestDestroyWithoutAPIKey(t *testing.T) {
+	cd := &unstructured.Unstructured{}
+	cd.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+	})
+	cd.SetName("spoke1")
+	cd.SetNamespace("spoke1")
+
+	cfg := testConfig()
+	cfg.IBMCloudAPIKey = ""
+	c := fakeClient(cd)
+	m := New(c, cfg)
+
+	if err := m.Destroy(context.Background(), "spoke1"); err != nil {
+		t.Fatalf("Destroy failed: %v", err)
+	}
+}
+
+func TestCreateIfNotExistsAlreadyExists(t *testing.T) {
+	ns := &unstructured.Unstructured{}
+	ns.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"})
+	ns.SetName("existing")
+
+	c := fakeClient(ns)
+	m := New(c, testConfig())
+
+	newNs := buildNamespace("existing")
+	err := m.createIfNotExists(context.Background(), client.GVRNamespace, "", newNs)
+	if err != nil {
+		t.Fatalf("createIfNotExists should succeed for existing resource: %v", err)
+	}
+}
+
+func TestListMultipleClusters(t *testing.T) {
+	var objs []runtime.Object
+	for i := 0; i < 3; i++ {
+		cd := &unstructured.Unstructured{}
+		cd.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+		})
+		cd.SetName(fmt.Sprintf("spoke%d", i))
+		cd.SetNamespace(fmt.Sprintf("spoke%d", i))
+		cd.SetLabels(map[string]string{"acmlab.redhat.com/managed": "true"})
+		cd.Object["spec"] = map[string]interface{}{}
+		objs = append(objs, cd)
+	}
+
+	c := fakeClient(objs...)
+	m := New(c, testConfig())
+
+	clusters, err := m.List(context.Background())
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(clusters) != 3 {
+		t.Errorf("expected 3 clusters, got %d", len(clusters))
+	}
+}
+
+func TestListMultipleImageSets(t *testing.T) {
+	var objs []runtime.Object
+	for i := 0; i < 3; i++ {
+		imgset := &unstructured.Unstructured{}
+		imgset.SetGroupVersionKind(schema.GroupVersionKind{
+			Group: "hive.openshift.io", Version: "v1", Kind: "ClusterImageSet",
+		})
+		imgset.SetName(fmt.Sprintf("img-%d", i))
+		imgset.Object["spec"] = map[string]interface{}{
+			"releaseImage": fmt.Sprintf("quay.io/ocp:%d", i),
+		}
+		objs = append(objs, imgset)
+	}
+
+	c := fakeClient(objs...)
+	m := New(c, testConfig())
+
+	sets, err := m.ListImageSets(context.Background())
+	if err != nil {
+		t.Fatalf("ListImageSets failed: %v", err)
+	}
+	if len(sets) != 3 {
+		t.Errorf("expected 3 image sets, got %d", len(sets))
+	}
+}
+
+
