@@ -138,13 +138,22 @@ func (m *Manager) GetMachinePool(ctx context.Context, clusterName string) (*Mach
 
 // InitMachinePool creates a MachinePool for an existing Hive cluster.
 // If replicas matches detected worker count, no worker changes will be made.
+// Platform is auto-detected from the ClusterDeployment spec.platform key.
 func (m *Manager) InitMachinePool(ctx context.Context, clusterName, workerType string, replicas int) (*MachinePoolInfo, error) {
-	isHive, err := m.ClusterSupportsScaling(ctx, clusterName)
+	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, clusterName, clusterName)
 	if err != nil {
-		return nil, err
-	}
-	if !isHive {
 		return nil, &ErrNoMachinePool{ClusterName: clusterName, IsHive: false}
+	}
+
+	platform := detectPlatform(cd)
+	if platform == "" {
+		return nil, fmt.Errorf("cannot detect platform from ClusterDeployment %s — spec.platform is empty", clusterName)
+	}
+
+	platformBlock := map[string]interface{}{
+		platform: map[string]interface{}{
+			"type": workerType,
+		},
 	}
 
 	mp := &unstructured.Unstructured{
@@ -161,11 +170,7 @@ func (m *Manager) InitMachinePool(ctx context.Context, clusterName, workerType s
 				},
 				"name":     "worker",
 				"replicas": int64(replicas),
-				"platform": map[string]interface{}{
-					"ibmcloud": map[string]interface{}{
-						"type": workerType,
-					},
-				},
+				"platform": platformBlock,
 			},
 		},
 	}
@@ -176,6 +181,18 @@ func (m *Manager) InitMachinePool(ctx context.Context, clusterName, workerType s
 	}
 
 	return m.GetMachinePool(ctx, clusterName)
+}
+
+var knownPlatforms = []string{"ibmcloud", "aws", "gcp", "azure", "openstack", "vsphere", "ovirt"}
+
+func detectPlatform(cd *unstructured.Unstructured) string {
+	platformMap, _, _ := unstructured.NestedMap(cd.Object, "spec", "platform")
+	for _, p := range knownPlatforms {
+		if _, ok := platformMap[p]; ok {
+			return p
+		}
+	}
+	return ""
 }
 
 // SetReplicas patches the MachinePool replicas count and removes autoscaling if active.
@@ -275,7 +292,7 @@ func machinePoolInfoFromUnstructured(mp *unstructured.Unstructured) MachinePoolI
 		info.MaxSize = &v
 	}
 
-	for _, platform := range []string{"ibmvpc", "aws", "gcp", "azure"} {
+	for _, platform := range []string{"ibmcloud", "ibmvpc", "aws", "gcp", "azure"} {
 		if _, found, _ := unstructured.NestedMap(mp.Object, "spec", "platform", platform); found {
 			info.Platform = platform
 			break
