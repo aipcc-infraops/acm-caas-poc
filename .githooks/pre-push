@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Coverage thresholds: 90% business logic, 70% glue code
+declare -A THRESHOLDS=(
+  [internal/batch]=90
+  [internal/config]=90
+  [internal/fleet]=90
+  [internal/importing]=90
+  [internal/lifecycle]=90
+  [internal/monitoring]=90
+  [internal/observability]=90
+  [internal/policy]=90
+  [internal/provisioning]=90
+  [internal/registry]=90
+  [internal/scaling]=90
+  [internal/tenant]=90
+  [internal/client]=70
+  [internal/mcp]=70
+)
+
+echo "=== Pre-push: running tests with coverage ==="
+
+FAILED=0
+RESULTS=""
+
+for pkg in "${!THRESHOLDS[@]}"; do
+  threshold=${THRESHOLDS[$pkg]}
+  output=$(go test "./$pkg/..." -cover 2>&1) || {
+    echo "FAIL: $pkg — tests failed"
+    echo "$output"
+    FAILED=1
+    continue
+  }
+
+  coverage=$(echo "$output" | grep -oP 'coverage: \K[0-9]+\.[0-9]+' | head -1)
+  if [ -z "$coverage" ]; then
+    echo "WARN: $pkg — no coverage data (no test files?)"
+    continue
+  fi
+
+  pass=$(awk "BEGIN {print ($coverage >= $threshold) ? 1 : 0}")
+  if [ "$pass" -eq 0 ]; then
+    RESULTS+="  FAIL  $pkg: ${coverage}% < ${threshold}%\n"
+    FAILED=1
+  else
+    RESULTS+="  OK    $pkg: ${coverage}% >= ${threshold}%\n"
+  fi
+done
+
+echo ""
+echo "=== Coverage Report ==="
+echo -e "$RESULTS"
+
+if [ "$FAILED" -ne 0 ]; then
+  echo "Push rejected: coverage thresholds not met."
+  echo "Fix failing tests or raise coverage before pushing."
+  exit 1
+fi
+
+echo "All thresholds met. Pushing."
