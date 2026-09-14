@@ -54,6 +54,25 @@ acm-caas-poc/
 │   │   ├── builder.go             # Builds MultiClusterObservability + object storage Secret
 │   │   └── observability_test.go
 │   │
+│   ├── lifecycle/                 # UC-05: Cluster lifecycle (hibernate/resume)
+│   │   ├── lifecycle.go           # Manager — Hibernate, Resume, GetPowerState, WaitForPowerState
+│   │   ├── recovery.go            # PostResumeRecovery — approves expired kubelet CSRs
+│   │   └── lifecycle_test.go
+│   │
+│   ├── importing/                 # UC-07: External cluster import
+│   │   ├── importing.go           # Manager — Import, Detach, WaitForImport, GetImportStatus, ListImported
+│   │   └── importing_test.go
+│   │
+│   ├── registry/                  # UC-13: Registry mirror (ROKS, air-gapped)
+│   │   ├── registry.go            # Manager — ListRequiredImages, ConfigureMirror, RemoveMirror, GenerateMirrorScript
+│   │   └── registry_test.go
+│   │
+│   ├── batch/                     # Batch/parallel operations (shared CLI utility)
+│   │   ├── batch.go               # Execute(), PrintSummary(), ToJSON()
+│   │   ├── loader.go              # LoadFile(), NamesFromArgs(), ClusterItem
+│   │   ├── batch_test.go
+│   │   └── loader_test.go
+│   │
 │   └── mcp/
 │       ├── server.go              # NewServer() — registers all MCP tools
 │       └── server_test.go
@@ -72,6 +91,9 @@ acm-caas-poc/
 │   │   ├── 005-uc-packages-as-controller-foundation.md
 │   │   ├── 006-idempotent-operations.md
 │   │   └── 007-minio-for-observability-object-storage.md
+│   ├── manual/                     # Kubectl/curl manual reference scripts per UC
+│   │   ├── uc-07-import-detach.sh
+│   │   └── uc-13-registry-mirror.sh
 │   ├── project-structure.md        # This file
 │   └── acmlab-commands.md          # CLI + MCP command reference
 │

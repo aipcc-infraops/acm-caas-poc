@@ -18,7 +18,12 @@ local-cluster     True       True    True      4.21.29
 
 #### `acmlab fleet status <name>`
 
-Shows detailed status for a specific cluster: labels, conditions, version.
+Shows detailed status for a specific cluster: labels, conditions, version. Accepts multiple names or `--from-file` for batch.
+
+Options:
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output as JSON array of results
 
 ```
 $ acmlab fleet status spoke1
@@ -63,7 +68,12 @@ Use 'acmlab provision status' to monitor progress.
 
 #### `acmlab provision destroy <name>`
 
-Deletes a spoke cluster by removing its ClusterDeployment. Hive deprovisions infrastructure. For IBM Cloud, auto-cleans IAM Service IDs. Idempotent.
+Deletes a spoke cluster by removing its ClusterDeployment. Hive deprovisions infrastructure. For IBM Cloud, auto-cleans IAM Service IDs. Idempotent. Accepts multiple names or `--from-file`.
+
+Options:
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 #### `acmlab provision status <name>`
 
@@ -153,6 +163,18 @@ Lists cluster resource summaries from ManagedClusterInfo (nodes, CPU, memory).
 
 Shows detailed resource info for a specific cluster.
 
+#### `acmlab monitor setup`
+
+Deploys the observability stack (MinIO + MultiClusterObservability CR) on the hub.
+
+#### `acmlab monitor teardown`
+
+Removes the observability stack and all associated resources.
+
+#### `acmlab monitor obs-status`
+
+Shows the MultiClusterObservability CR status and spoke collection state.
+
 ### Lifecycle
 
 #### `acmlab lifecycle hibernate <cluster-name>`
@@ -163,6 +185,9 @@ Options:
 - `--namespace`, `-n` — cluster namespace (defaults to cluster name)
 - `--wait` — wait for hibernation to complete
 - `--timeout` — timeout for wait operation (default: 10m)
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab lifecycle hibernate spoke2
@@ -179,6 +204,9 @@ Options:
 - `--namespace`, `-n` — cluster namespace (defaults to cluster name)
 - `--wait` — wait for resume to complete, then recover expired certificates
 - `--timeout` — timeout for wait operation (default: 15m)
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab lifecycle resume spoke2 --wait
@@ -257,6 +285,9 @@ Options:
 - `--cluster-set` — ManagedClusterSet to assign (default: "default")
 - `--wait` — wait for import to complete (only with auto-import)
 - `--timeout` — timeout for wait operation (default: 10m)
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab import cluster import-test --kubeconfig-path /tmp/import-test.kubeconfig --label cloud=IBM --label vendor=OpenShift --wait
@@ -267,7 +298,12 @@ Cluster successfully imported and available
 
 #### `acmlab import detach <name>`
 
-Detaches a cluster from ACM management. Does NOT destroy the underlying cluster — only removes the ACM registration. ACM cleanup controllers remove the klusterlet from the spoke.
+Detaches a cluster from ACM management. Does NOT destroy the underlying cluster — only removes the ACM registration. ACM cleanup controllers remove the klusterlet from the spoke. Accepts multiple names or `--from-file`.
+
+Options:
+- `--from-file` — YAML file with cluster list (see Batch Operations section)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab import detach import-test
@@ -329,11 +365,11 @@ Images required by ACM on import-test (6):
 Generates a bash script with `skopeo copy` commands to mirror all required images from `registry.redhat.io` to a target registry.
 
 Options:
-- `--target` — target mirror registry (required, e.g., `us.icr.io/acm-mirror`)
+- `--target` — target mirror registry (required, e.g., `your-registry.example.com/acm-mirror`)
 
 ```
-$ acmlab registry mirror-script import-test --target us.icr.io/acm-mirror > mirror.sh
-# Generates: skopeo copy --all docker://registry.redhat.io/... docker://us.icr.io/acm-mirror/...
+$ acmlab registry mirror-script import-test --target your-registry.example.com/acm-mirror > mirror.sh
+# Generates: skopeo copy --all docker://registry.redhat.io/... docker://your-registry.example.com/acm-mirror/...
 ```
 
 #### `acmlab registry configure <cluster>`
@@ -341,16 +377,19 @@ $ acmlab registry mirror-script import-test --target us.icr.io/acm-mirror > mirr
 Configures a `ManagedClusterImageRegistry` on the hub so ACM rewrites klusterlet image references before applying them to the spoke. Also creates the required `ManagedClusterSetBinding` and `Placement` (with tolerations for unavailable clusters).
 
 Options:
-- `--mirror` — mirror registry base path (e.g., `us.icr.io/acm-mirror`)
+- `--mirror` — mirror registry base path (e.g., `your-registry.example.com/acm-mirror`)
 - `--pull-secret` — path to pull secret JSON for the mirror registry
 - `--registry` — explicit source=mirror mapping (repeatable, overrides `--mirror`)
+- `--from-file` — YAML file with cluster list (per-item `mirror` and `pullSecretPath` override global flags)
+- `--concurrency int` — max parallel operations (default 5, max 20)
+- `--json` — output results as JSON array
 
 ```
 $ acmlab registry configure import-test \
-    --mirror us.icr.io/acm-mirror \
+    --mirror your-registry.example.com/acm-mirror \
     --pull-secret ~/pull-secret.json
 Image registry mirror configured for cluster import-test
-Mirror registry: us.icr.io/acm-mirror
+Mirror registry: your-registry.example.com/acm-mirror
 ```
 
 #### `acmlab registry status <cluster>`
@@ -365,8 +404,8 @@ $ acmlab registry status import-test
 Cluster: import-test
 Mirror configured: true
 Registry mappings:
-  registry.redhat.io/multicluster-engine → us.icr.io/acm-mirror/multicluster-engine
-  registry.redhat.io/rhacm2 → us.icr.io/acm-mirror/rhacm2
+  registry.redhat.io/multicluster-engine → your-registry.example.com/acm-mirror/multicluster-engine
+  registry.redhat.io/rhacm2 → your-registry.example.com/acm-mirror/rhacm2
 ```
 
 #### `acmlab registry remove <cluster>`
@@ -415,6 +454,10 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_hub_health` | UC-04 | Checks hub connectivity by listing CRDs |
 | `acm_list_cluster_resources` | UC-06 | Resource summary for all clusters |
 | `acm_cluster_resources` | UC-06 | Detailed node/CPU/memory for a specific cluster |
+| `acm_deploy_tenant` | UC-03 | Deploys tenant isolation (namespace, RBAC, network policy, quota) to a spoke via ManifestWork |
+| `acm_remove_tenant` | UC-03 | Removes tenant isolation from a spoke cluster |
+| `acm_list_tenants` | UC-03 | Lists tenants deployed to a spoke cluster with sync status |
+| `acm_tenant_status` | UC-03 | Detailed tenant ManifestWork sync status with per-resource results |
 | `acm_list_policies` | UC-02 | Lists governance policies |
 | `acm_get_policy` | UC-02 | Gets policy details and compliance |
 | `acm_apply_policy` | UC-02 | Creates/updates image registry policy |

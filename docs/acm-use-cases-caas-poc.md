@@ -1,6 +1,5 @@
 # ACM Use Cases — ACM CaaS PoC
 
-> AIPCC-29876 — Epic: AIPCC-29817
 >
 > Use cases to validate ACM capabilities for the CaaS platform.
 > Each use case exercises ACM's Go API (`open-cluster-management.io/api`,
@@ -733,13 +732,13 @@ So that the CaaS platform can charge teams for actual usage
 ### Scenario: Calculate CPU-hours per cluster over a time period
 
 **Given** Thanos metrics are available via the MCO observability stack  
-**When** I query total CPU usage for cluster infraops1 over the last 7 days  
+**When** I query total CPU usage for cluster cluster-1 over the last 7 days  
 **Then** I get the aggregate CPU-hours consumed  
 **And** the result is broken down by day
 
 ### Scenario: Calculate resource usage per tenant namespace
 
-**Given** tenant team-alpha has a namespace on cluster infraops1  
+**Given** tenant team-alpha has a namespace on cluster cluster-1  
 **When** I query CPU and memory usage for namespace team-alpha over the last 30 days  
 **Then** I get CPU-hours and memory-GiB-hours for the tenant  
 **And** I can compare usage against the tenant's ResourceQuota limits
@@ -1181,7 +1180,7 @@ So that we can generate monthly chargeback reports and alert when teams exceed t
 ### ComputeRequest controller equivalent
 
 ```
-ComputeRequest.spec.billing.costCenter = "rhoai-platform"
+ComputeRequest.spec.billing.costCenter = "engineering-platform"
 ComputeRequest.spec.billing.monthlyBudgetUSD = 5000
   -> controller stamps cost center labels on ManagedCluster
   -> Thanos aggregates usage by cost-center label
@@ -1288,54 +1287,54 @@ ComputeRequest.spec.gpu.count = 8
 
 ---
 
-## UC-20: OpenShift AI (ROI) version fleet segregation
+## UC-20: AI platform operator version fleet segregation
 
-**Feature**: Manage GPU clusters segregated by ROI version to support multi-version testing without cluster sharing conflicts
+**Feature**: Manage GPU clusters segregated by operator version to support multi-version testing without cluster sharing conflicts
 
 As a platform operator
-I want each GPU cluster to run a specific ROI version
-So that teams testing different ROI versions can get dedicated capacity without operator conflicts
+I want each GPU cluster to run a specific operator version
+So that teams testing different operator versions can get dedicated capacity without operator conflicts
 
-### Scenario: Route workload to cluster with specific ROI version
+### Scenario: Route workload to cluster with specific operator version
 
-**Given** GPU clusters are labelled `rhoai-version=2.17`, `rhoai-version=2.18`, `rhoai-build=nightly`
-**When** a team requests a GPU environment with ROI 2.18
-**Then** Placement selects only clusters with `rhoai-version=2.18`
+**Given** GPU clusters are labelled `ai-platform-version=2.17`, `ai-platform-version=2.18`, `ai-platform-build=nightly`
+**When** a team requests a GPU environment with operator version 2.18
+**Then** Placement selects only clusters with `ai-platform-version=2.18`
 **And** the workload is submitted to the matched cluster
 
-### Scenario: Enforce single ROI version per cluster
+### Scenario: Enforce single operator version per cluster
 
-**Given** a GPU cluster has `rhoai-version=2.17`
-**When** someone tries to install ROI 2.18 on the same cluster
+**Given** a GPU cluster has `ai-platform-version=2.17`
+**When** someone tries to install operator version 2.18 on the same cluster
 **Then** a ConfigurationPolicy detects the version mismatch
 **And** the cluster is marked NonCompliant with remediation instructions
 
-### Scenario: Provision new cluster for new ROI version
+### Scenario: Provision new cluster for new operator version
 
-**Given** ROI 2.19 is released and no GPU cluster has it
-**When** the first request for ROI 2.19 arrives
+**Given** operator version 2.19 is released and no GPU cluster has it
+**When** the first request for operator version 2.19 arrives
 **Then** the controller provisions a new GPU cluster (UC-01)
-**And** deploys ROI 2.19 via ManifestWork
-**And** labels the cluster `rhoai-version=2.19`
+**And** deploys operator version 2.19 via ManifestWork
+**And** labels the cluster `ai-platform-version=2.19`
 **And** adds it to the GPU routing pool (UC-19)
 
 ### Context (from InfraOps Strategy Day)
 
-ROI is a cluster-wide operator — only one version can be installed per cluster. Different testing teams (nightly builds, weekly builds, stable versions) require different versions simultaneously. Segregation by cluster is the only viable approach without operator conflict.
+The AI platform operator is a cluster-wide operator — only one version can be installed per cluster. Different testing teams (nightly builds, weekly builds, stable versions) require different versions simultaneously. Segregation by cluster is the only viable approach without operator conflict.
 
 ### ACM types
 
-`cluster.open-cluster-management.io/v1.ManagedCluster` — `rhoai-version`, `rhoai-channel`, `rhoai-build` labels
-`policy.open-cluster-management.io/v1.ConfigurationPolicy` — enforce single ROI version per cluster
-`cluster.open-cluster-management.io/v1beta1.Placement` — route by ROI version label
-`work.open-cluster-management.io/v1.ManifestWork` — deploy ROI operator to new GPU cluster
+`cluster.open-cluster-management.io/v1.ManagedCluster` — `ai-platform-version`, `ai-platform-channel`, `ai-platform-build` labels
+`policy.open-cluster-management.io/v1.ConfigurationPolicy` — enforce single operator version per cluster
+`cluster.open-cluster-management.io/v1beta1.Placement` — route by operator version label
+`work.open-cluster-management.io/v1.ManifestWork` — deploy the AI platform operator to new GPU cluster
 
 ### ComputeRequest controller equivalent
 
 ```
-ComputeRequest.spec.gpu.rhoaiVersion = "2.18"
-  -> controller creates Placement with rhoai-version=2.18 predicate
-  -> if no cluster matches: provisions new GPU cluster + deploys ROI 2.18 (UC-01)
+ComputeRequest.spec.gpu.aiPlatformVersion = "2.18"
+  -> controller creates Placement with ai-platform-version=2.18 predicate
+  -> if no cluster matches: provisions new GPU cluster + deploys operator version 2.18 (UC-01)
   -> controller labels new cluster and adds to routing pool
   -> controller routes workload to matched cluster
 ```
@@ -1454,7 +1453,7 @@ ComputeRequest.spec.team = "serving"
 
 ## UC-23: Multi-architecture cluster matrix provisioning (QA)
 
-**Feature**: Automated provisioning of a version × architecture × ROI matrix of clusters for QA regression testing
+**Feature**: Automated provisioning of a version × architecture × operator version matrix of clusters for QA regression testing
 
 As a QA engineer
 I want to provision a full test matrix of clusters with one command
@@ -1462,16 +1461,16 @@ So that I can run regression tests across all supported combinations
 
 ### Scenario: Provision a version × architecture matrix
 
-**Given** a matrix.yaml specifying OCP versions [4.18, 4.19], architectures [amd64, ppc64le], and ROI versions [3.4, 3.5]
+**Given** a matrix.yaml specifying OCP versions [4.18, 4.19], architectures [amd64, ppc64le], and operator versions [3.4, 3.5]
 **When** I run `acmlab matrix provision --from-file matrix.yaml`
 **Then** all combinations are provisioned in parallel (8 clusters)
-**And** each cluster is labelled with `ocp-version`, `arch`, `rhoai-version`
+**And** each cluster is labelled with `ocp-version`, `arch`, `ai-platform-version`
 **And** a summary table shows per-combination status
 
 ### Scenario: Route a test workload to a specific combination
 
 **Given** the matrix clusters are Running
-**When** a Placement specifies `ocp-version=4.19`, `arch=amd64`, `rhoai-version=3.5`
+**When** a Placement specifies `ocp-version=4.19`, `arch=amd64`, `ai-platform-version=3.5`
 **Then** the Placement selects exactly the matching cluster
 **And** the test workload is dispatched to that cluster
 
@@ -1484,7 +1483,7 @@ So that I can run regression tests across all supported combinations
 ### ACM types
 
 `hive.openshift.io/v1.ClusterDeployment` — one per matrix cell (reuses UC-01)
-`cluster.open-cluster-management.io/v1.ManagedCluster` — labels: `ocp-version`, `arch`, `rhoai-version`
+`cluster.open-cluster-management.io/v1.ManagedCluster` — labels: `ocp-version`, `arch`, `ai-platform-version`
 `cluster.open-cluster-management.io/v1beta1.Placement` — combined label predicate routing
 
 ### Package
@@ -1602,7 +1601,7 @@ So that distributed training jobs (PyTorch distributed, Ray, Kueue multi-cluster
 
 ### Spike required
 
-Before implementation, validate: submariner-addon is installed on hub, IBM Cloud VPC firewall allows IPSec/VXLAN ports, existing RHOAI Submariner usage.
+Before implementation, validate: submariner-addon is installed on hub, IBM Cloud VPC firewall allows IPSec/VXLAN ports, 
 
 ### ACM types
 
@@ -1613,6 +1612,223 @@ Before implementation, validate: submariner-addon is installed on hub, IBM Cloud
 ### Package
 
 `internal/submariner/` (to be created after spike)
+
+---
+
+## UC-32: GitOps fleet deployment via ACM ApplicationSet integration
+
+**Feature**: GitOps-driven team tooling deployment using ArgoCD ApplicationSet with ACM Placement as cluster selector
+
+As a platform operator
+I want team tooling to be deployed via Git PRs with automatic drift detection
+So that cluster configuration stays reconciled without manual acmlab commands
+
+### Scenario: Deploy team tooling via GitOps across a ClusterSet
+
+**Given** a git repo contains Kueue configuration for the training team's clusters
+**When** an ApplicationSet targeting the training team's ClusterSet is applied
+**Then** ArgoCD creates an Application per cluster automatically
+**And** configuration drift is detected and corrected continuously
+**And** a git PR to update the config triggers a sync across the fleet
+
+### Why different from ManifestWork
+
+ManifestWork (UC-03, UC-18) is imperative raw-manifest push — no drift detection, no rollback history. ApplicationSet is declarative GitOps — drift is continuously reconciled, rollback is a git revert, and sync health is visible in the ArgoCD dashboard.
+
+### ACM types
+
+`argoproj.io/v1alpha1.ApplicationSet` — with clusterDecisionResource generator pointing to Placement
+`cluster.open-cluster-management.io/v1beta1.Placement` — cluster selection
+`cluster.open-cluster-management.io/v1beta1.PlacementDecision` — consumed by ApplicationSet generator
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.gitops.repoURL = "https://github.com/org/cluster-configs"
+ComputeRequest.spec.gitops.path = "teams/training"
+ComputeRequest.spec.gitops.clusterSet = "team-training"
+  -> controller creates ApplicationSet with clusterDecisionResource generator
+  -> ArgoCD deploys and continuously reconciles team config on all clusters
+  -> controller updates ComputeRequest.status.gitops.syncStatus
+```
+
+---
+
+## UC-33: ManifestWorkReplicaSet with progressive rollout for safe fleet updates
+
+**Feature**: Safe rolling updates of fleet-wide manifests using ManifestWorkReplicaSet rollout strategies
+
+As a platform operator
+I want to update the GPU sharing stack across all clusters in a controlled rollout
+So that a bad manifest update does not take down the entire GPU fleet simultaneously
+
+### Scenario: Progressive rollout of GPU sharing stack update
+
+**Given** the GPU sharing stack is deployed on 20 GPU clusters via ManifestWorkReplicaSet
+**When** a new version of the Kueue configuration is applied
+**Then** the rollout proceeds 2 clusters at a time
+**And** stops automatically if more than 10% of clusters report Degraded health
+**And** operators can inspect and roll back before proceeding
+
+### Scenario: Rollout with CEL-based health check
+
+**Given** a ManifestWorkReplicaSet with a progressDeadline of 5 minutes
+**When** a cluster does not report healthy within the deadline
+**Then** the rollout pauses and alerts the operator
+**And** no additional clusters are updated until the issue is resolved
+
+### Why this matters
+
+Without ManifestWorkReplicaSet, UC-18 (GPU sharing stack) pushes to all clusters simultaneously with no rollback. A bad manifest takes all GPU clusters offline at once. ManifestWorkReplicaSet's Progressive strategy is the production-safe alternative.
+
+### ACM types
+
+`work.open-cluster-management.io/v1alpha1.ManifestWorkReplicaSet` — with RolloutStrategy
+`cluster.open-cluster-management.io/v1beta1.Placement` — cluster selection
+
+### Package
+
+Replaces `work.open-cluster-management.io/v1.ManifestWork` in UC-18 and UC-03 for production use
+
+---
+
+## UC-35: ManagedServiceAccount + cluster-proxy for credential-free spoke access
+
+**Feature**: Automatic short-lived credential provisioning for hub-to-spoke API access without static kubeconfigs
+
+As a platform operator
+I want the hub to access spoke clusters using auto-rotated credentials
+So that no static kubeconfig or long-lived credentials need to be managed per cluster
+
+### Scenario: Hub-initiated spoke access without static credentials
+
+**Given** the ManagedServiceAccount addon is enabled on a spoke cluster
+**When** a hub-side operation needs spoke API access (diagnose, cert recovery, policy automation)
+**Then** the hub authenticates using an automatically rotated short-lived token
+**And** no static kubeconfig for that spoke is required on the hub
+
+### Scenario: Policy automation with auto-provisioned spoke credentials
+
+**Given** PolicyAutomation (UC-30) triggers an Ansible job to remediate a NonCompliant cluster
+**When** the playbook needs to run kubectl commands against the spoke
+**Then** ManagedServiceAccount provides a fresh rotated token to the playbook
+**And** the token expires after the job completes
+
+### ACM types
+
+`authentication.open-cluster-management.io/v1beta1.ManagedServiceAccount`
+`addon.open-cluster-management.io/v1alpha1.ManagedClusterAddOn` — name: managed-serviceaccount, cluster-proxy
+
+### Package
+
+`internal/access/` (to be created; enhances lifecycle, importing, and policyautomation packages)
+
+---
+
+## UC-36: ACM hub backup and restore for disaster recovery
+
+**Feature**: Scheduled backup of all ACM hub state (clusters, policies, manifests) with automated restore
+
+As a platform operator
+I want the ACM hub state to be backed up regularly
+So that the entire fleet can be recovered in minutes if the hub cluster is lost
+
+### Scenario: Hub backup and restore after disaster
+
+**Given** daily hub backups are scheduled to object storage
+**When** the hub cluster is accidentally destroyed
+**Then** restoring the backup on a new cluster reconnects all Hive-provisioned clusters automatically
+**And** imported clusters are flagged for re-import via acmlab batch import
+
+### Scenario: Verify backup completeness
+
+**Given** a hub backup exists
+**When** `acmlab hub backup verify --from <backup>` is run
+**Then** all critical resources (ManagedClusters, ClusterDeployments, Policies, ManifestWorks) are confirmed present
+**And** the backup age and storage location are reported
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1beta1.BackupSchedule`
+`cluster.open-cluster-management.io/v1beta1.Restore`
+OADP `DataProtectionApplication` — for object storage backend (S3, IBM COS)
+
+### Package
+
+`internal/backup/` (to be created)
+
+---
+
+## UC-37: Worker node flavor change via MachinePool rolling replacement
+
+**Feature**: Change worker node instance type post-provisioning via Hive MachinePool platform update
+
+As a platform operator
+I want to change the worker node flavor of a running cluster
+So that I can right-size compute without reprovisioning the cluster
+
+### Scenario: Change worker instance type
+
+**Given** a cluster has workers of type `bx2-4x16` and needs more CPU
+**When** I run `acmlab scaling set-flavor cluster-1 --worker-type cx2-8x16`
+**Then** Hive creates new workers with the new instance type
+**And** old workers are drained and removed
+**And** the cluster remains available throughout the rolling replacement
+
+### Limitations
+
+- Control plane flavor cannot be changed post-provisioning
+- Only works for Hive-provisioned clusters with a MachinePool
+- For clusters using HyperShift (UC-38), use NodePool flavor update instead
+
+### ACM/Hive types
+
+`hive.openshift.io/v1.MachinePool` — patch `spec.platform.<provider>.type`
+
+### Package
+
+Extends `internal/scaling/` (UC-10)
+
+---
+
+## UC-38: HyperShift (HostedCluster) provisioning — control-plane-free clusters
+
+**Feature**: Provision OCP clusters with hosted control planes using HyperShift, eliminating control plane VM costs
+
+As a platform operator
+I want to provision clusters where the control plane runs as pods on the hub
+So that I reduce cost and provisioning time for short-lived clusters
+
+### Scenario: Provision a HyperShift cluster
+
+**Given** the hypershift-addon is enabled on the ACM hub
+**When** I run `acmlab provision create cluster-1 --type hypershift --workers 2 --worker-type bx2-4x16`
+**Then** a HostedCluster and NodePool are created (no control plane VMs)
+**And** the cluster is available in 3-4 minutes (vs 10+ minutes for Hive IPI)
+**And** control plane runs as pods on the hub cluster
+
+### Scenario: Scale HyperShift worker nodes
+
+**Given** a HyperShift cluster exists
+**When** I run `acmlab scaling set cluster-1 --replicas 4`
+**Then** the NodePool replicas are updated (not MachinePool)
+
+### Why this matters
+
+HyperShift eliminates ~30% of cluster cost (no control plane VMs). Ideal for short-lived QA matrix clusters (UC-23) where many clusters are needed simultaneously.
+
+### Prerequisites (spike needed)
+
+Verify `hypershift-addon` is enabled on hub and IBM Cloud NodePool support is available.
+
+### ACM types
+
+`hypershift.openshift.io/v1beta1.HostedCluster`
+`hypershift.openshift.io/v1beta1.NodePool`
+
+### Package
+
+Extends `internal/provisioning/` with HyperShift provisioning path
 
 ---
 
@@ -1639,13 +1855,24 @@ Before implementation, validate: submariner-addon is installed on hub, IBM Cloud
 | UC-17  |  Cost center attribution + budget alerting  |  `ManagedCluster` labels + `MCO/Thanos` + `Policy`  |  spec.billing.costCenter |
 | UC-18  |  GPU sharing stack deployment fleet-wide (Kueue + Kyverno)  |  `ManifestWork` + `ConfigurationPolicy`  |  spec.gpu.sharingEnabled |
 | UC-19  |  Multi-cluster GPU workload routing via Placement  |  `Placement` + `PlacementDecision` + `ManagedCluster` labels  |  spec.gpu.type |
-| UC-20  |  OpenShift AI version fleet segregation  |  `Placement` + `ConfigurationPolicy` + `ManifestWork`  |  spec.gpu.rhoaiVersion |
+| UC-20  |  AI platform operator version fleet segregation  |  `Placement` + `ConfigurationPolicy` + `ManifestWork`  |  spec.gpu.aiPlatformVersion |
 | UC-21  |  Elastic GPU capacity (auto-provision on saturation)  |  `MCO/Thanos` + `ConfigurationPolicy` + `ClusterDeployment`  |  spec.gpu.elasticCapacity |
 | UC-22  |  ClusterSet management (team isolation)  |  `ManagedClusterSet` + `ManagedClusterSetBinding`  |  spec.team |
 | UC-23  |  Multi-architecture cluster matrix (QA)  |  `ClusterDeployment` + `ManagedCluster` labels + `Placement`  |  spec.matrix |
 | UC-24  |  Per-team compliance reporting  |  `Policy` + `PlacementBinding` scoped to ClusterSet  |  spec.compliance.clusterSet |
 | UC-25  |  ClusterPool + ClusterClaim (pre-warmed)  |  `hive/v1.ClusterPool` + `hive/v1.ClusterClaim`  |  spec.pool |
 | UC-26  |  Multi-cluster networking (Submariner)  |  `ManagedClusterAddOn` + `SubmarinerConfig`  |  spec.submariner |
+| UC-27  |  Operator version pinning (OperatorPolicy)  |  `policy/v1beta1.OperatorPolicy`  |  spec.operatorPolicy |
+| UC-28  |  Certificate expiry detection fleet-wide  |  `policy/v1.CertificatePolicy`  |  spec.certPolicy |
+| UC-29  |  Security baseline via Gatekeeper/OPA  |  `ManifestWork` + `ConfigurationPolicy` + OPA constraints  |  spec.securityBaseline |
+| UC-30  |  Policy automation (Ansible auto-remediation)  |  `policy/v1beta1.PolicyAutomation`  |  spec.policyAutomation |
+| UC-31  |  SCAP scanning via Compliance Operator  |  `ManifestWork` + `ConfigurationPolicy` + ComplianceScan  |  spec.compliance |
+| UC-32  |  GitOps fleet deployment via ApplicationSet  |  `ApplicationSet` + `Placement` + `PlacementDecision`  |  spec.gitops |
+| UC-33  |  ManifestWorkReplicaSet progressive rollout  |  `work/v1alpha1.ManifestWorkReplicaSet`  |  spec.rollout |
+| UC-35  |  Credential-free spoke access (ManagedServiceAccount)  |  `ManagedServiceAccount` + `cluster-proxy` addon  |  spec.access |
+| UC-36  |  Hub backup and restore  |  `BackupSchedule` + `Restore` + OADP  |  spec.backup |
+| UC-37  |  Worker node flavor change (rolling replacement)  |  `hive/v1.MachinePool` platform patch  |  spec.workers.type |
+| UC-38  |  HyperShift (HostedCluster) provisioning  |  `hypershift.io/v1beta1.HostedCluster` + `NodePool`  |  spec.type=hypershift |
 
 ## Go Dependencies (for the lab repo)
 

@@ -159,16 +159,70 @@ func (m *Manager) setPowerState(ctx context.Context, namespace, name string, sta
 	return nil
 }
 
-// ClusterSupportsLifecycle checks if a cluster supports lifecycle operations (has ClusterDeployment)
-func (m *Manager) ClusterSupportsLifecycle(ctx context.Context, namespace, name string) (bool, error) {
+// LifecycleSupport describes what lifecycle operations are available for a cluster.
+type LifecycleSupport int
+
+const (
+	// LifecycleFull — Hive-provisioned cluster with ClusterDeployment.
+	LifecycleFull LifecycleSupport = iota
+	// LifecycleNotYetImplemented — cluster type detected but hibernate not yet implemented.
+	// Extension point: add a new case here when Kubernetes hibernate is implemented (see UC-41).
+	LifecycleNotYetImplemented
+	// LifecycleUnsupported — cluster type is unknown or incompatible.
+	LifecycleUnsupported
+)
+
+// LifecycleSupportReason provides a user-facing explanation and suggested alternative.
+type LifecycleSupportReason struct {
+	Support     LifecycleSupport
+	ClusterType client.ClusterType
+	// Alternative is a suggested command when Support != LifecycleFull.
+	Alternative string
+}
+
+// CheckLifecycleSupport returns detailed support info for a cluster.
+// Callers use this instead of ClusterSupportsLifecycle to distinguish
+// "not yet implemented" from "will never be supported".
+func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name string) (*LifecycleSupportReason, error) {
 	_, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("checking ClusterDeployment existence: %w", err)
+	if err == nil {
+		return &LifecycleSupportReason{Support: LifecycleFull}, nil
 	}
-	return true, nil
+	if !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("checking ClusterDeployment: %w", err)
+	}
+
+	// No ClusterDeployment — check cluster type for a useful message.
+	clusterType, typeErr := m.client.GetClusterType(ctx, name)
+	if typeErr != nil {
+		// Can't determine type — treat as unsupported but don't mask the real error.
+		return &LifecycleSupportReason{Support: LifecycleUnsupported, ClusterType: client.ClusterTypeUnknown}, nil
+	}
+
+	switch clusterType {
+	case client.ClusterTypeKubernetes:
+		// UC-41: Kubernetes hibernate via CAPI MachineDeployment scale-to-zero is planned.
+		return &LifecycleSupportReason{
+			Support:     LifecycleNotYetImplemented,
+			ClusterType: clusterType,
+			Alternative: "acmlab scaling set " + name + " --replicas 0",
+		}, nil
+	default:
+		return &LifecycleSupportReason{
+			Support:     LifecycleUnsupported,
+			ClusterType: clusterType,
+		}, nil
+	}
+}
+
+// ClusterSupportsLifecycle checks if a cluster supports lifecycle operations (has ClusterDeployment).
+// Deprecated: use CheckLifecycleSupport for richer error context.
+func (m *Manager) ClusterSupportsLifecycle(ctx context.Context, namespace, name string) (bool, error) {
+	r, err := m.CheckLifecycleSupport(ctx, namespace, name)
+	if err != nil {
+		return false, err
+	}
+	return r.Support == LifecycleFull, nil
 }
 
 func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, error) {
