@@ -20,7 +20,7 @@ type iamClient struct {
 	http      *http.Client
 }
 
-func newIAMClient(apiKey string) *iamClient {
+var newIAMClient = func(apiKey string) *iamClient {
 	return &iamClient{
 		apiKey: apiKey,
 		http:   &http.Client{},

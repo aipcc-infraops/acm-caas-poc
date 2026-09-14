@@ -24,13 +24,21 @@ func fakeClientWithClusters(clusters ...*unstructured.Unstructured) *client.Clie
 	}
 	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			client.GVRManagedCluster:     "ManagedClusterList",
-			client.GVRClusterDeployment:  "ClusterDeploymentList",
-			client.GVRManifestWork:       "ManifestWorkList",
-			client.GVRManagedClusterInfo: "ManagedClusterInfoList",
-			client.GVRPolicy:             "PolicyList",
-			client.GVRPlacement:          "PlacementList",
-			client.GVRPlacementBinding:   "PlacementBindingList",
+			client.GVRManagedCluster:                "ManagedClusterList",
+			client.GVRClusterDeployment:             "ClusterDeploymentList",
+			client.GVRManifestWork:                  "ManifestWorkList",
+			client.GVRManagedClusterInfo:             "ManagedClusterInfoList",
+			client.GVRPolicy:                        "PolicyList",
+			client.GVRPlacement:                     "PlacementList",
+			client.GVRPlacementBinding:              "PlacementBindingList",
+			client.GVRClusterImageSet:               "ClusterImageSetList",
+			client.GVRKlusterletAddonConfig:         "KlusterletAddonConfigList",
+			client.GVRNamespace:                     "NamespaceList",
+			client.GVRSecret:                        "SecretList",
+			client.GVRMachinePool:                   "MachinePoolList",
+			client.GVRManagedClusterImageRegistry:   "ManagedClusterImageRegistryList",
+			client.GVRManagedClusterSetBinding:      "ManagedClusterSetBindingList",
+			client.GVRPlacementRule:                 "PlacementRuleList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -104,6 +112,70 @@ func extractToolText(t *testing.T, resp mcplib.JSONRPCMessage) string {
 		t.Fatal("tool returned no content")
 	}
 	return result.Content[0].Text
+}
+
+// extractToolResult returns the text and isError flag without failing on tool errors.
+func extractToolResult(t *testing.T, resp mcplib.JSONRPCMessage) (string, bool) {
+	t.Helper()
+	rpcResp, ok := resp.(mcplib.JSONRPCResponse)
+	if !ok {
+		t.Fatalf("expected JSONRPCResponse, got %T", resp)
+	}
+	data, _ := json.Marshal(rpcResp.Result)
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result.Content) == 0 {
+		return "", result.IsError
+	}
+	return result.Content[0].Text, result.IsError
+}
+
+func newClusterDeployment(name string, installed bool) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+	})
+	obj.SetName(name)
+	obj.SetNamespace(name)
+	obj.SetLabels(map[string]string{"acmlab.redhat.com/managed": "true"})
+	obj.Object["spec"] = map[string]interface{}{
+		"clusterName": name,
+		"baseDomain":  "example.com",
+		"platform": map[string]interface{}{
+			"ibmcloud": map[string]interface{}{
+				"region": "us-south",
+			},
+		},
+		"provisioning": map[string]interface{}{
+			"imageSetRef": map[string]interface{}{
+				"name": "ocp-4.15",
+			},
+		},
+		"powerState": "Running",
+	}
+	obj.Object["status"] = map[string]interface{}{
+		"installed":  installed,
+		"powerState": "Running",
+		"conditions": func() []interface{} {
+			if installed {
+				return []interface{}{
+					map[string]interface{}{
+						"type":   "Provisioned",
+						"status": "True",
+					},
+				}
+			}
+			return []interface{}{}
+		}(),
+	}
+	return obj
 }
 
 func TestNewServerReturnsNonNil(t *testing.T) {
