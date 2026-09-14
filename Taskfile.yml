@@ -27,6 +27,11 @@ tasks:
     cmds:
       - go test ./... -tags=integration
 
+  test:bdd:
+    desc: Run BDD Gherkin tests via godog (requires live hub connection)
+    cmds:
+      - go test ./integration/... -tags=integration -v
+
   lint:
     desc: Run go vet
     cmds:
