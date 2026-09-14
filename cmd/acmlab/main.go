@@ -41,6 +41,7 @@ func main() {
 	root.AddCommand(importCmd())
 	root.AddCommand(registryCmd())
 	root.AddCommand(scalingCmd())
+	root.AddCommand(decommissionCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {

@@ -14,6 +14,7 @@ acm-caas-poc/
 │   ├── import.go                  # import cluster/detach/status/list
 │   ├── registry.go                # registry list-images/mirror-script/configure/status/remove
 │   ├── scaling.go                 # scaling list/get/set/auto
+│   ├── decommission.go            # decommission start/advance/status/list/cancel/audit
 │   └── mcp.go                     # mcp serve (MCP server on stdio)
 │
 ├── internal/
@@ -82,7 +83,8 @@ acm-caas-poc/
 │   │   ├── backup.go              # Backup() — exports cluster state to YAML
 │   │   ├── drain.go               # Drain() — cordon + evict via spoke kubeconfig
 │   │   ├── cleanup.go             # Cleanup() — removes hub-side resources
-│   │   └── decommission_test.go
+│   │   ├── state_test.go          # State machine unit tests
+│   │   └── decommission_test.go   # Manager, audit, backup, drain, cleanup tests
 │   │
 │   ├── batch/                     # Batch/parallel operations (shared CLI utility)
 │   │   ├── batch.go               # Execute(), PrintSummary(), ToJSON()
