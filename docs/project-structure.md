@@ -9,7 +9,11 @@ acm-caas-poc/
 │   ├── provision.go               # provision create/destroy/status/list/image-sets
 │   ├── policy.go                  # policy list/apply/status/remove
 │   ├── tenant.go                  # tenant deploy/status/list/remove
-│   ├── monitor.go                 # monitor list/status
+│   ├── monitor.go                 # monitor list/status/setup/teardown/obs-status
+│   ├── lifecycle.go               # lifecycle hibernate/resume/status/diagnose/list
+│   ├── import.go                  # import cluster/detach/status/list
+│   ├── registry.go                # registry list-images/mirror-script/configure/status/remove
+│   ├── scaling.go                 # scaling list/get/set/auto
 │   └── mcp.go                     # mcp serve (MCP server on stdio)
 │
 ├── internal/
@@ -63,9 +67,22 @@ acm-caas-poc/
 │   │   ├── importing.go           # Manager — Import, Detach, WaitForImport, GetImportStatus, ListImported
 │   │   └── importing_test.go
 │   │
+│   ├── scaling/                   # UC-10: Cluster scaling (add/remove workers)
+│   │   ├── scaling.go             # Manager — GetMachinePool, SetReplicas, EnableAutoscaling, InitMachinePool
+│   │   └── scaling_test.go
+│   │
 │   ├── registry/                  # UC-13: Registry mirror (ROKS, air-gapped)
 │   │   ├── registry.go            # Manager — ListRequiredImages, ConfigureMirror, RemoveMirror, GenerateMirrorScript
 │   │   └── registry_test.go
+│   │
+│   ├── decommission/              # UC-08: Legacy cluster decommissioning
+│   │   ├── manager.go             # Manager — Start, Advance, Cancel, List
+│   │   ├── state.go               # ConfigMap-based state machine (see ADR-008)
+│   │   ├── audit.go               # Audit() — collects usage data from ACM resources
+│   │   ├── backup.go              # Backup() — exports cluster state to YAML
+│   │   ├── drain.go               # Drain() — cordon + evict via spoke kubeconfig
+│   │   ├── cleanup.go             # Cleanup() — removes hub-side resources
+│   │   └── decommission_test.go
 │   │
 │   ├── batch/                     # Batch/parallel operations (shared CLI utility)
 │   │   ├── batch.go               # Execute(), PrintSummary(), ToJSON()
@@ -82,7 +99,8 @@ acm-caas-poc/
 │
 ├── docs/
 │   ├── specs/
-│   │   └── 2026-08-19-acm-caas-poc-design.md   # Design spec (7 UCs)
+│   │   ├── 2026-08-19-acm-caas-poc-design.md   # Design spec (7 UCs)
+│   │   └── 2026-09-14-uc08-decommission-design.md  # UC-08 decommission design
 │   ├── adr/
 │   │   ├── 001-dynamic-client-over-typed.md
 │   │   ├── 002-mcp-server-for-interactive-testing.md
@@ -90,7 +108,8 @@ acm-caas-poc/
 │   │   ├── 004-env-based-configuration.md
 │   │   ├── 005-uc-packages-as-controller-foundation.md
 │   │   ├── 006-idempotent-operations.md
-│   │   └── 007-minio-for-observability-object-storage.md
+│   │   ├── 007-minio-for-observability-object-storage.md
+│   │   └── 008-configmap-state-machine-for-workflows.md
 │   ├── manual/                     # Kubectl/curl manual reference scripts per UC
 │   │   ├── uc-07-import-detach.sh
 │   │   └── uc-13-registry-mirror.sh

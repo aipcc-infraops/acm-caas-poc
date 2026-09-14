@@ -574,12 +574,13 @@ So that the CaaS platform can reclaim resources and reduce cost
 6. **Delete** — destroy cluster via cloud API
 7. **Cleanup** — remove from ACM (ManagedCluster, ManifestWorks, policies)
 
-### ACM Go types
+### ACM resources (dynamic client)
 
-```go
-cluster.open-cluster-management.io/v1.ManagedCluster — detach/delete
-internal.open-cluster-management.io/v1beta1.ManagedClusterInfo — usage audit
-work.open-cluster-management.io/v1.ManifestWork — cleanup
+```
+cluster.open-cluster-management.io/v1         ManagedCluster        — detach/delete
+internal.open-cluster-management.io/v1beta1   ManagedClusterInfo    — usage audit
+work.open-cluster-management.io/v1            ManifestWork          — cleanup
+v1                                            ConfigMap             — state machine (see ADR-008)
 ```
 
 ### ComputeRequest controller equivalent
