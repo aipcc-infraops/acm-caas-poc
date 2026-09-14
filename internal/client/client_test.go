@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -197,5 +199,170 @@ func TestListEmptyNamespaceReturnsEmpty(t *testing.T) {
 	}
 	if len(list.Items) != 0 {
 		t.Errorf("List returned %d items, want 0", len(list.Items))
+	}
+}
+
+func TestUpdateModifiesResource(t *testing.T) {
+	c := newFakeClient()
+
+	obj := newObj("to-update", "default")
+	if _, err := c.Create(context.Background(), testGVR, "default", obj); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	obj.SetLabels(map[string]string{"updated": "true"})
+	updated, err := c.Update(context.Background(), testGVR, "default", obj)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if updated.GetLabels()["updated"] != "true" {
+		t.Errorf("label updated = %q, want %q", updated.GetLabels()["updated"], "true")
+	}
+
+	got, err := c.Get(context.Background(), testGVR, "default", "to-update")
+	if err != nil {
+		t.Fatalf("Get after update failed: %v", err)
+	}
+	if got.GetLabels()["updated"] != "true" {
+		t.Errorf("persisted label updated = %q, want %q", got.GetLabels()["updated"], "true")
+	}
+}
+
+func TestNewFromContextInvalidPathReturnsError(t *testing.T) {
+	_, err := NewFromContext("/nonexistent/path/kubeconfig.yaml", "")
+	if err == nil {
+		t.Error("expected error for invalid kubeconfig path, got nil")
+	}
+}
+
+func TestNewFromContextInvalidPathWithContextReturnsError(t *testing.T) {
+	_, err := NewFromContext("/nonexistent/path/kubeconfig.yaml", "some-context")
+	if err == nil {
+		t.Error("expected error for invalid kubeconfig path with context, got nil")
+	}
+}
+
+func TestGetClusterType(t *testing.T) {
+	tests := []struct {
+		name        string
+		distType    string
+		wantType    ClusterType
+	}{
+		{"OCP cluster", "OCP", ClusterTypeOCP},
+		{"Kubernetes cluster", "kubernetes", ClusterTypeKubernetes},
+		{"empty distribution", "", ClusterTypeUnknown},
+		{"other distribution", "EKS", ClusterType("EKS")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			infoGVK := schema.GroupVersionKind{
+				Group:   "internal.open-cluster-management.io",
+				Version: "v1beta1",
+				Kind:    "ManagedClusterInfo",
+			}
+			scheme := runtime.NewScheme()
+			obj := &unstructured.Unstructured{}
+			obj.SetGroupVersionKind(infoGVK)
+			obj.SetName("test-cluster")
+			obj.SetNamespace("test-cluster")
+			if tt.distType != "" {
+				unstructured.SetNestedField(obj.Object, tt.distType, "status", "distributionInfo", "type")
+			}
+
+			fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+				map[schema.GroupVersionResource]string{
+					GVRManagedClusterInfo: "ManagedClusterInfoList",
+				}, obj)
+			c := &Client{Dynamic: fake}
+
+			got, err := c.GetClusterType(context.Background(), "test-cluster")
+			if err != nil {
+				t.Fatalf("GetClusterType failed: %v", err)
+			}
+			if got != tt.wantType {
+				t.Errorf("GetClusterType = %q, want %q", got, tt.wantType)
+			}
+		})
+	}
+}
+
+func writeMinimalKubeconfig(t *testing.T, dir, context string) string {
+	t.Helper()
+	content := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: ` + context + `
+current-context: ` + context + `
+users:
+- name: test-user
+  user:
+    token: fake-token
+`
+	path := filepath.Join(dir, "kubeconfig")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatalf("writing kubeconfig: %v", err)
+	}
+	return path
+}
+
+func TestNewFromDefaultWithEnvKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+	kc := writeMinimalKubeconfig(t, dir, "default")
+	t.Setenv("KUBECONFIG", kc)
+
+	c, err := NewFromDefault()
+	if err != nil {
+		t.Fatalf("NewFromDefault failed: %v", err)
+	}
+	if c == nil || c.Dynamic == nil {
+		t.Error("expected non-nil client with Dynamic interface")
+	}
+}
+
+func TestNewFromDefaultNoKubeconfig(t *testing.T) {
+	t.Setenv("KUBECONFIG", "/nonexistent/kubeconfig.yaml")
+	t.Setenv("HOME", "/nonexistent-home")
+
+	_, err := NewFromDefault()
+	if err == nil {
+		t.Error("expected error with no valid kubeconfig, got nil")
+	}
+}
+
+func TestNewFromContextValidKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+	kc := writeMinimalKubeconfig(t, dir, "my-ctx")
+
+	c, err := NewFromContext(kc, "my-ctx")
+	if err != nil {
+		t.Fatalf("NewFromContext failed: %v", err)
+	}
+	if c == nil || c.Dynamic == nil {
+		t.Error("expected non-nil client with Dynamic interface")
+	}
+}
+
+func TestGetClusterTypeNotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			GVRManagedClusterInfo: "ManagedClusterInfoList",
+		})
+	c := &Client{Dynamic: fake}
+
+	got, err := c.GetClusterType(context.Background(), "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent cluster, got nil")
+	}
+	if got != ClusterTypeUnknown {
+		t.Errorf("got type %q, want empty string for unknown", got)
 	}
 }

@@ -2,12 +2,14 @@ package observability
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -188,5 +190,78 @@ func TestStatusProgressing(t *testing.T) {
 	}
 	if status != "Progressing" {
 		t.Errorf("status = %q, want Progressing", status)
+	}
+}
+
+func TestStatusGetError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("get", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("api unavailable")
+	})
+	mgr := New(c, config.Config{})
+
+	_, err := mgr.Status(context.Background())
+	if err == nil {
+		t.Fatal("expected error from Status when API fails")
+	}
+}
+
+func TestSetupStepError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("create", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("create blocked")
+	})
+	fake.PrependReactor("get", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("get blocked")
+	})
+	mgr := New(c, config.Config{})
+
+	err := mgr.Setup(context.Background())
+	if err == nil {
+		t.Fatal("expected error from Setup when API fails")
+	}
+}
+
+func TestTeardownStepError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("delete", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("delete blocked")
+	})
+	mgr := New(c, config.Config{})
+
+	err := mgr.Teardown(context.Background())
+	if err == nil {
+		t.Fatal("expected error from Teardown when delete fails")
+	}
+}
+
+func TestStatusConditionBadType(t *testing.T) {
+	mco := &unstructured.Unstructured{}
+	mco.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "observability.open-cluster-management.io", Version: "v1beta2", Kind: "MultiClusterObservability",
+	})
+	mco.SetName(MCOName)
+	mco.Object["status"] = map[string]interface{}{
+		"conditions": []interface{}{
+			"not-a-map",
+			map[string]interface{}{
+				"type":   "SomethingElse",
+				"status": "True",
+			},
+		},
+	}
+
+	c := fakeClient(mco)
+	mgr := New(c, config.Config{})
+
+	status, err := mgr.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if status != "Progressing" {
+		t.Errorf("status = %q, want Progressing (no Ready condition)", status)
 	}
 }
