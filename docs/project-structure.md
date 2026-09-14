@@ -132,6 +132,7 @@ acm-caas-poc/
 │   │   ├── demo-uc06-monitoring.sh
 │   │   ├── demo-uc07-import.sh
 │   │   ├── demo-uc10-scaling.sh
+│   │   ├── demo-uc08-decommission.sh
 │   │   └── demo-uc13-registry.sh
 │   ├── manual/                     # Kubectl/curl manual reference scripts per UC
 │   │   ├── uc-01-provision.sh
@@ -142,6 +143,7 @@ acm-caas-poc/
 │   │   ├── uc-06-monitoring.sh
 │   │   ├── uc-07-import-detach.sh
 │   │   ├── uc-10-scaling.sh
+│   │   ├── uc-08-decommission.sh
 │   │   └── uc-13-registry-mirror.sh
 │   ├── project-structure.md        # This file
 │   └── acmlab-commands.md          # CLI + MCP command reference

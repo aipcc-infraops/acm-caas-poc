@@ -417,6 +417,114 @@ $ acmlab registry remove import-test
 Image registry mirror removed for cluster import-test
 ```
 
+### Decommission
+
+#### `acmlab decommission start <cluster>`
+
+Starts a decommission workflow: creates a tracking ConfigMap in the cluster namespace and runs an automatic audit. The audit collects node count, CPU/memory capacity, owner, and platform from ManagedCluster and ManagedClusterInfo. Idempotent — if a workflow already exists, returns the existing state.
+
+Options:
+- `--owner` — cluster owner email (overrides label detection)
+- `--deadline` — reclaim deadline ISO 8601 (default: 14 days from now)
+- `--kubeconfig-path` — spoke kubeconfig for imported clusters
+
+```
+$ acmlab decommission start spoke2 --owner "pestevez@redhat.com"
+{
+  "clusterName": "spoke2",
+  "phase": "audited",
+  "owner": "pestevez@redhat.com",
+  "deadline": "2026-09-28T15:10:16Z",
+  "audit": {
+    "nodeCount": 5,
+    "cpuCapacity": "32",
+    "memoryCapacity": "131527516Ki",
+    "platform": "IBM",
+    "clusterAge": "3d"
+  },
+  "history": [
+    {"phase": "imported", "message": "Decommission workflow started"},
+    {"phase": "audited", "message": "5 nodes, 32 CPU, 131527516Ki memory"}
+  ]
+}
+```
+
+#### `acmlab decommission advance <cluster>`
+
+Advances the decommission to the next phase. Each phase executes its action before transitioning:
+- **audited → notified**: records notification timestamp
+- **notified → backed-up**: records backup path
+- **backed-up → drained**: stubs cordon + evict (PoC)
+- **drained → deleted**: deletes ClusterDeployment or ManagedCluster (**DESTRUCTIVE**)
+- **deleted → cleaned**: removes ManifestWorks, namespace from hub (**DESTRUCTIVE**)
+
+```
+$ acmlab decommission advance spoke2
+{
+  "clusterName": "spoke2",
+  "phase": "notified",
+  ...
+}
+```
+
+#### `acmlab decommission status <cluster>`
+
+Shows current phase, owner, deadline, audit data, and full history.
+
+```
+$ acmlab decommission status spoke2
+Cluster:  spoke2
+Phase:    audited
+Owner:    pestevez@redhat.com
+Deadline: 2026-09-28T15:10:16Z
+Nodes:    5
+CPU:      32
+Memory:   131527516Ki
+Platform: IBM
+
+History:
+  [2026-09-14T15:10:17Z] imported — Decommission workflow started
+  [2026-09-14T15:10:18Z] audited — 5 nodes, 32 CPU, 131527516Ki memory
+```
+
+#### `acmlab decommission list`
+
+Lists all active decommission workflows across the fleet.
+
+Options:
+- `--json` — output as JSON
+
+```
+$ acmlab decommission list
+CLUSTER              PHASE        OWNER                          DEADLINE
+spoke2               audited      pestevez@redhat.com            2026-09-28T15:10:16Z
+```
+
+#### `acmlab decommission cancel <cluster>`
+
+Cancels a decommission workflow by deleting the tracking ConfigMap. The cluster is not affected. Safe at any phase before `deleted`.
+
+```
+$ acmlab decommission cancel spoke2
+Decommission cancelled for spoke2
+```
+
+#### `acmlab decommission audit <cluster>`
+
+Runs a standalone audit without starting a decommission workflow. Read-only — no state change.
+
+```
+$ acmlab decommission audit spoke2
+{
+  "nodeCount": 5,
+  "cpuCapacity": "32",
+  "memoryCapacity": "131527516Ki",
+  "owner": "",
+  "platform": "IBM",
+  "clusterAge": "3d"
+}
+```
+
 ### Batch Operations
 
 All commands that take a single cluster name also accept multiple names and a `--from-file` flag.
@@ -482,3 +590,9 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_registry_configure_mirror` | UC-13 | Creates ManagedClusterImageRegistry + Placement + pull secret on hub |
 | `acm_registry_mirror_status` | UC-13 | Checks if registry mirror is configured for a cluster |
 | `acm_registry_generate_mirror_script` | UC-13 | Generates bash script with skopeo commands to mirror images |
+| `acm_decommission_start` | UC-08 | Start decommission workflow (creates ConfigMap, runs audit) |
+| `acm_decommission_advance` | UC-08 | Advance to next decommission phase |
+| `acm_decommission_status` | UC-08 | Get current decommission state for a cluster |
+| `acm_decommission_list` | UC-08 | List all active decommission workflows |
+| `acm_decommission_cancel` | UC-08 | Cancel workflow (keeps cluster intact) |
+| `acm_decommission_audit` | UC-08 | Standalone audit without starting decommission |
