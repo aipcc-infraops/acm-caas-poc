@@ -1616,6 +1616,274 @@ Before implementation, validate: submariner-addon is installed on hub, IBM Cloud
 
 ---
 
+## UC-27: Operator version pinning via OperatorPolicy
+
+**Feature**: Enforce specific operator versions on managed clusters via ACM OperatorPolicy
+
+As a platform operator
+I want to pin operator versions across the fleet
+So that clusters run validated operator releases and do not auto-upgrade to untested versions
+
+### Scenario: Pin an operator to a specific version on all clusters
+
+**Given** the GPU sharing operator is installed on multiple clusters
+**When** I create an OperatorPolicy requiring version 2.17.3
+**And** I bind it to all GPU clusters via Placement
+**Then** clusters running a different version are marked NonCompliant
+**And** the policy status shows which clusters need remediation
+
+### Scenario: Prevent automatic operator upgrades
+
+**Given** an OperatorPolicy pins the operator to channel stable-2.17
+**When** a new version 2.18.0 appears in the fast channel
+**Then** the pinned clusters remain on 2.17.x
+**And** the policy blocks the upgrade until the pin is updated
+
+### Scenario: Staged rollout of operator upgrade across clusters
+
+**Given** the platform team validates operator version 2.18.0
+**When** the OperatorPolicy is updated to 2.18.0 for batch-1 clusters
+**Then** batch-1 clusters upgrade to 2.18.0
+**And** batch-2 clusters remain on 2.17.x until their policy is updated
+
+### ACM types
+
+```go
+policy.open-cluster-management.io/v1beta1.OperatorPolicy
+cluster.open-cluster-management.io/v1beta1.Placement — cluster targeting
+```
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.operators[0].name = "gpu-sharing-operator"
+ComputeRequest.spec.operators[0].version = "2.17.3"
+ComputeRequest.spec.operators[0].channel = "stable-2.17"
+  -> controller creates OperatorPolicy with version constraint
+  -> controller binds to target clusters via Placement
+  -> controller monitors compliance status
+  -> controller updates ComputeRequest.status.operators[0].compliant = true
+```
+
+---
+
+## UC-28: Certificate expiry detection fleet-wide
+
+**Feature**: Detect and alert on expiring certificates across all managed clusters via ACM CertificatePolicy
+
+As a platform operator
+I want to detect certificates approaching expiry across the fleet
+So that certificate-related outages are prevented before they occur
+
+### Scenario: Detect certificates expiring within 30 days
+
+**Given** a CertificatePolicy is deployed to all managed clusters
+**When** any certificate in a monitored namespace expires within 30 days
+**Then** the cluster is marked NonCompliant
+**And** the policy status identifies the expiring certificate, namespace, and expiry date
+
+### Scenario: Monitor API server and ingress certificates
+
+**Given** CertificatePolicy targets the openshift-config and openshift-ingress namespaces
+**When** the API server or wildcard ingress certificate is approaching expiry
+**Then** the platform team is alerted with sufficient lead time to rotate
+
+### Scenario: Fleet-wide certificate health report
+
+**Given** CertificatePolicy is active on all clusters
+**When** I query policy compliance across the fleet
+**Then** I get a report showing: cluster name, certificate name, days until expiry
+**And** clusters are sorted by most urgent expiry first
+
+### ACM types
+
+```go
+policy.open-cluster-management.io/v1.CertificatePolicy
+policy.open-cluster-management.io/v1.Policy — wraps CertificatePolicy for distribution
+cluster.open-cluster-management.io/v1beta1.Placement — cluster targeting
+```
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.security.certExpiryThresholdDays = 30
+  -> controller creates CertificatePolicy targeting cluster namespaces
+  -> controller wraps in Policy and binds via Placement
+  -> controller monitors compliance status
+  -> controller updates ComputeRequest.status.conditions[CertificatesHealthy]
+```
+
+---
+
+## UC-29: Security baseline via Gatekeeper/OPA constraints
+
+**Feature**: Deploy and enforce Open Policy Agent (Gatekeeper) security constraints across the fleet via ACM ManifestWork and governance policies
+
+As a platform operator
+I want a security baseline enforced on all clusters
+So that common misconfigurations (privileged containers, host networking, missing resource limits) are prevented fleet-wide
+
+### Scenario: Deploy Gatekeeper with security constraint templates
+
+**Given** a new cluster is registered in ACM
+**When** the security baseline controller runs
+**Then** a ManifestWork deploys Gatekeeper and a set of ConstraintTemplate CRDs
+**And** constraints are created for: no privileged containers, no host networking, required resource limits, no latest tag
+
+### Scenario: Detect violations of security baseline
+
+**Given** Gatekeeper constraints are active on a cluster
+**When** a user deploys a pod with `securityContext.privileged: true`
+**Then** Gatekeeper blocks the pod admission
+**And** a ConfigurationPolicy on the hub detects the violation count
+**And** the cluster compliance status reflects the violation
+
+### Scenario: Exempt specific namespaces from constraints
+
+**Given** certain system namespaces require privileged access (e.g., monitoring agents)
+**When** the constraint is configured with namespace exclusions
+**Then** pods in excluded namespaces are allowed
+**And** all other namespaces remain under the security baseline
+
+### ACM types
+
+```go
+work.open-cluster-management.io/v1.ManifestWork — deploy Gatekeeper + ConstraintTemplates + Constraints
+policy.open-cluster-management.io/v1.ConfigurationPolicy — monitor Gatekeeper violation count
+policy.open-cluster-management.io/v1.Policy — distribute and report compliance
+```
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.security.baseline = "strict"
+ComputeRequest.spec.security.exemptNamespaces = ["openshift-monitoring"]
+  -> controller creates ManifestWork with Gatekeeper + constraints
+  -> ConfigurationPolicy monitors violation count
+  -> controller updates ComputeRequest.status.conditions[SecurityBaselineCompliant]
+```
+
+---
+
+## UC-30: Policy automation — Ansible auto-remediation
+
+**Feature**: Automatic remediation of NonCompliant policies via ACM PolicyAutomation and Ansible Automation Platform
+
+As a platform operator
+I want NonCompliant policies to trigger automated remediation playbooks
+So that common issues are resolved without manual intervention
+
+### Scenario: Auto-remediate a NonCompliant certificate policy
+
+**Given** a CertificatePolicy (UC-28) detects an expiring certificate
+**When** the cluster becomes NonCompliant
+**Then** a PolicyAutomation CR triggers an Ansible playbook
+**And** the playbook renews the certificate on the spoke
+**And** the cluster returns to Compliant status
+
+### Scenario: Auto-remediate drift in security baseline
+
+**Given** a Gatekeeper constraint (UC-29) is manually removed from a spoke
+**When** the ConfigurationPolicy detects the missing constraint
+**Then** PolicyAutomation triggers a playbook to redeploy the constraint
+**And** the remediation is logged with timestamp and cluster name
+
+### Scenario: PolicyAutomation with approval gate
+
+**Given** a critical policy violation requires human approval before auto-remediation
+**When** the PolicyAutomation mode is set to `once` with manual trigger
+**Then** the violation is logged and a notification sent
+**And** remediation only runs after an operator approves
+
+### ACM types
+
+```go
+policy.open-cluster-management.io/v1beta1.PolicyAutomation
+policy.open-cluster-management.io/v1.Policy — triggers the automation
+```
+
+### Ansible Automation Platform integration
+
+- PolicyAutomation CR references an Ansible Automation Platform credential secret
+- The secret contains the AAP tower URL and authentication token
+- Playbooks run on the spoke cluster via ManagedServiceAccount token (UC-35) or direct kubeconfig
+- Supported modes: `once` (manual trigger), `everyEvent` (auto on each violation), `disabled`
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.policyAutomation.enabled = true
+ComputeRequest.spec.policyAutomation.mode = "everyEvent"
+ComputeRequest.spec.policyAutomation.aapSecretRef = "aap-credentials"
+  -> controller creates PolicyAutomation CR linked to NonCompliant policies
+  -> AAP runs remediation playbook on violation
+  -> controller tracks remediation events in ComputeRequest.status.remediations[]
+```
+
+---
+
+## UC-31: SCAP scanning via Compliance Operator
+
+**Feature**: Deploy and manage OpenSCAP compliance scanning across the fleet via ACM ManifestWork and governance policies
+
+As a platform operator
+I want to run SCAP compliance scans on all clusters
+So that the fleet meets regulatory and security benchmarks (CIS, NIST, PCI-DSS)
+
+### Scenario: Deploy Compliance Operator to all clusters
+
+**Given** a cluster is registered in ACM
+**When** the compliance controller runs
+**Then** a ManifestWork deploys the Compliance Operator
+**And** a ScanSettingBinding is created for the CIS benchmark profile
+**And** the operator begins scheduled scans
+
+### Scenario: Detect non-compliant SCAP findings
+
+**Given** a ComplianceScan completes on a spoke cluster
+**When** findings include FAIL results for CIS benchmark rules
+**Then** a ConfigurationPolicy on the hub detects the non-compliant scan results
+**And** the cluster is marked NonCompliant with the specific failing rules
+
+### Scenario: Remediate SCAP findings automatically
+
+**Given** a ComplianceScan found remediable issues
+**When** the ComplianceRemediation CR is applied
+**Then** the failing configurations are corrected on the spoke
+**And** a rescan confirms the issues are resolved
+**And** PolicyAutomation (UC-30) can trigger this automatically
+
+### Scenario: Fleet-wide compliance report by benchmark
+
+**Given** all clusters run scheduled SCAP scans
+**When** I query compliance status across the fleet
+**Then** I get a report per benchmark: cluster name, pass count, fail count, score percentage
+**And** clusters below a minimum score threshold are flagged
+
+### ACM types
+
+```go
+work.open-cluster-management.io/v1.ManifestWork — deploy Compliance Operator + ScanSettingBinding
+policy.open-cluster-management.io/v1.ConfigurationPolicy — monitor ComplianceScan results
+policy.open-cluster-management.io/v1.Policy — distribute and report compliance
+compliance.openshift.io/v1alpha1.ComplianceScan
+compliance.openshift.io/v1alpha1.ScanSettingBinding
+```
+
+### ComputeRequest controller equivalent
+
+```
+ComputeRequest.spec.compliance.benchmarks = ["cis", "nist-800-53"]
+ComputeRequest.spec.compliance.schedule = "0 2 * * *"
+ComputeRequest.spec.compliance.minScore = 85
+  -> controller creates ManifestWork with Compliance Operator + profiles
+  -> ConfigurationPolicy monitors scan results
+  -> controller updates ComputeRequest.status.compliance.score
+  -> controller flags clusters below minScore
+```
+
+---
+
 ## UC-32: GitOps fleet deployment via ACM ApplicationSet integration
 
 **Feature**: GitOps-driven team tooling deployment using ArgoCD ApplicationSet with ACM Placement as cluster selector
