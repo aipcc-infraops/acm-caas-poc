@@ -66,4 +66,7 @@ var (
 	GVRMachinePool = schema.GroupVersionResource{
 		Group: "hive.openshift.io", Version: "v1", Resource: "machinepools",
 	}
+	GVRConfigMap = schema.GroupVersionResource{
+		Group: "", Version: "v1", Resource: "configmaps",
+	}
 )
