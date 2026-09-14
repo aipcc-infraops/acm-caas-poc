@@ -2,12 +2,14 @@ package policy
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -329,5 +331,178 @@ func TestParsePolicyInfoNoStatus(t *testing.T) {
 	}
 	if len(info.ClusterCompliance) != 0 {
 		t.Errorf("got %d cluster compliance, want 0", len(info.ClusterCompliance))
+	}
+}
+
+func TestApplyError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("get", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("api unavailable")
+	})
+	mgr := New(c, config.Config{})
+
+	opts := PolicyOpts{Name: "test-policy", Namespace: DefaultNamespace}
+	err := mgr.Apply(context.Background(), opts)
+	if err == nil {
+		t.Fatal("expected error from Apply when API fails")
+	}
+}
+
+func TestRemoveError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("delete", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("delete blocked")
+	})
+	mgr := New(c, config.Config{})
+
+	err := mgr.Remove(context.Background(), "test", DefaultNamespace)
+	if err == nil {
+		t.Fatal("expected error from Remove when delete fails")
+	}
+}
+
+func TestRemoveDefaultsNamespace(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{})
+	if err := mgr.Remove(context.Background(), "x", ""); err != nil {
+		t.Fatalf("Remove with empty ns failed: %v", err)
+	}
+}
+
+func TestListError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("list", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("list blocked")
+	})
+	mgr := New(c, config.Config{})
+
+	_, err := mgr.List(context.Background(), DefaultNamespace)
+	if err == nil {
+		t.Fatal("expected error from List when API fails")
+	}
+}
+
+func TestListDefaultsNamespace(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{})
+	policies, err := mgr.List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("List with empty ns failed: %v", err)
+	}
+	if len(policies) != 0 {
+		t.Errorf("got %d policies, want 0", len(policies))
+	}
+}
+
+func TestGetError(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{})
+
+	_, err := mgr.Get(context.Background(), "nonexistent", DefaultNamespace)
+	if err == nil {
+		t.Fatal("expected error from Get when policy doesn't exist")
+	}
+}
+
+func TestGetDefaultsNamespace(t *testing.T) {
+	pol := &unstructured.Unstructured{}
+	pol.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "policy.open-cluster-management.io", Version: "v1", Kind: "Policy",
+	})
+	pol.SetName("my-policy")
+	pol.SetNamespace(DefaultNamespace)
+	pol.Object["spec"] = map[string]interface{}{"remediationAction": "inform"}
+
+	c := fakeClient(pol)
+	mgr := New(c, config.Config{})
+
+	info, err := mgr.Get(context.Background(), "my-policy", "")
+	if err != nil {
+		t.Fatalf("Get with empty ns failed: %v", err)
+	}
+	if info.Name != "my-policy" {
+		t.Errorf("name = %q, want my-policy", info.Name)
+	}
+}
+
+func TestSetRemediationError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("patch", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("patch blocked")
+	})
+	mgr := New(c, config.Config{})
+
+	err := mgr.SetRemediation(context.Background(), "test", DefaultNamespace, "enforce")
+	if err == nil {
+		t.Fatal("expected error from SetRemediation when patch fails")
+	}
+}
+
+func TestSetRemediationDefaultsNamespace(t *testing.T) {
+	pol := &unstructured.Unstructured{}
+	pol.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "policy.open-cluster-management.io", Version: "v1", Kind: "Policy",
+	})
+	pol.SetName("my-policy")
+	pol.SetNamespace(DefaultNamespace)
+	pol.Object["spec"] = map[string]interface{}{"remediationAction": "inform"}
+
+	c := fakeClient(pol)
+	mgr := New(c, config.Config{})
+
+	if err := mgr.SetRemediation(context.Background(), "my-policy", "", "enforce"); err != nil {
+		t.Fatalf("SetRemediation with empty ns failed: %v", err)
+	}
+}
+
+func TestSetDisabledError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("patch", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("patch blocked")
+	})
+	mgr := New(c, config.Config{})
+
+	err := mgr.SetDisabled(context.Background(), "test", DefaultNamespace, true)
+	if err == nil {
+		t.Fatal("expected error from SetDisabled when patch fails")
+	}
+}
+
+func TestSetDisabledDefaultsNamespace(t *testing.T) {
+	pol := &unstructured.Unstructured{}
+	pol.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "policy.open-cluster-management.io", Version: "v1", Kind: "Policy",
+	})
+	pol.SetName("my-policy")
+	pol.SetNamespace(DefaultNamespace)
+	pol.Object["spec"] = map[string]interface{}{"disabled": false}
+
+	c := fakeClient(pol)
+	mgr := New(c, config.Config{})
+
+	if err := mgr.SetDisabled(context.Background(), "my-policy", "", true); err != nil {
+		t.Fatalf("SetDisabled with empty ns failed: %v", err)
+	}
+}
+
+func TestParsePolicyInfoBadStatusEntry(t *testing.T) {
+	obj := map[string]interface{}{
+		"metadata": map[string]interface{}{"name": "test", "namespace": "ns"},
+		"spec":     map[string]interface{}{"remediationAction": "inform"},
+		"status": map[string]interface{}{
+			"status": []interface{}{
+				"not-a-map",
+				map[string]interface{}{"clustername": "c1", "compliant": "Compliant"},
+			},
+		},
+	}
+	info := parsePolicyInfo(obj)
+	if len(info.ClusterCompliance) != 1 {
+		t.Errorf("got %d cluster compliance, want 1 (bad entry skipped)", len(info.ClusterCompliance))
 	}
 }
