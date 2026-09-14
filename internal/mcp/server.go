@@ -15,10 +15,11 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/fleet"
 	"github.com/pablofelix/acm-caas-poc/internal/importing"
 	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
-	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/monitoring"
 	"github.com/pablofelix/acm-caas-poc/internal/policy"
 	"github.com/pablofelix/acm-caas-poc/internal/provisioning"
+	"github.com/pablofelix/acm-caas-poc/internal/registry"
+	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
 )
 
@@ -53,6 +54,9 @@ func NewServer(c *client.Client, cfg config.Config) *server.MCPServer {
 
 	reg := registry.New(c, cfg)
 	registerRegistryTools(s, reg)
+
+	sc := scaling.New(c, cfg)
+	registerScalingTools(s, sc)
 
 	return s
 }
@@ -859,6 +863,81 @@ func registerRegistryTools(s *server.MCPServer, reg *registry.Manager) {
 
 			script := registry.GenerateMirrorScript(images, target)
 			return mcp.NewToolResultText(script), nil
+		},
+	)
+}
+
+func registerScalingTools(s *server.MCPServer, sc *scaling.Manager) {
+	s.AddTool(
+		mcp.NewTool("acm_scaling_get",
+			mcp.WithDescription("Get MachinePool info for a cluster — replicas, autoscaling bounds, and platform."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			info, err := sc.GetMachinePool(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("getting MachinePool: %v", err)), nil
+			}
+			data, _ := json.MarshalIndent(info, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_scaling_set",
+			mcp.WithDescription("Set a fixed worker node replica count on a cluster's MachinePool. Disables autoscaling if active."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithNumber("replicas", mcp.Required(), mcp.Description("Number of worker nodes")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			replicasFloat, _ := req.GetArguments()["replicas"].(float64)
+			replicas := int(replicasFloat)
+			if err := sc.SetReplicas(ctx, cluster, replicas); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("setting replicas: %v", err)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Cluster %s MachinePool replicas set to %d", cluster, replicas)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_scaling_auto",
+			mcp.WithDescription("Enable autoscaling on a cluster's MachinePool with min/max worker node bounds."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithNumber("min", mcp.Required(), mcp.Description("Minimum worker nodes")),
+			mcp.WithNumber("max", mcp.Required(), mcp.Description("Maximum worker nodes")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			minFloat, _ := req.GetArguments()["min"].(float64)
+			maxFloat, _ := req.GetArguments()["max"].(float64)
+			min, max := int(minFloat), int(maxFloat)
+			if min >= max {
+				return mcp.NewToolResultError(fmt.Sprintf("min (%d) must be less than max (%d)", min, max)), nil
+			}
+			if err := sc.EnableAutoscaling(ctx, cluster, min, max); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("enabling autoscaling: %v", err)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Cluster %s MachinePool autoscaling enabled (min=%d max=%d)", cluster, min, max)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_scaling_list",
+			mcp.WithDescription("List all MachinePools across the fleet with replicas and autoscaling info."),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			pools, err := sc.ListMachinePools(ctx)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("listing MachinePools: %v", err)), nil
+			}
+			result := map[string]interface{}{
+				"count": len(pools),
+				"pools": pools,
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
 		},
 	)
 }
