@@ -45,6 +45,9 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-36 | Hub backup and restore | 📋 Planned | `internal/backup/` |
 | UC-37 | Worker node flavor change (rolling replacement) | 📋 Planned | `internal/scaling/` |
 | UC-38 | HyperShift (HostedCluster) provisioning | 📋 Planned | `internal/provisioning/` |
+| UC-39 | Cloud-provider native scaling for imported clusters | 📋 Planned | `internal/scaling/` |
+| UC-40 | Cluster API (CAPI) provisioning for vanilla Kubernetes | 📋 Planned | `internal/provisioning/` |
+| UC-41 | Kubernetes cluster hibernate via CAPI scale-to-zero | 📋 Planned | `internal/lifecycle/` |
 
 ### PoC Priority Areas
 
