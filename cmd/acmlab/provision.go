@@ -39,7 +39,7 @@ func provisionCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := provisioning.New(c, cfg)
+			mgr := provisioning.New(c, cfg, logger)
 
 			opts := provisioning.ClusterOpts{
 				Name:           args[0],
@@ -127,7 +127,7 @@ func provisionDestroyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := provisioning.New(c, cfg)
+			mgr := provisioning.New(c, cfg, logger)
 			ctx := context.Background()
 
 			work := make([]batch.Work, len(items))
@@ -192,7 +192,7 @@ func provisionStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := provisioning.New(c, cfg)
+			mgr := provisioning.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// single-item: preserve existing detailed output
@@ -260,7 +260,7 @@ func provisionListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := provisioning.New(c, cfg)
+			mgr := provisioning.New(c, cfg, logger)
 			clusters, err := mgr.List(context.Background())
 			if err != nil {
 				return err
@@ -287,7 +287,7 @@ func provisionImageSetsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := provisioning.New(c, cfg)
+			mgr := provisioning.New(c, cfg, logger)
 			sets, err := mgr.ListImageSets(context.Background())
 			if err != nil {
 				return err

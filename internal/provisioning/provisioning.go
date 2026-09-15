@@ -3,6 +3,7 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -46,10 +47,11 @@ type ClusterInfo struct {
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 var supportedPlatforms = map[string]bool{
@@ -90,6 +92,7 @@ func (m *Manager) applyDefaults(opts *ClusterOpts) {
 }
 
 func (m *Manager) Create(ctx context.Context, opts ClusterOpts) error {
+	m.logger.Info("provisioning.Create", "cluster", opts.Name)
 	m.applyDefaults(&opts)
 
 	if !supportedPlatforms[opts.Platform] {
@@ -169,6 +172,7 @@ func (m *Manager) Create(ctx context.Context, opts ClusterOpts) error {
 }
 
 func (m *Manager) Destroy(ctx context.Context, name string) error {
+	m.logger.Info("provisioning.Destroy", "cluster", name)
 	err := m.client.Delete(ctx, client.GVRClusterDeployment, name, name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("deleting ClusterDeployment %s: %w", name, err)
@@ -180,6 +184,7 @@ func (m *Manager) Destroy(ctx context.Context, name string) error {
 }
 
 func (m *Manager) Status(ctx context.Context, name string) (*ClusterInfo, error) {
+	m.logger.Info("provisioning.Status", "cluster", name)
 	obj, err := m.client.Get(ctx, client.GVRClusterDeployment, name, name)
 	if err != nil {
 		return nil, fmt.Errorf("getting ClusterDeployment %s: %w", name, err)
@@ -188,6 +193,7 @@ func (m *Manager) Status(ctx context.Context, name string) (*ClusterInfo, error)
 }
 
 func (m *Manager) List(ctx context.Context) ([]ClusterInfo, error) {
+	m.logger.Info("provisioning.List")
 	list, err := m.client.List(ctx, client.GVRClusterDeployment, "", "acmlab.redhat.com/managed")
 	if err != nil {
 		return nil, fmt.Errorf("listing ClusterDeployments: %w", err)
@@ -200,6 +206,7 @@ func (m *Manager) List(ctx context.Context) ([]ClusterInfo, error) {
 }
 
 func (m *Manager) WaitForProvision(ctx context.Context, name string, timeout time.Duration) error {
+	m.logger.Info("provisioning.WaitForProvision", "cluster", name)
 	if timeout == 0 {
 		timeout = m.cfg.ProvisionTimeout
 	}
@@ -238,6 +245,7 @@ func (m *Manager) WaitForProvision(ctx context.Context, name string, timeout tim
 }
 
 func (m *Manager) ListImageSets(ctx context.Context) ([]ImageSetInfo, error) {
+	m.logger.Info("provisioning.ListImageSets")
 	list, err := m.client.List(ctx, client.GVRClusterImageSet, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("listing ClusterImageSets: %w", err)

@@ -73,7 +73,7 @@ no per-item kubeconfig is set in the file.`,
 			if err != nil {
 				return err
 			}
-			m := importing.New(c, cfg)
+			m := importing.New(c, cfg, logger)
 			ctx := context.Background()
 
 			work := make([]batch.Work, len(items))
@@ -192,7 +192,7 @@ func detachClusterCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := importing.New(c, cfg)
+			m := importing.New(c, cfg, logger)
 			ctx := context.Background()
 
 			work := make([]batch.Work, len(items))
@@ -257,7 +257,7 @@ func importStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := importing.New(c, cfg)
+			m := importing.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// single cluster with no file: keep existing detailed output
@@ -317,7 +317,7 @@ func importListCmd() *cobra.Command {
 				return err
 			}
 
-			m := importing.New(c, cfg)
+			m := importing.New(c, cfg, logger)
 			ctx := context.Background()
 
 			clusters, err := m.ListImported(ctx)

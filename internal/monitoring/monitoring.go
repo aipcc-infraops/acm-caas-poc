@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -34,13 +35,15 @@ type ClusterResources struct {
 type Monitor struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Monitor {
-	return &Monitor{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Monitor {
+	return &Monitor{client: c, cfg: cfg, logger: logger}
 }
 
 func (m *Monitor) GetClusterResources(ctx context.Context, name string) (*ClusterResources, error) {
+	m.logger.Info("monitoring.GetClusterResources", "cluster", name)
 	obj, err := m.client.Get(ctx, client.GVRManagedClusterInfo, name, name)
 	if err != nil {
 		return nil, fmt.Errorf("getting ManagedClusterInfo %s: %w", name, err)
@@ -49,6 +52,7 @@ func (m *Monitor) GetClusterResources(ctx context.Context, name string) (*Cluste
 }
 
 func (m *Monitor) ListClusterResources(ctx context.Context) ([]ClusterResources, error) {
+	m.logger.Info("monitoring.ListClusterResources")
 	list, err := m.client.List(ctx, client.GVRManagedClusterInfo, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("listing ManagedClusterInfo: %w", err)

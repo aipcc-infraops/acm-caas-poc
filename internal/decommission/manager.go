@@ -3,6 +3,7 @@ package decommission
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -11,13 +12,15 @@ import (
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 func (m *Manager) Start(ctx context.Context, clusterName string, opts StartOpts) (*DecommissionState, error) {
+	m.logger.Info("decommission.Start", "cluster", clusterName)
 	existing, err := getState(ctx, m.client, clusterName)
 	if err == nil {
 		return existing, nil
@@ -47,6 +50,7 @@ func (m *Manager) Start(ctx context.Context, clusterName string, opts StartOpts)
 }
 
 func (m *Manager) Advance(ctx context.Context, clusterName string) (*DecommissionState, error) {
+	m.logger.Info("decommission.Advance", "cluster", clusterName)
 	state, err := getState(ctx, m.client, clusterName)
 	if err != nil {
 		return nil, err
@@ -103,13 +107,16 @@ func (m *Manager) Advance(ctx context.Context, clusterName string) (*Decommissio
 }
 
 func (m *Manager) GetState(ctx context.Context, clusterName string) (*DecommissionState, error) {
+	m.logger.Info("decommission.GetState", "cluster", clusterName)
 	return getState(ctx, m.client, clusterName)
 }
 
 func (m *Manager) List(ctx context.Context) ([]DecommissionState, error) {
+	m.logger.Info("decommission.List")
 	return listStates(ctx, m.client)
 }
 
 func (m *Manager) Cancel(ctx context.Context, clusterName string) error {
+	m.logger.Info("decommission.Cancel", "cluster", clusterName)
 	return deleteState(ctx, m.client, clusterName)
 }

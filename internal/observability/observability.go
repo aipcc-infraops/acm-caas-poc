@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,13 +30,15 @@ const (
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 func (m *Manager) Setup(ctx context.Context) error {
+	m.logger.Info("observability.Setup")
 	steps := []struct {
 		name string
 		fn   func(context.Context) error
@@ -56,6 +59,7 @@ func (m *Manager) Setup(ctx context.Context) error {
 }
 
 func (m *Manager) Teardown(ctx context.Context) error {
+	m.logger.Info("observability.Teardown")
 	steps := []struct {
 		name string
 		fn   func(context.Context) error
@@ -76,6 +80,7 @@ func (m *Manager) Teardown(ctx context.Context) error {
 }
 
 func (m *Manager) Status(ctx context.Context) (string, error) {
+	m.logger.Info("observability.Status")
 	obj, err := m.client.Get(ctx, client.GVRMultiClusterObservability, "", MCOName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
