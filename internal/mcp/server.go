@@ -197,11 +197,16 @@ func registerPolicyTools(s *server.MCPServer, pol *policy.Manager) {
 
 	s.AddTool(
 		mcp.NewTool("acm_apply_policy",
-			mcp.WithDescription("Create a governance policy with placement targeting clusters by label. Idempotent."),
+			mcp.WithDescription("Create a governance policy with placement targeting clusters by label. Supports ConfigurationPolicy (default), OperatorPolicy (--operator), and CertificatePolicy (--cert-expiry). Idempotent."),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Policy name")),
 			mcp.WithString("namespace", mcp.Description("Policy namespace (default: global-set)")),
 			mcp.WithString("remediation", mcp.Description("inform or enforce (default: inform)")),
 			mcp.WithString("registries", mcp.Description("Comma-separated list of allowed container registries")),
+			mcp.WithString("operator", mcp.Description("Operator name for OperatorPolicy")),
+			mcp.WithString("operator_version", mcp.Description("Pin operator to this version")),
+			mcp.WithString("operator_channel", mcp.Description("Pin operator to this channel")),
+			mcp.WithNumber("cert_expiry_days", mcp.Description("Certificate expiry threshold in days for CertificatePolicy")),
+			mcp.WithString("cert_namespaces", mcp.Description("Comma-separated namespaces to monitor for cert expiry")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			name, _ := req.RequireString("name")
@@ -218,6 +223,21 @@ func registerPolicyTools(s *server.MCPServer, pol *policy.Manager) {
 				for _, r := range splitTrim(registriesStr) {
 					opts.AllowedRegistries = append(opts.AllowedRegistries, r)
 				}
+			}
+			if op, ok := req.GetArguments()["operator"].(string); ok && op != "" {
+				opts.OperatorName = op
+			}
+			if v, ok := req.GetArguments()["operator_version"].(string); ok {
+				opts.OperatorVersion = v
+			}
+			if ch, ok := req.GetArguments()["operator_channel"].(string); ok {
+				opts.OperatorChannel = ch
+			}
+			if days, ok := req.GetArguments()["cert_expiry_days"].(float64); ok && days > 0 {
+				opts.CertExpiryDays = int(days)
+			}
+			if ns, ok := req.GetArguments()["cert_namespaces"].(string); ok && ns != "" {
+				opts.CertNamespaces = splitTrim(ns)
 			}
 			if err := pol.Apply(ctx, opts); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil

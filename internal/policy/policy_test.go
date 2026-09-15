@@ -494,6 +494,188 @@ func TestSetDisabledDefaultsNamespace(t *testing.T) {
 	}
 }
 
+func TestApplyOperatorPolicy(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{
+		Name:            "gpu-pin",
+		Namespace:       DefaultNamespace,
+		OperatorName:    "gpu-sharing-operator",
+		OperatorVersion: "2.17.3",
+		OperatorChannel: "stable-2.17",
+		ClusterLabels:   map[string]string{"gpu": "true"},
+	}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply OperatorPolicy failed: %v", err)
+	}
+
+	obj, err := c.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "gpu-pin")
+	if err != nil {
+		t.Fatalf("policy not created: %v", err)
+	}
+
+	templates, _, _ := unstructured.NestedSlice(obj.Object, "spec", "policy-templates")
+	if len(templates) != 1 {
+		t.Fatalf("got %d policy-templates, want 1", len(templates))
+	}
+
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+
+	if objDef["kind"] != "OperatorPolicy" {
+		t.Errorf("kind = %v, want OperatorPolicy", objDef["kind"])
+	}
+	if objDef["apiVersion"] != "policy.open-cluster-management.io/v1beta1" {
+		t.Errorf("apiVersion = %v, want policy.open-cluster-management.io/v1beta1", objDef["apiVersion"])
+	}
+
+	spec := objDef["spec"].(map[string]interface{})
+	sub := spec["subscription"].(map[string]interface{})
+	if sub["name"] != "gpu-sharing-operator" {
+		t.Errorf("subscription.name = %v, want gpu-sharing-operator", sub["name"])
+	}
+	if sub["channel"] != "stable-2.17" {
+		t.Errorf("subscription.channel = %v, want stable-2.17", sub["channel"])
+	}
+
+	versions := spec["versions"].([]interface{})
+	if len(versions) != 1 || versions[0] != "2.17.3" {
+		t.Errorf("versions = %v, want [2.17.3]", versions)
+	}
+}
+
+func TestApplyOperatorPolicyNoVersion(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{
+		Name:         "operator-no-ver",
+		Namespace:    DefaultNamespace,
+		OperatorName: "my-operator",
+	}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+
+	obj, _ := c.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "operator-no-ver")
+	templates, _, _ := unstructured.NestedSlice(obj.Object, "spec", "policy-templates")
+	tmpl := templates[0].(map[string]interface{})
+	spec := tmpl["objectDefinition"].(map[string]interface{})["spec"].(map[string]interface{})
+
+	if _, ok := spec["versions"]; ok {
+		t.Error("versions should not be set when OperatorVersion is empty")
+	}
+}
+
+func TestApplyCertificatePolicy(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{
+		Name:           "cert-check",
+		Namespace:      DefaultNamespace,
+		CertExpiryDays: 30,
+		CertNamespaces: []string{"openshift-config", "openshift-ingress", "kube-system"},
+	}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply CertificatePolicy failed: %v", err)
+	}
+
+	obj, err := c.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "cert-check")
+	if err != nil {
+		t.Fatalf("policy not created: %v", err)
+	}
+
+	templates, _, _ := unstructured.NestedSlice(obj.Object, "spec", "policy-templates")
+	if len(templates) != 1 {
+		t.Fatalf("got %d policy-templates, want 1", len(templates))
+	}
+
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+
+	if objDef["kind"] != "CertificatePolicy" {
+		t.Errorf("kind = %v, want CertificatePolicy", objDef["kind"])
+	}
+
+	spec := objDef["spec"].(map[string]interface{})
+	if spec["minimumDuration"] != "720h" {
+		t.Errorf("minimumDuration = %v, want 720h", spec["minimumDuration"])
+	}
+	if spec["severity"] != "high" {
+		t.Errorf("severity = %v, want high", spec["severity"])
+	}
+
+	nsSelector := spec["namespaceSelector"].(map[string]interface{})
+	include := nsSelector["include"].([]interface{})
+	if len(include) != 3 {
+		t.Errorf("got %d namespaces, want 3", len(include))
+	}
+}
+
+func TestApplyCertificatePolicyDefaults(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{
+		Name:           "cert-default",
+		Namespace:      DefaultNamespace,
+		CertExpiryDays: 14,
+	}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+
+	obj, _ := c.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "cert-default")
+	templates, _, _ := unstructured.NestedSlice(obj.Object, "spec", "policy-templates")
+	tmpl := templates[0].(map[string]interface{})
+	spec := tmpl["objectDefinition"].(map[string]interface{})["spec"].(map[string]interface{})
+
+	if spec["minimumDuration"] != "336h" {
+		t.Errorf("minimumDuration = %v, want 336h (14 days)", spec["minimumDuration"])
+	}
+
+	nsSelector := spec["namespaceSelector"].(map[string]interface{})
+	include := nsSelector["include"].([]interface{})
+	if len(include) != 2 {
+		t.Errorf("got %d default namespaces, want 2", len(include))
+	}
+}
+
+func TestBuildPolicyTemplatesConfigurationPolicy(t *testing.T) {
+	opts := PolicyOpts{Name: "test"}
+	templates := buildPolicyTemplates(opts, "inform")
+	if len(templates) != 1 {
+		t.Fatalf("got %d templates, want 1", len(templates))
+	}
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	if objDef["kind"] != "ConfigurationPolicy" {
+		t.Errorf("default kind = %v, want ConfigurationPolicy", objDef["kind"])
+	}
+}
+
+func TestBuildPolicyTemplatesOperatorPolicy(t *testing.T) {
+	opts := PolicyOpts{Name: "test", OperatorName: "my-op"}
+	templates := buildPolicyTemplates(opts, "inform")
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	if objDef["kind"] != "OperatorPolicy" {
+		t.Errorf("kind = %v, want OperatorPolicy", objDef["kind"])
+	}
+}
+
+func TestBuildPolicyTemplatesCertificatePolicy(t *testing.T) {
+	opts := PolicyOpts{Name: "test", CertExpiryDays: 7}
+	templates := buildPolicyTemplates(opts, "inform")
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	if objDef["kind"] != "CertificatePolicy" {
+		t.Errorf("kind = %v, want CertificatePolicy", objDef["kind"])
+	}
+}
+
 func TestParsePolicyInfoBadStatusEntry(t *testing.T) {
 	obj := map[string]interface{}{
 		"metadata": map[string]interface{}{"name": "test", "namespace": "ns"},

@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -14,6 +15,11 @@ type PolicyOpts struct {
 	RemediationAction string
 	ClusterLabels     map[string]string
 	AllowedRegistries []string
+	OperatorName      string
+	OperatorVersion   string
+	OperatorChannel   string
+	CertExpiryDays    int
+	CertNamespaces    []string
 }
 
 func (m *Manager) ensurePolicy(ctx context.Context, namespace string, opts PolicyOpts) error {
@@ -22,7 +28,7 @@ func (m *Manager) ensurePolicy(ctx context.Context, namespace string, opts Polic
 		remediation = "inform"
 	}
 
-	objectTemplates := buildObjectTemplates(opts)
+	policyTemplates := buildPolicyTemplates(opts, remediation)
 
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -35,23 +41,7 @@ func (m *Manager) ensurePolicy(ctx context.Context, namespace string, opts Polic
 			"spec": map[string]interface{}{
 				"disabled":          false,
 				"remediationAction": remediation,
-				"policy-templates": []interface{}{
-					map[string]interface{}{
-						"objectDefinition": map[string]interface{}{
-							"apiVersion": "policy.open-cluster-management.io/v1",
-							"kind":       "ConfigurationPolicy",
-							"metadata": map[string]interface{}{
-								"name": opts.Name + "-config",
-							},
-							"spec": map[string]interface{}{
-								"remediationAction":  remediation,
-								"severity":           "medium",
-								"object-templates":   objectTemplates,
-								"pruneObjectBehavior": "None",
-							},
-						},
-					},
-				},
+				"policy-templates":  policyTemplates,
 			},
 		},
 	}
@@ -134,11 +124,101 @@ func (m *Manager) ensurePlacementBinding(ctx context.Context, namespace string, 
 	return m.client.CreateIfNotExists(ctx, client.GVRPlacementBinding, namespace, obj)
 }
 
-func buildObjectTemplates(opts PolicyOpts) []interface{} {
-	if len(opts.AllowedRegistries) > 0 {
-		return buildRegistryRestrictionTemplates(opts.AllowedRegistries)
+func buildPolicyTemplates(opts PolicyOpts, remediation string) []interface{} {
+	if opts.OperatorName != "" {
+		return buildOperatorPolicyTemplate(opts)
 	}
-	return buildNamespaceTemplate(opts.Name)
+	if opts.CertExpiryDays > 0 {
+		return buildCertificatePolicyTemplate(opts, remediation)
+	}
+	return buildConfigurationPolicyTemplate(opts, remediation)
+}
+
+func buildConfigurationPolicyTemplate(opts PolicyOpts, remediation string) []interface{} {
+	var objectTemplates []interface{}
+	if len(opts.AllowedRegistries) > 0 {
+		objectTemplates = buildRegistryRestrictionTemplates(opts.AllowedRegistries)
+	} else {
+		objectTemplates = buildNamespaceTemplate(opts.Name)
+	}
+	return []interface{}{
+		map[string]interface{}{
+			"objectDefinition": map[string]interface{}{
+				"apiVersion": "policy.open-cluster-management.io/v1",
+				"kind":       "ConfigurationPolicy",
+				"metadata": map[string]interface{}{
+					"name": opts.Name + "-config",
+				},
+				"spec": map[string]interface{}{
+					"remediationAction":   remediation,
+					"severity":            "medium",
+					"object-templates":    objectTemplates,
+					"pruneObjectBehavior": "None",
+				},
+			},
+		},
+	}
+}
+
+func buildOperatorPolicyTemplate(opts PolicyOpts) []interface{} {
+	spec := map[string]interface{}{
+		"remediationAction": "inform",
+		"severity":          "medium",
+		"complianceType":    "musthave",
+		"subscription": map[string]interface{}{
+			"name": opts.OperatorName,
+		},
+	}
+	if opts.OperatorVersion != "" {
+		spec["versions"] = []interface{}{opts.OperatorVersion}
+	}
+	if opts.OperatorChannel != "" {
+		sub := spec["subscription"].(map[string]interface{})
+		sub["channel"] = opts.OperatorChannel
+	}
+	return []interface{}{
+		map[string]interface{}{
+			"objectDefinition": map[string]interface{}{
+				"apiVersion": "policy.open-cluster-management.io/v1beta1",
+				"kind":       "OperatorPolicy",
+				"metadata": map[string]interface{}{
+					"name": opts.Name + "-operator",
+				},
+				"spec": spec,
+			},
+		},
+	}
+}
+
+func buildCertificatePolicyTemplate(opts PolicyOpts, remediation string) []interface{} {
+	namespaces := opts.CertNamespaces
+	if len(namespaces) == 0 {
+		namespaces = []string{"openshift-config", "openshift-ingress"}
+	}
+	nsSelector := make([]interface{}, len(namespaces))
+	for i, ns := range namespaces {
+		nsSelector[i] = ns
+	}
+
+	return []interface{}{
+		map[string]interface{}{
+			"objectDefinition": map[string]interface{}{
+				"apiVersion": "policy.open-cluster-management.io/v1",
+				"kind":       "CertificatePolicy",
+				"metadata": map[string]interface{}{
+					"name": opts.Name + "-cert",
+				},
+				"spec": map[string]interface{}{
+					"remediationAction": remediation,
+					"severity":          "high",
+					"minimumDuration":   fmt.Sprintf("%dh", opts.CertExpiryDays*24),
+					"namespaceSelector": map[string]interface{}{
+						"include": nsSelector,
+					},
+				},
+			},
+		},
+	}
 }
 
 func buildNamespaceTemplate(name string) []interface{} {

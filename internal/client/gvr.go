@@ -72,4 +72,10 @@ var (
 	GVRClusterCurator = schema.GroupVersionResource{
 		Group: "cluster.open-cluster-management.io", Version: "v1beta1", Resource: "clustercurators",
 	}
+	GVROperatorPolicy = schema.GroupVersionResource{
+		Group: "policy.open-cluster-management.io", Version: "v1beta1", Resource: "operatorpolicies",
+	}
+	GVRCertificatePolicy = schema.GroupVersionResource{
+		Group: "policy.open-cluster-management.io", Version: "v1", Resource: "certificatepolicies",
+	}
 )
