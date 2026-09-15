@@ -417,6 +417,72 @@ $ acmlab registry remove import-test
 Image registry mirror removed for cluster import-test
 ```
 
+### Upgrade
+
+#### `acmlab upgrade status <cluster>`
+
+Shows upgrade status for a cluster: current version, desired version, channel, available updates, upgrade method, and whether an upgrade is in progress.
+
+Options:
+- `--json` — output as JSON
+
+```
+$ acmlab upgrade status spoke2
+Cluster:         spoke2
+Type:            OCP
+Upgrade method:  hive
+Current version: 4.22.9
+Desired version: 4.22.9
+Channel:         stable-4.22
+Available:       4.22.10, 4.22.11, 4.22.12
+```
+
+#### `acmlab upgrade list`
+
+Lists clusters with available OCP upgrades. Excludes vanilla Kubernetes clusters (report-only) and clusters already at the latest version.
+
+Options:
+- `--json` — output as JSON
+
+```
+$ acmlab upgrade list
+CLUSTER              VERSION      CHANNEL          METHOD       AVAILABLE
+infraops1            4.21.29      stable-4.21      manifestwork 4.21.30, 4.21.31
+spoke2               4.22.9       stable-4.22      hive         4.22.10, 4.22.11, 4.22.12
+```
+
+#### `acmlab upgrade set-channel <cluster> <channel>`
+
+Sets the OCP update channel for a cluster by creating a ManifestWork that patches the spoke ClusterVersion via ServerSideApply. Idempotent — updates existing ManifestWork if present.
+
+```
+$ acmlab upgrade set-channel spoke2 fast-4.22
+Channel set to fast-4.22 for cluster spoke2
+```
+
+#### `acmlab upgrade start <cluster> <version>`
+
+Triggers a cluster upgrade by creating a ManifestWork that patches the spoke ClusterVersion desiredUpdate. Idempotent — updates existing ManifestWork if present.
+
+```
+$ acmlab upgrade start spoke2 4.22.10
+Upgrade to 4.22.10 started for cluster spoke2
+```
+
+#### `acmlab upgrade history <cluster>`
+
+Shows version upgrade history for a cluster — past versions with state, start time, and completion time.
+
+Options:
+- `--json` — output as JSON
+
+```
+$ acmlab upgrade history spoke2
+VERSION      STATE        STARTED                  COMPLETED
+4.22.9       Completed    2026-09-01T10:00:00Z     2026-09-01T11:30:00Z
+4.22.8       Completed    2026-08-15T08:00:00Z     2026-08-15T09:45:00Z
+```
+
 ### Decommission
 
 #### `acmlab decommission start <cluster>`
@@ -596,3 +662,8 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_decommission_list` | UC-08 | List all active decommission workflows |
 | `acm_decommission_cancel` | UC-08 | Cancel workflow (keeps cluster intact) |
 | `acm_decommission_audit` | UC-08 | Standalone audit without starting decommission |
+| `acm_upgrade_status` | UC-09 | Upgrade status: version, channel, available updates, method |
+| `acm_upgrade_list` | UC-09 | List clusters with available OCP upgrades |
+| `acm_upgrade_set_channel` | UC-09 | Set OCP update channel via ManifestWork |
+| `acm_upgrade_start` | UC-09 | Start OCP version upgrade via ManifestWork |
+| `acm_upgrade_history` | UC-09 | Version upgrade history with state and timestamps |
