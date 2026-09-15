@@ -3,6 +3,7 @@ package tenant
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -45,13 +46,15 @@ type ResourceStatus struct {
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 func (m *Manager) Deploy(ctx context.Context, opts TenantOpts) error {
+	m.logger.Info("tenant.Deploy", "tenant", opts.Name, "cluster", opts.Cluster)
 	name := manifestWorkName(opts.Name)
 	manifests := buildTenantManifests(opts)
 
@@ -77,11 +80,13 @@ func (m *Manager) Deploy(ctx context.Context, opts TenantOpts) error {
 }
 
 func (m *Manager) Remove(ctx context.Context, tenantName, cluster string) error {
+	m.logger.Info("tenant.Remove", "tenant", tenantName, "cluster", cluster)
 	name := manifestWorkName(tenantName)
 	return m.deleteIfExists(ctx, client.GVRManifestWork, cluster, name)
 }
 
 func (m *Manager) List(ctx context.Context, cluster string) ([]TenantInfo, error) {
+	m.logger.Info("tenant.List", "cluster", cluster)
 	list, err := m.client.List(ctx, client.GVRManifestWork, cluster, "acmlab.redhat.com/tenant")
 	if err != nil {
 		return nil, fmt.Errorf("listing tenant manifestworks: %w", err)
@@ -94,6 +99,7 @@ func (m *Manager) List(ctx context.Context, cluster string) ([]TenantInfo, error
 }
 
 func (m *Manager) Status(ctx context.Context, tenantName, cluster string) (*ManifestStatus, error) {
+	m.logger.Info("tenant.Status", "tenant", tenantName, "cluster", cluster)
 	name := manifestWorkName(tenantName)
 	obj, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
 	if err != nil {

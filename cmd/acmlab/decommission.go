@@ -41,7 +41,7 @@ func decommissionStartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := decommission.New(c, cfg)
+			m := decommission.New(c, cfg, logger)
 
 			if deadline == "" {
 				deadline = time.Now().AddDate(0, 0, 14).UTC().Format(time.RFC3339)
@@ -78,7 +78,7 @@ func decommissionAdvanceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := decommission.New(c, cfg)
+			m := decommission.New(c, cfg, logger)
 
 			state, err := m.Advance(context.Background(), args[0])
 			if err != nil {
@@ -102,7 +102,7 @@ func decommissionStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := decommission.New(c, cfg)
+			m := decommission.New(c, cfg, logger)
 
 			state, err := m.GetState(context.Background(), args[0])
 			if err != nil {
@@ -141,7 +141,7 @@ func decommissionListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := decommission.New(c, cfg)
+			m := decommission.New(c, cfg, logger)
 
 			states, err := m.List(context.Background())
 			if err != nil {
@@ -180,7 +180,7 @@ func decommissionCancelCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := decommission.New(c, cfg)
+			m := decommission.New(c, cfg, logger)
 
 			if err := m.Cancel(context.Background(), args[0]); err != nil {
 				return err
@@ -201,7 +201,7 @@ func decommissionAuditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := decommission.New(c, cfg)
+			m := decommission.New(c, cfg, logger)
 
 			report, err := m.Audit(context.Background(), args[0])
 			if err != nil {

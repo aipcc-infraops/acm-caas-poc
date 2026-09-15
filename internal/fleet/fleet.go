@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -27,13 +28,15 @@ type ClusterInfo struct {
 type Inspector struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Inspector {
-	return &Inspector{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Inspector {
+	return &Inspector{client: c, cfg: cfg, logger: logger}
 }
 
 func (i *Inspector) ListClusters(ctx context.Context) ([]ClusterInfo, error) {
+	i.logger.Info("fleet.ListClusters")
 	list, err := i.client.List(ctx, client.GVRManagedCluster, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("listing managed clusters: %w", err)
@@ -46,6 +49,7 @@ func (i *Inspector) ListClusters(ctx context.Context) ([]ClusterInfo, error) {
 }
 
 func (i *Inspector) GetCluster(ctx context.Context, name string) (*ClusterInfo, error) {
+	i.logger.Info("fleet.GetCluster", "cluster", name)
 	obj, err := i.client.Get(ctx, client.GVRManagedCluster, "", name)
 	if err != nil {
 		return nil, fmt.Errorf("getting managed cluster %s: %w", name, err)

@@ -12,6 +12,7 @@ import (
 )
 
 func (m *Manager) Audit(ctx context.Context, clusterName string) (*AuditReport, error) {
+	m.logger.Info("decommission.Audit", "cluster", clusterName)
 	mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", clusterName)
 	if err != nil {
 		return nil, fmt.Errorf("getting ManagedCluster %s: %w", clusterName, err)

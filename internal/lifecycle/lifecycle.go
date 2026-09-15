@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -54,18 +55,21 @@ type DiagnosticReport struct {
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
 // New creates a new lifecycle Manager
-func New(c *client.Client, cfg config.Config) *Manager {
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 	return &Manager{
 		client: c,
 		cfg:    cfg,
+		logger: logger,
 	}
 }
 
 // Hibernate hibernates a Hive-provisioned cluster by patching powerState to Hibernating
 func (m *Manager) Hibernate(ctx context.Context, namespace, name string) error {
+	m.logger.Info("lifecycle.Hibernate", "cluster", name)
 	currentState, err := m.GetPowerState(ctx, namespace, name)
 	if err != nil {
 		return fmt.Errorf("checking current power state: %w", err)
@@ -81,6 +85,7 @@ func (m *Manager) Hibernate(ctx context.Context, namespace, name string) error {
 
 // Resume resumes a hibernated cluster by patching powerState to Running
 func (m *Manager) Resume(ctx context.Context, namespace, name string) error {
+	m.logger.Info("lifecycle.Resume", "cluster", name)
 	currentState, err := m.GetPowerState(ctx, namespace, name)
 	if err != nil {
 		return fmt.Errorf("checking current power state: %w", err)
@@ -96,6 +101,7 @@ func (m *Manager) Resume(ctx context.Context, namespace, name string) error {
 
 // GetPowerState returns the current power state of a cluster
 func (m *Manager) GetPowerState(ctx context.Context, namespace, name string) (PowerState, error) {
+	m.logger.Info("lifecycle.GetPowerState", "cluster", name)
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -118,6 +124,7 @@ func (m *Manager) GetPowerState(ctx context.Context, namespace, name string) (Po
 
 // GetPowerStateStatus returns the power state from status.powerState (reflects actual state)
 func (m *Manager) GetPowerStateStatus(ctx context.Context, namespace, name string) (PowerState, error) {
+	m.logger.Info("lifecycle.GetPowerStateStatus", "cluster", name)
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -140,6 +147,7 @@ func (m *Manager) GetPowerStateStatus(ctx context.Context, namespace, name strin
 
 // WaitForPowerState waits for the cluster power state to reach the target state
 func (m *Manager) WaitForPowerState(ctx context.Context, namespace, name string, target PowerState, timeout time.Duration) error {
+	m.logger.Info("lifecycle.WaitForPowerState", "cluster", name, "target", string(target))
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		state, err := m.GetPowerStateStatus(ctx, namespace, name)
 		if err != nil {
@@ -184,6 +192,7 @@ type LifecycleSupportReason struct {
 // Callers use this instead of ClusterSupportsLifecycle to distinguish
 // "not yet implemented" from "will never be supported".
 func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name string) (*LifecycleSupportReason, error) {
+	m.logger.Info("lifecycle.CheckLifecycleSupport", "cluster", name)
 	_, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err == nil {
 		return &LifecycleSupportReason{Support: LifecycleFull}, nil
@@ -218,6 +227,7 @@ func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name str
 // ClusterSupportsLifecycle checks if a cluster supports lifecycle operations (has ClusterDeployment).
 // Deprecated: use CheckLifecycleSupport for richer error context.
 func (m *Manager) ClusterSupportsLifecycle(ctx context.Context, namespace, name string) (bool, error) {
+	m.logger.Info("lifecycle.ClusterSupportsLifecycle", "cluster", name)
 	r, err := m.CheckLifecycleSupport(ctx, namespace, name)
 	if err != nil {
 		return false, err
@@ -226,6 +236,7 @@ func (m *Manager) ClusterSupportsLifecycle(ctx context.Context, namespace, name 
 }
 
 func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, error) {
+	m.logger.Info("lifecycle.ListClustersWithLifecycle")
 	cds, err := m.client.List(ctx, client.GVRClusterDeployment, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("listing ClusterDeployments: %w", err)
@@ -241,6 +252,7 @@ func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, erro
 }
 
 func (m *Manager) Diagnose(ctx context.Context, namespace, name string) (*DiagnosticReport, error) {
+	m.logger.Info("lifecycle.Diagnose", "cluster", name)
 	report := &DiagnosticReport{
 		Cluster: fmt.Sprintf("%s/%s", namespace, name),
 	}

@@ -35,7 +35,7 @@ func tenantDeployCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := tenant.New(c, cfg)
+			mgr := tenant.New(c, cfg, logger)
 			opts := tenant.TenantOpts{
 				Name:        args[0],
 				Cluster:     cluster,
@@ -72,7 +72,7 @@ func tenantRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := tenant.New(c, cfg)
+			mgr := tenant.New(c, cfg, logger)
 			fmt.Printf("Removing tenant %s from cluster %s...\n", args[0], cluster)
 			if err := mgr.Remove(context.Background(), args[0], cluster); err != nil {
 				return err
@@ -96,7 +96,7 @@ func tenantListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := tenant.New(c, cfg)
+			mgr := tenant.New(c, cfg, logger)
 			tenants, err := mgr.List(context.Background(), cluster)
 			if err != nil {
 				return err
@@ -128,7 +128,7 @@ func tenantStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := tenant.New(c, cfg)
+			mgr := tenant.New(c, cfg, logger)
 			ms, err := mgr.Status(context.Background(), args[0], cluster)
 			if err != nil {
 				return err

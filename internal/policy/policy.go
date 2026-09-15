@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -35,13 +36,15 @@ type PolicyInfo struct {
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 func (m *Manager) Apply(ctx context.Context, opts PolicyOpts) error {
+	m.logger.Info("policy.Apply", "policy", opts.Name)
 	ns := opts.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
@@ -64,6 +67,7 @@ func (m *Manager) Apply(ctx context.Context, opts PolicyOpts) error {
 }
 
 func (m *Manager) Remove(ctx context.Context, name, namespace string) error {
+	m.logger.Info("policy.Remove", "policy", name)
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
@@ -86,6 +90,7 @@ func (m *Manager) Remove(ctx context.Context, name, namespace string) error {
 }
 
 func (m *Manager) List(ctx context.Context, namespace string) ([]PolicyInfo, error) {
+	m.logger.Info("policy.List")
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
@@ -101,6 +106,7 @@ func (m *Manager) List(ctx context.Context, namespace string) ([]PolicyInfo, err
 }
 
 func (m *Manager) Get(ctx context.Context, name, namespace string) (*PolicyInfo, error) {
+	m.logger.Info("policy.Get", "policy", name)
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
@@ -113,6 +119,7 @@ func (m *Manager) Get(ctx context.Context, name, namespace string) (*PolicyInfo,
 }
 
 func (m *Manager) SetRemediation(ctx context.Context, name, namespace, action string) error {
+	m.logger.Info("policy.SetRemediation", "policy", name, "action", action)
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
@@ -130,6 +137,7 @@ func (m *Manager) SetRemediation(ctx context.Context, name, namespace, action st
 }
 
 func (m *Manager) SetDisabled(ctx context.Context, name, namespace string, disabled bool) error {
+	m.logger.Info("policy.SetDisabled", "policy", name, "disabled", disabled)
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
