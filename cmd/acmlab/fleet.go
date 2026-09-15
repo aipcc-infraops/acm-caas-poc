@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -83,6 +84,11 @@ func fleetStatusCmd() *cobra.Command {
 				info, err := fi.GetCluster(ctx, items[0].Name)
 				if err != nil {
 					return err
+				}
+				if outputJSON {
+					data, _ := json.MarshalIndent(info, "", "  ")
+					fmt.Println(string(data))
+					return nil
 				}
 				fmt.Printf("Cluster: %s\n", info.Name)
 				fmt.Printf("Version: %s\n", info.Version)
