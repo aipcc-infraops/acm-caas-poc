@@ -14,6 +14,7 @@ acm-caas-poc/
 │   ├── import.go                  # import cluster/detach/status/list
 │   ├── registry.go                # registry list-images/mirror-script/configure/status/remove
 │   ├── scaling.go                 # scaling list/get/set/auto
+│   ├── decommission.go            # decommission start/advance/status/list/cancel/audit
 │   └── mcp.go                     # mcp serve (MCP server on stdio)
 │
 ├── internal/
@@ -82,7 +83,8 @@ acm-caas-poc/
 │   │   ├── backup.go              # Backup() — exports cluster state to YAML
 │   │   ├── drain.go               # Drain() — cordon + evict via spoke kubeconfig
 │   │   ├── cleanup.go             # Cleanup() — removes hub-side resources
-│   │   └── decommission_test.go
+│   │   ├── state_test.go          # State machine unit tests
+│   │   └── decommission_test.go   # Manager, audit, backup, drain, cleanup tests
 │   │
 │   ├── batch/                     # Batch/parallel operations (shared CLI utility)
 │   │   ├── batch.go               # Execute(), PrintSummary(), ToJSON()
@@ -130,6 +132,7 @@ acm-caas-poc/
 │   │   ├── demo-uc06-monitoring.sh
 │   │   ├── demo-uc07-import.sh
 │   │   ├── demo-uc10-scaling.sh
+│   │   ├── demo-uc08-decommission.sh
 │   │   └── demo-uc13-registry.sh
 │   ├── manual/                     # Kubectl/curl manual reference scripts per UC
 │   │   ├── uc-01-provision.sh
@@ -140,6 +143,7 @@ acm-caas-poc/
 │   │   ├── uc-06-monitoring.sh
 │   │   ├── uc-07-import-detach.sh
 │   │   ├── uc-10-scaling.sh
+│   │   ├── uc-08-decommission.sh
 │   │   └── uc-13-registry-mirror.sh
 │   ├── project-structure.md        # This file
 │   └── acmlab-commands.md          # CLI + MCP command reference
