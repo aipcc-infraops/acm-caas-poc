@@ -7,21 +7,15 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// ClusterType represents the distribution type of a managed cluster.
 type ClusterType string
 
 const (
-	// ClusterTypeOCP is an OpenShift cluster (Hive-provisioned or imported).
-	ClusterTypeOCP ClusterType = "OCP"
-	// ClusterTypeKubernetes is a vanilla Kubernetes cluster (CAPI, EKS, AKS, GKE, IKS).
+	ClusterTypeOCP        ClusterType = "OCP"
 	ClusterTypeKubernetes ClusterType = "kubernetes"
-	// ClusterTypeUnknown means the cluster has not yet reported its distribution.
-	ClusterTypeUnknown ClusterType = ""
+	ClusterTypeUnknown    ClusterType = ""
 )
 
-// GetClusterType reads the cluster distribution type from ManagedClusterInfo.
-// ACM sets distributionInfo.type automatically when a cluster joins the hub.
-// Returns ClusterTypeUnknown if the cluster has not yet reported its distribution.
+// GetClusterType reads distributionInfo.type from ManagedClusterInfo.
 func (c *Client) GetClusterType(ctx context.Context, clusterName string) (ClusterType, error) {
 	info, err := c.Get(ctx, GVRManagedClusterInfo, clusterName, clusterName)
 	if err != nil {

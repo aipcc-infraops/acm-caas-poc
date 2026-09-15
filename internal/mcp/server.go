@@ -23,6 +23,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
+	"github.com/pablofelix/acm-caas-poc/internal/upgrade"
 )
 
 func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MCPServer {
@@ -62,6 +63,9 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	decomm := decommission.New(c, cfg, log)
 	registerDecommissionTools(s, decomm)
+
+	upg := upgrade.New(c, cfg, log)
+	registerUpgradeTools(s, upg)
 
 	return s
 }

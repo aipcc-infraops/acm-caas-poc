@@ -32,7 +32,7 @@ to graduate into a ComputeRequest controller.
                     │   fleet, provisioning, policy,       │
                     │   tenant, lifecycle, monitoring,     │
                     │   importing, decommission, scaling,  │
-                    │   registry, observability            │
+                    │   registry, observability, upgrade   │
                     └──────────────┬──────────────────────┘
                                    │
               ┌────────────────────┼────────────────────┐
@@ -114,7 +114,7 @@ methods. Uses `github.com/mark3labs/mcp-go` for the stdio transport.
 | 06 | Thanos-based observability | `observability` | Done |
 | 07 | External cluster import/detach | `importing` | Done |
 | 08 | Legacy cluster decommissioning | `decommission` | Done |
-| 09 | Cluster upgrades (Day-2 OCP) | — | Planned |
+| 09 | Cluster upgrades (Day-2 OCP) | `upgrade` | Done |
 | 10 | Cluster scaling (workers) | `scaling` | Done |
 | 11 | Cost tracking and chargeback | — | Planned |
 | 13 | Registry mirror (ROKS, air-gapped) | `registry` | Done |
