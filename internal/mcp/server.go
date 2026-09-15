@@ -12,6 +12,7 @@ import (
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
+	"github.com/pablofelix/acm-caas-poc/internal/decommission"
 	"github.com/pablofelix/acm-caas-poc/internal/fleet"
 	"github.com/pablofelix/acm-caas-poc/internal/importing"
 	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
@@ -57,6 +58,9 @@ func NewServer(c *client.Client, cfg config.Config) *server.MCPServer {
 
 	sc := scaling.New(c, cfg)
 	registerScalingTools(s, sc)
+
+	decomm := decommission.New(c, cfg)
+	registerDecommissionTools(s, decomm)
 
 	return s
 }
@@ -937,6 +941,104 @@ func registerScalingTools(s *server.MCPServer, sc *scaling.Manager) {
 				"pools": pools,
 			}
 			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+}
+
+func registerDecommissionTools(s *server.MCPServer, m *decommission.Manager) {
+	s.AddTool(
+		mcp.NewTool("acm_decommission_start",
+			mcp.WithDescription("Start decommission workflow for a cluster. Runs audit automatically."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("owner", mcp.Description("Cluster owner email")),
+			mcp.WithString("deadline", mcp.Description("Reclaim deadline ISO 8601")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			owner, _ := req.GetArguments()["owner"].(string)
+			deadline, _ := req.GetArguments()["deadline"].(string)
+			state, err := m.Start(ctx, cluster, decommission.StartOpts{Owner: owner, Deadline: deadline})
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(state, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_decommission_advance",
+			mcp.WithDescription("Advance decommission to the next phase."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			state, err := m.Advance(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(state, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_decommission_status",
+			mcp.WithDescription("Get current decommission state for a cluster."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			state, err := m.GetState(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(state, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_decommission_list",
+			mcp.WithDescription("List all active decommission workflows."),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			states, err := m.List(ctx)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(states, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_decommission_cancel",
+			mcp.WithDescription("Cancel a decommission workflow. Keeps the cluster."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			if err := m.Cancel(ctx, cluster); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Decommission cancelled for %s", cluster)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_decommission_audit",
+			mcp.WithDescription("Run standalone audit for a cluster without starting decommission."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			report, err := m.Audit(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(report, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil
 		},
 	)
