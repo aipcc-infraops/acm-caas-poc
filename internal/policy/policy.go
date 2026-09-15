@@ -152,6 +152,72 @@ func (m *Manager) SetDisabled(ctx context.Context, name, namespace string, disab
 	return nil
 }
 
+type ClusterSetCompliance struct {
+	ClusterSet   string `json:"clusterSet"`
+	Total        int    `json:"total"`
+	Compliant    int    `json:"compliant"`
+	NonCompliant int    `json:"nonCompliant"`
+	Pending      int    `json:"pending"`
+}
+
+func (m *Manager) ComplianceReport(ctx context.Context, namespace string) ([]ClusterSetCompliance, error) {
+	m.logger.Info("policy.ComplianceReport")
+	if namespace == "" {
+		namespace = DefaultNamespace
+	}
+
+	policies, err := m.List(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	clusters, err := m.client.List(ctx, client.GVRManagedCluster, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("listing ManagedClusters: %w", err)
+	}
+
+	clusterToSet := map[string]string{}
+	for _, mc := range clusters.Items {
+		labels := mc.GetLabels()
+		if labels == nil {
+			continue
+		}
+		if setName, ok := labels["cluster.open-cluster-management.io/clusterset"]; ok {
+			clusterToSet[mc.GetName()] = setName
+		}
+	}
+
+	setStats := map[string]*ClusterSetCompliance{}
+	for _, pol := range policies {
+		for _, cc := range pol.ClusterCompliance {
+			setName := clusterToSet[cc.ClusterName]
+			if setName == "" {
+				setName = "default"
+			}
+			stats, ok := setStats[setName]
+			if !ok {
+				stats = &ClusterSetCompliance{ClusterSet: setName}
+				setStats[setName] = stats
+			}
+			stats.Total++
+			switch cc.ComplianceState {
+			case "Compliant":
+				stats.Compliant++
+			case "NonCompliant":
+				stats.NonCompliant++
+			default:
+				stats.Pending++
+			}
+		}
+	}
+
+	result := make([]ClusterSetCompliance, 0, len(setStats))
+	for _, s := range setStats {
+		result = append(result, *s)
+	}
+	return result, nil
+}
+
 func parsePolicyInfo(obj map[string]interface{}) PolicyInfo {
 	info := PolicyInfo{}
 

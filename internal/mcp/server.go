@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
+	"github.com/pablofelix/acm-caas-poc/internal/clusterset"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 	"github.com/pablofelix/acm-caas-poc/internal/decommission"
 	"github.com/pablofelix/acm-caas-poc/internal/fleet"
@@ -66,6 +67,9 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	upg := upgrade.New(c, cfg, log)
 	registerUpgradeTools(s, upg)
+
+	cs := clusterset.New(c, cfg, log)
+	registerClusterSetTools(s, cs)
 
 	return s
 }
