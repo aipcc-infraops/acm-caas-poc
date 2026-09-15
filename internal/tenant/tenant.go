@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -76,13 +74,13 @@ func (m *Manager) Deploy(ctx context.Context, opts TenantOpts) error {
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRManifestWork, opts.Cluster, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRManifestWork, opts.Cluster, obj)
 }
 
 func (m *Manager) Remove(ctx context.Context, tenantName, cluster string) error {
 	m.logger.Info("tenant.Remove", "tenant", tenantName, "cluster", cluster)
 	name := manifestWorkName(tenantName)
-	return m.deleteIfExists(ctx, client.GVRManifestWork, cluster, name)
+	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, name)
 }
 
 func (m *Manager) List(ctx context.Context, cluster string) ([]TenantInfo, error) {
@@ -106,26 +104,6 @@ func (m *Manager) Status(ctx context.Context, tenantName, cluster string) (*Mani
 		return nil, fmt.Errorf("getting tenant manifestwork %s: %w", name, err)
 	}
 	return parseManifestStatus(obj.Object), nil
-}
-
-func (m *Manager) createIfNotExists(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
-	_, err := m.client.Get(ctx, gvr, namespace, obj.GetName())
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-	_, err = m.client.Create(ctx, gvr, namespace, obj)
-	return err
-}
-
-func (m *Manager) deleteIfExists(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
-	err := m.client.Delete(ctx, gvr, namespace, name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
 }
 
 func manifestWorkName(tenantName string) string {

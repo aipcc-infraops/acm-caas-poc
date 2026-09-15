@@ -2,6 +2,7 @@ package decommission
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -609,5 +611,34 @@ func TestCleanupRemovesManifestWorks(t *testing.T) {
 	_, err = m.client.Get(context.Background(), client.GVRManifestWork, "spoke1", "spoke1-tenant")
 	if err == nil {
 		t.Error("ManifestWork should be deleted")
+	}
+}
+
+func TestCleanupLogsWarnOnDeleteErrors(t *testing.T) {
+	objs := setupCluster("spoke1")
+	mw := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "work.open-cluster-management.io/v1",
+			"kind":       "ManifestWork",
+			"metadata":   map[string]interface{}{"name": "spoke1-tenant", "namespace": "spoke1"},
+		},
+	}
+	objs = append(objs, mw)
+	m := newTestManager(objs...)
+
+	fc := m.client.Dynamic.(k8stesting.FakeClient)
+	fc.PrependReactor("delete", "manifestworks", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("connection refused")
+	})
+	fc.PrependReactor("delete", "managedclusters", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("connection refused")
+	})
+	fc.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("connection refused")
+	})
+
+	err := m.Cleanup(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("Cleanup should not return error on delete failures: %v", err)
 	}
 }

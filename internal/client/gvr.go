@@ -69,4 +69,7 @@ var (
 	GVRConfigMap = schema.GroupVersionResource{
 		Group: "", Version: "v1", Resource: "configmaps",
 	}
+	GVRClusterCurator = schema.GroupVersionResource{
+		Group: "cluster.open-cluster-management.io", Version: "v1beta1", Resource: "clustercurators",
+	}
 )

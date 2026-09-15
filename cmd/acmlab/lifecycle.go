@@ -260,7 +260,7 @@ func resumeCmd() *cobra.Command {
 						if err != nil {
 							return "", err
 						}
-						if err2 := lifecycleSupportErr(item.Name, "hibernate", support); err2 != nil {
+						if err2 := lifecycleSupportErr(item.Name, "resume", support); err2 != nil {
 							return "", err2
 						}
 						if err := m.Resume(ctx, ns, item.Name); err != nil {
@@ -383,7 +383,7 @@ func lifecycleStatusCmd() *cobra.Command {
 						if err != nil {
 							return "", err
 						}
-						if err2 := lifecycleSupportErr(item.Name, "hibernate", support); err2 != nil {
+						if err2 := lifecycleSupportErr(item.Name, "status", support); err2 != nil {
 							return "no ClusterDeployment — imported cluster", nil
 						}
 						specState, err := m.GetPowerState(ctx, ns, item.Name)
