@@ -174,6 +174,120 @@ Removes a ManagedClusterSet and its binding.
 Options:
 - `--namespace` — namespace of the binding (required)
 
+### Identity Providers
+
+#### `acmlab idp configure <name>`
+
+Configures an Identity Provider on a cluster via ManifestWork. Creates an OAuth CR and Secret in openshift-config. Supports five IdP types: GitHub, Google, htpasswd, LDAP, OIDC (Keycloak).
+
+Options:
+- `--cluster` — target cluster (required)
+- `--type` — IdP type: github, google, htpasswd, ldap, oidc (required)
+- `--client-id` — OAuth client ID (github, google, oidc)
+- `--client-secret` — OAuth client secret (github, google, oidc)
+- `--organizations` — GitHub organizations (comma-separated)
+- `--issuer-url` — OIDC issuer URL (oidc)
+- `--users` — htpasswd users (user1:pass1,user2:pass2)
+- `--ldap-url` — LDAP server URL
+- `--bind-dn` — LDAP bind DN
+- `--bind-password` — LDAP bind password
+- `--insecure` — LDAP insecure connection
+
+```
+$ acmlab idp configure corp-github --cluster spoke1 --type github \
+    --client-id placeholder-id --client-secret placeholder-secret \
+    --organizations example-org
+IdP corp-github (github) configured on cluster spoke1
+```
+
+#### `acmlab idp list`
+
+Lists Identity Providers configured on a cluster.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--json` — output as JSON
+
+```
+$ acmlab idp list --cluster spoke1
+NAME                 TYPE       STATUS
+corp-github          github     Applied
+corp-ldap            ldap       Applied
+keycloak             oidc       Pending
+```
+
+#### `acmlab idp rotate <name>`
+
+Rotates credentials for an Identity Provider by updating the ManifestWork Secret.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--client-id` — new OAuth client ID
+- `--client-secret` — new OAuth client secret
+- `--users` — new htpasswd users
+- `--bind-password` — new LDAP bind password
+
+#### `acmlab idp remove <name>`
+
+Removes an Identity Provider from a cluster.
+
+Options:
+- `--cluster` — target cluster (required)
+
+### Scaling
+
+#### `acmlab scaling get <cluster>`
+
+Shows MachinePool info: replicas, autoscaling bounds, platform.
+
+Options:
+- `--json` — output as JSON
+
+#### `acmlab scaling set <cluster>`
+
+Sets a fixed worker replica count.
+
+Options:
+- `--replicas` — number of worker nodes (default: 2)
+- `--json` — output as JSON
+
+#### `acmlab scaling auto <cluster>`
+
+Enables autoscaling with min/max bounds.
+
+Options:
+- `--min` — minimum worker nodes (default: 1)
+- `--max` — maximum worker nodes (default: 5)
+- `--json` — output as JSON
+
+#### `acmlab scaling set-flavor <cluster>`
+
+Changes worker node instance type via MachinePool platform update. Hive performs a rolling replacement — new workers are created with the new type, old workers are drained and removed.
+
+Options:
+- `--worker-type` — new worker instance type (required)
+
+```
+$ acmlab scaling set-flavor spoke1 --worker-type cx2-8x16
+Cluster spoke1 worker flavor changed to cx2-8x16
+```
+
+#### `acmlab scaling list`
+
+Lists all MachinePools across the fleet.
+
+Options:
+- `--json` — output as JSON
+
+#### `acmlab scaling init <cluster>`
+
+Creates a MachinePool for a Hive cluster that does not have one. Auto-detects current workers.
+
+Options:
+- `--worker-type` — worker instance type (auto-detected if omitted)
+- `--replicas` — worker count (auto-detected if omitted)
+- `--json` — output as JSON
+
 ### Tenants
 
 #### `acmlab tenant deploy <name>`
@@ -495,7 +609,7 @@ Options:
 ```
 $ acmlab upgrade list
 CLUSTER              VERSION      CHANNEL          METHOD       AVAILABLE
-infraops1            4.21.29      stable-4.21      manifestwork 4.21.30, 4.21.31
+hub-cluster          4.21.29      stable-4.21      manifestwork 4.21.30, 4.21.31
 spoke2               4.22.9       stable-4.22      hive         4.22.10, 4.22.11, 4.22.12
 ```
 
@@ -543,11 +657,11 @@ Options:
 - `--kubeconfig-path` — spoke kubeconfig for imported clusters
 
 ```
-$ acmlab decommission start spoke2 --owner "pestevez@redhat.com"
+$ acmlab decommission start spoke2 --owner "admin@example.com"
 {
   "clusterName": "spoke2",
   "phase": "audited",
-  "owner": "pestevez@redhat.com",
+  "owner": "admin@example.com",
   "deadline": "2026-09-28T15:10:16Z",
   "audit": {
     "nodeCount": 5,
@@ -589,7 +703,7 @@ Shows current phase, owner, deadline, audit data, and full history.
 $ acmlab decommission status spoke2
 Cluster:  spoke2
 Phase:    audited
-Owner:    pestevez@redhat.com
+Owner:    admin@example.com
 Deadline: 2026-09-28T15:10:16Z
 Nodes:    5
 CPU:      32
@@ -611,7 +725,7 @@ Options:
 ```
 $ acmlab decommission list
 CLUSTER              PHASE        OWNER                          DEADLINE
-spoke2               audited      pestevez@redhat.com            2026-09-28T15:10:16Z
+spoke2               audited      admin@example.com            2026-09-28T15:10:16Z
 ```
 
 #### `acmlab decommission cancel <cluster>`
@@ -710,8 +824,17 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_decommission_list` | UC-08 | List all active decommission workflows |
 | `acm_decommission_cancel` | UC-08 | Cancel workflow (keeps cluster intact) |
 | `acm_decommission_audit` | UC-08 | Standalone audit without starting decommission |
+| `acm_scaling_get` | UC-10 | MachinePool info: replicas, autoscaling, platform |
+| `acm_scaling_set` | UC-10 | Set fixed worker replica count |
+| `acm_scaling_auto` | UC-10 | Enable autoscaling with min/max bounds |
+| `acm_scaling_set_flavor` | UC-37 | Change worker node instance type via MachinePool |
+| `acm_scaling_list` | UC-10 | List all MachinePools across the fleet |
 | `acm_upgrade_status` | UC-09 | Upgrade status: version, channel, available updates, method |
 | `acm_upgrade_list` | UC-09 | List clusters with available OCP upgrades |
 | `acm_upgrade_set_channel` | UC-09 | Set OCP update channel via ManifestWork |
 | `acm_upgrade_start` | UC-09 | Start OCP version upgrade via ManifestWork |
 | `acm_upgrade_history` | UC-09 | Version upgrade history with state and timestamps |
+| `acm_configure_idp` | UC-12 | Configure Identity Provider on a cluster via ManifestWork |
+| `acm_remove_idp` | UC-12 | Remove Identity Provider from a cluster |
+| `acm_list_idps` | UC-12 | List Identity Providers configured on a cluster |
+| `acm_rotate_idp` | UC-12 | Rotate credentials for an Identity Provider |
