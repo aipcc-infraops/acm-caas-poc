@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -82,7 +80,7 @@ func (m *Manager) Remove(ctx context.Context, name, namespace string) error {
 		{"placement", client.GVRPlacement, name + "-placement"},
 	}
 	for _, s := range steps {
-		if err := m.deleteIfExists(ctx, s.gvr, namespace, s.name); err != nil {
+		if err := m.client.DeleteIfExists(ctx, s.gvr, namespace, s.name); err != nil {
 			return fmt.Errorf("remove %s: %w", s.label, err)
 		}
 	}
@@ -150,26 +148,6 @@ func (m *Manager) SetDisabled(ctx context.Context, name, namespace string, disab
 	_, err := m.client.Patch(ctx, client.GVRPolicy, namespace, name, types.MergePatchType, data)
 	if err != nil {
 		return fmt.Errorf("patching policy %s disabled=%v: %w", name, disabled, err)
-	}
-	return nil
-}
-
-func (m *Manager) createIfNotExists(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
-	_, err := m.client.Get(ctx, gvr, namespace, obj.GetName())
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-	_, err = m.client.Create(ctx, gvr, namespace, obj)
-	return err
-}
-
-func (m *Manager) deleteIfExists(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
-	err := m.client.Delete(ctx, gvr, namespace, name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
 	}
 	return nil
 }

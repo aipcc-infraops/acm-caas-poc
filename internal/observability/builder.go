@@ -14,11 +14,11 @@ func (m *Manager) ensureNamespace(ctx context.Context) error {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(client.GVRNamespace.GroupVersion().WithKind("Namespace"))
 	obj.SetName(Namespace)
-	return m.createIfNotExists(ctx, client.GVRNamespace, "", obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRNamespace, "", obj)
 }
 
 func (m *Manager) deleteNamespace(ctx context.Context) error {
-	return m.deleteIfExists(ctx, client.GVRNamespace, "", Namespace)
+	return m.client.DeleteIfExists(ctx, client.GVRNamespace, "", Namespace)
 }
 
 func (m *Manager) ensureMinioPVC(ctx context.Context) error {
@@ -41,11 +41,11 @@ func (m *Manager) ensureMinioPVC(ctx context.Context) error {
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRPersistentVolumeClaim, Namespace, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRPersistentVolumeClaim, Namespace, obj)
 }
 
 func (m *Manager) deleteMinioPVC(ctx context.Context) error {
-	return m.deleteIfExists(ctx, client.GVRPersistentVolumeClaim, Namespace, MinIOName)
+	return m.client.DeleteIfExists(ctx, client.GVRPersistentVolumeClaim, Namespace, MinIOName)
 }
 
 func (m *Manager) ensureMinioDeployment(ctx context.Context) error {
@@ -116,11 +116,11 @@ func (m *Manager) ensureMinioDeployment(ctx context.Context) error {
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRDeployment, Namespace, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRDeployment, Namespace, obj)
 }
 
 func (m *Manager) deleteMinioDeployment(ctx context.Context) error {
-	return m.deleteIfExists(ctx, client.GVRDeployment, Namespace, MinIOName)
+	return m.client.DeleteIfExists(ctx, client.GVRDeployment, Namespace, MinIOName)
 }
 
 func (m *Manager) ensureMinioService(ctx context.Context) error {
@@ -145,11 +145,11 @@ func (m *Manager) ensureMinioService(ctx context.Context) error {
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRService, Namespace, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRService, Namespace, obj)
 }
 
 func (m *Manager) deleteMinioService(ctx context.Context) error {
-	return m.deleteIfExists(ctx, client.GVRService, Namespace, MinIOName)
+	return m.client.DeleteIfExists(ctx, client.GVRService, Namespace, MinIOName)
 }
 
 func (m *Manager) ensureThanosSecret(ctx context.Context) error {
@@ -176,11 +176,11 @@ config:
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRSecret, Namespace, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRSecret, Namespace, obj)
 }
 
 func (m *Manager) deleteSecret(ctx context.Context) error {
-	return m.deleteIfExists(ctx, client.GVRSecret, Namespace, SecretName)
+	return m.client.DeleteIfExists(ctx, client.GVRSecret, Namespace, SecretName)
 }
 
 func (m *Manager) ensureMCO(ctx context.Context) error {
@@ -208,9 +208,9 @@ func (m *Manager) ensureMCO(ctx context.Context) error {
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRMultiClusterObservability, "", obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRMultiClusterObservability, "", obj)
 }
 
 func (m *Manager) deleteMCO(ctx context.Context) error {
-	return m.deleteIfExists(ctx, client.GVRMultiClusterObservability, "", MCOName)
+	return m.client.DeleteIfExists(ctx, client.GVRMultiClusterObservability, "", MCOName)
 }

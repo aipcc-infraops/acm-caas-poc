@@ -145,6 +145,10 @@ func (m *Manager) SetChannel(ctx context.Context, clusterName, channel string) e
 		return fmt.Errorf("cluster %s does not support channel changes (type: %s)", clusterName, clusterType)
 	}
 
+	if method == UpgradeMethodHive {
+		return m.applyClusterCurator(ctx, clusterName, buildChannelClusterCurator(clusterName, channel))
+	}
+
 	return m.applyManifestWork(ctx, clusterName, fmt.Sprintf("%s-channel", clusterName),
 		func(cluster, mwName string) *unstructured.Unstructured {
 			return buildChannelManifestWork(cluster, mwName, channel)
@@ -159,6 +163,10 @@ func (m *Manager) StartUpgrade(ctx context.Context, clusterName, version string)
 
 	if method == UpgradeMethodReportOnly {
 		return fmt.Errorf("cluster %s does not support upgrades (type: %s)", clusterName, clusterType)
+	}
+
+	if method == UpgradeMethodHive {
+		return m.applyClusterCurator(ctx, clusterName, buildUpgradeClusterCurator(clusterName, version, ""))
 	}
 
 	return m.applyManifestWork(ctx, clusterName, fmt.Sprintf("%s-upgrade", clusterName),
@@ -233,6 +241,27 @@ func (m *Manager) applyManifestWork(ctx context.Context, clusterName, mwName str
 	_, err = m.client.Create(ctx, client.GVRManifestWork, clusterName, mw)
 	if err != nil {
 		return fmt.Errorf("creating ManifestWork for %s on %s: %w", mwName, clusterName, err)
+	}
+	return nil
+}
+
+func (m *Manager) applyClusterCurator(ctx context.Context, clusterName string, obj *unstructured.Unstructured) error {
+	existing, err := m.client.Get(ctx, client.GVRClusterCurator, clusterName, clusterName)
+	if err == nil {
+		obj.SetResourceVersion(existing.GetResourceVersion())
+		_, err = m.client.Update(ctx, client.GVRClusterCurator, clusterName, obj)
+		if err != nil {
+			return fmt.Errorf("updating ClusterCurator for %s: %w", clusterName, err)
+		}
+		return nil
+	}
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("checking ClusterCurator for %s: %w", clusterName, err)
+	}
+
+	_, err = m.client.Create(ctx, client.GVRClusterCurator, clusterName, obj)
+	if err != nil {
+		return fmt.Errorf("creating ClusterCurator for %s: %w", clusterName, err)
 	}
 	return nil
 }

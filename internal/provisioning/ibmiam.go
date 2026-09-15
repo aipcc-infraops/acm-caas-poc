@@ -46,7 +46,10 @@ func (c *iamClient) authenticate() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("IAM token request failed (%d), body unreadable: %w", resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("IAM token request failed (%d): %s", resp.StatusCode, body)
 	}
 
@@ -77,7 +80,10 @@ func (c *iamClient) fetchAccountID() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("API key details request failed (%d), body unreadable: %w", resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("API key details request failed (%d): %s", resp.StatusCode, body)
 	}
 
@@ -215,7 +221,10 @@ func (c *iamClient) listServiceIDs(namePrefix string) ([]serviceIDResponse, erro
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("listing service IDs (%d), body unreadable: %w", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("listing service IDs (%d): %s", resp.StatusCode, body)
 	}
 
@@ -247,7 +256,10 @@ func (c *iamClient) doJSON(method, url string, body interface{}) ([]byte, error)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("IBM Cloud IAM API error (%d): %s", resp.StatusCode, respBody)
 	}
