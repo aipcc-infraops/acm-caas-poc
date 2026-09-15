@@ -16,6 +16,7 @@ declare -A THRESHOLDS=(
   [internal/scaling]=90
   [internal/tenant]=90
   [internal/decommission]=90
+  [internal/upgrade]=90
   [internal/client]=70
   [internal/mcp]=70
 )
