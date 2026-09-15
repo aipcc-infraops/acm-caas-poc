@@ -2,6 +2,8 @@ package monitoring
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -12,6 +14,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func fakeClient(objs ...runtime.Object) *client.Client {
 	scheme := runtime.NewScheme()
@@ -86,7 +90,7 @@ func TestGetClusterResourcesReturnsNodeInfo(t *testing.T) {
 		makeNode("worker-0", "4", "16455624Ki", "bx2-4x16", "us-south", "us-south-1", true),
 	}
 	c := fakeClient(newClusterInfo("infraops1", nodes))
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	cr, err := mon.GetClusterResources(context.Background(), "infraops1")
 	if err != nil {
@@ -115,7 +119,7 @@ func TestGetClusterResourcesCountsReadyNodes(t *testing.T) {
 		makeNode("worker-0", "4", "16Mi", "bx2-4x16", "us-south", "us-south-1", false),
 	}
 	c := fakeClient(newClusterInfo("test", nodes))
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	cr, err := mon.GetClusterResources(context.Background(), "test")
 	if err != nil {
@@ -131,7 +135,7 @@ func TestGetClusterResourcesCountsReadyNodes(t *testing.T) {
 
 func TestGetClusterResourcesNotFound(t *testing.T) {
 	c := fakeClient()
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	_, err := mon.GetClusterResources(context.Background(), "nonexistent")
 	if err == nil {
@@ -141,7 +145,7 @@ func TestGetClusterResourcesNotFound(t *testing.T) {
 
 func TestGetClusterResourcesHandlesEmptyNodeList(t *testing.T) {
 	c := fakeClient(newClusterInfo("empty", nil))
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	cr, err := mon.GetClusterResources(context.Background(), "empty")
 	if err != nil {
@@ -167,7 +171,7 @@ func TestGetClusterResourcesHandlesNilStatus(t *testing.T) {
 	obj.SetNamespace("nostatus")
 
 	c := fakeClient(obj)
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	cr, err := mon.GetClusterResources(context.Background(), "nostatus")
 	if err != nil {
@@ -187,7 +191,7 @@ func TestListClusterResourcesReturnsAll(t *testing.T) {
 		makeNode("w-0", "4", "16Mi", "bx2-4x16", "eu-de", "eu-de-2", true),
 	}
 	c := fakeClient(newClusterInfo("c1", nodes1), newClusterInfo("c2", nodes2))
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	results, err := mon.ListClusterResources(context.Background())
 	if err != nil {
@@ -200,7 +204,7 @@ func TestListClusterResourcesReturnsAll(t *testing.T) {
 
 func TestListClusterResourcesEmpty(t *testing.T) {
 	c := fakeClient()
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	results, err := mon.ListClusterResources(context.Background())
 	if err != nil {
@@ -216,7 +220,7 @@ func TestNodeInfoParsesLabels(t *testing.T) {
 		makeNode("worker-0", "16", "64Gi", "mx2-16x128", "eu-de", "eu-de-1", true),
 	}
 	c := fakeClient(newClusterInfo("labeled", nodes))
-	mon := New(c, config.Config{})
+	mon := New(c, config.Config{}, discardLogger)
 
 	cr, err := mon.GetClusterResources(context.Background(), "labeled")
 	if err != nil {

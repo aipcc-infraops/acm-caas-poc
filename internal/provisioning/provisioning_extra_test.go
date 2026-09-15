@@ -28,7 +28,7 @@ func TestCreateIBMCloudWithoutManifestsDir(t *testing.T) {
 	defer func() { newIAMClient = origNew }()
 
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:       "ibm-cluster",
@@ -64,7 +64,7 @@ func TestCreateIBMCloudGenerateCredsFails(t *testing.T) {
 	defer func() { newIAMClient = origNew }()
 
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:       "ibm-fail",
@@ -80,7 +80,7 @@ func TestCreateIBMCloudGenerateCredsFails(t *testing.T) {
 
 func TestCreateIBMCloudMissingAPIKey(t *testing.T) {
 	c := fakeClient()
-	m := New(c, config.Config{Platform: "ibmcloud"})
+	m := New(c, config.Config{Platform: "ibmcloud"}, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:       "spoke1",
@@ -97,7 +97,7 @@ func TestCreateIBMCloudMissingAPIKey(t *testing.T) {
 
 func TestCreateWithBadManifestsDir(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:         "spoke1",
@@ -128,7 +128,7 @@ func TestDestroyWithIBMCloudCleanup(t *testing.T) {
 
 	c := fakeClient()
 	cfg := testConfig()
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	// Destroy of nonexistent is idempotent but should still run IBM cleanup
 	if err := m.Destroy(context.Background(), "spoke1"); err != nil {

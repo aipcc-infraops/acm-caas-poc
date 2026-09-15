@@ -2,6 +2,8 @@ package fleet
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -12,6 +14,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func fakeClusterClient(clusters ...*unstructured.Unstructured) *client.Client {
 	scheme := runtime.NewScheme()
@@ -67,7 +71,7 @@ func TestListClustersReturnsParsedInfo(t *testing.T) {
 		managedCluster("spoke-1", true, map[string]string{"cloud": "IBMCloud"}),
 		managedCluster("spoke-2", false, map[string]string{"cloud": "AWS"}),
 	)
-	insp := New(c, config.Config{})
+	insp := New(c, config.Config{}, discardLogger)
 
 	clusters, err := insp.ListClusters(context.Background())
 	if err != nil {
@@ -89,7 +93,7 @@ func TestListClustersReturnsParsedInfo(t *testing.T) {
 
 func TestListClustersReturnsEmptyForNoResources(t *testing.T) {
 	c := fakeClusterClient()
-	insp := New(c, config.Config{})
+	insp := New(c, config.Config{}, discardLogger)
 
 	clusters, err := insp.ListClusters(context.Background())
 	if err != nil {
@@ -103,7 +107,7 @@ func TestListClustersReturnsEmptyForNoResources(t *testing.T) {
 func TestGetClusterReturnsLabelsAndConditions(t *testing.T) {
 	labels := map[string]string{"cloud": "IBMCloud", "region": "us-south"}
 	c := fakeClusterClient(managedCluster("test-cluster", true, labels))
-	insp := New(c, config.Config{})
+	insp := New(c, config.Config{}, discardLogger)
 
 	info, err := insp.GetCluster(context.Background(), "test-cluster")
 	if err != nil {
@@ -131,7 +135,7 @@ func TestGetClusterReturnsLabelsAndConditions(t *testing.T) {
 
 func TestGetClusterReturnsErrorForMissing(t *testing.T) {
 	c := fakeClusterClient()
-	insp := New(c, config.Config{})
+	insp := New(c, config.Config{}, discardLogger)
 
 	_, err := insp.GetCluster(context.Background(), "nonexistent")
 	if err == nil {

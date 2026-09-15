@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -48,10 +49,11 @@ func (e *ErrNoMachinePool) Error() string {
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 type MachinePoolInfo struct {
@@ -65,6 +67,7 @@ type MachinePoolInfo struct {
 
 // ClusterSupportsScaling returns true if the cluster was provisioned by Hive (ClusterDeployment exists).
 func (m *Manager) ClusterSupportsScaling(ctx context.Context, clusterName string) (bool, error) {
+	m.logger.Info("scaling.ClusterSupportsScaling", "cluster", clusterName)
 	_, err := m.client.Get(ctx, client.GVRClusterDeployment, clusterName, clusterName)
 	if errors.IsNotFound(err) {
 		return false, nil
@@ -77,6 +80,7 @@ func (m *Manager) ClusterSupportsScaling(ctx context.Context, clusterName string
 
 // GetCurrentWorkerInfo reads worker count and instance type from ManagedClusterInfo node labels.
 func (m *Manager) GetCurrentWorkerInfo(ctx context.Context, clusterName string) (count int, workerType string, err error) {
+	m.logger.Info("scaling.GetCurrentWorkerInfo", "cluster", clusterName)
 	info, err := m.client.Get(ctx, client.GVRManagedClusterInfo, clusterName, clusterName)
 	if err != nil {
 		return 0, "bx2-4x16", nil
@@ -125,6 +129,7 @@ func (m *Manager) noMachinePoolErr(ctx context.Context, clusterName string) erro
 // GetMachinePool returns the first MachinePool for a cluster. Namespace = cluster name (Hive convention).
 // Returns *ErrNoMachinePool if no MachinePool exists, with context on whether this is a Hive or imported cluster.
 func (m *Manager) GetMachinePool(ctx context.Context, clusterName string) (*MachinePoolInfo, error) {
+	m.logger.Info("scaling.GetMachinePool", "cluster", clusterName)
 	list, err := m.client.List(ctx, client.GVRMachinePool, clusterName, "")
 	if err != nil {
 		return nil, fmt.Errorf("listing MachinePools in namespace %s: %w", clusterName, err)
@@ -140,6 +145,7 @@ func (m *Manager) GetMachinePool(ctx context.Context, clusterName string) (*Mach
 // If replicas matches detected worker count, no worker changes will be made.
 // Platform is auto-detected from the ClusterDeployment spec.platform key.
 func (m *Manager) InitMachinePool(ctx context.Context, clusterName, workerType string, replicas int) (*MachinePoolInfo, error) {
+	m.logger.Info("scaling.InitMachinePool", "cluster", clusterName)
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, clusterName, clusterName)
 	if err != nil {
 		return nil, &ErrNoMachinePool{ClusterName: clusterName, IsHive: false}
@@ -197,6 +203,7 @@ func detectPlatform(cd *unstructured.Unstructured) string {
 
 // SetReplicas patches the MachinePool replicas count and removes autoscaling if active.
 func (m *Manager) SetReplicas(ctx context.Context, clusterName string, replicas int) error {
+	m.logger.Info("scaling.SetReplicas", "cluster", clusterName, "replicas", replicas)
 	mp, err := m.GetMachinePool(ctx, clusterName)
 	if err != nil {
 		return err
@@ -220,6 +227,7 @@ func (m *Manager) SetReplicas(ctx context.Context, clusterName string, replicas 
 
 // EnableAutoscaling enables autoscaling on the MachinePool with min/max bounds.
 func (m *Manager) EnableAutoscaling(ctx context.Context, clusterName string, min, max int) error {
+	m.logger.Info("scaling.EnableAutoscaling", "cluster", clusterName, "min", min, "max", max)
 	mp, err := m.GetMachinePool(ctx, clusterName)
 	if err != nil {
 		return err
@@ -246,11 +254,13 @@ func (m *Manager) EnableAutoscaling(ctx context.Context, clusterName string, min
 
 // DisableAutoscaling removes autoscaling and sets a fixed replica count.
 func (m *Manager) DisableAutoscaling(ctx context.Context, clusterName string, replicas int) error {
+	m.logger.Info("scaling.DisableAutoscaling", "cluster", clusterName, "replicas", replicas)
 	return m.SetReplicas(ctx, clusterName, replicas)
 }
 
 // ListMachinePools returns all MachinePools across the fleet (all namespaces).
 func (m *Manager) ListMachinePools(ctx context.Context) ([]MachinePoolInfo, error) {
+	m.logger.Info("scaling.ListMachinePools")
 	list, err := m.client.List(ctx, client.GVRMachinePool, "", "")
 	if err != nil {
 		if errors.IsNotFound(err) {

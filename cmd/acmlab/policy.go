@@ -37,7 +37,7 @@ func policyListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := policy.New(c, cfg)
+			mgr := policy.New(c, cfg, logger)
 			policies, err := mgr.List(context.Background(), namespace)
 			if err != nil {
 				return err
@@ -72,7 +72,7 @@ func policyStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := policy.New(c, cfg)
+			mgr := policy.New(c, cfg, logger)
 			info, err := mgr.Get(context.Background(), args[0], namespace)
 			if err != nil {
 				return err
@@ -111,7 +111,7 @@ func policyApplyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := policy.New(c, cfg)
+			mgr := policy.New(c, cfg, logger)
 			opts := policy.PolicyOpts{
 				Name:              args[0],
 				Namespace:         namespace,
@@ -149,7 +149,7 @@ func policyRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := policy.New(c, cfg)
+			mgr := policy.New(c, cfg, logger)
 			fmt.Printf("Removing policy %s...\n", args[0])
 			if err := mgr.Remove(context.Background(), args[0], namespace); err != nil {
 				return err
@@ -173,7 +173,7 @@ func policySetRemediationCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := policy.New(c, cfg)
+			mgr := policy.New(c, cfg, logger)
 			if err := mgr.SetRemediation(context.Background(), args[0], namespace, args[1]); err != nil {
 				return err
 			}
@@ -196,7 +196,7 @@ func policyEnableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := policy.New(c, cfg)
+			mgr := policy.New(c, cfg, logger)
 			if err := mgr.SetDisabled(context.Background(), args[0], namespace, false); err != nil {
 				return err
 			}
@@ -219,7 +219,7 @@ func policyDisableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := policy.New(c, cfg)
+			mgr := policy.New(c, cfg, logger)
 			if err := mgr.SetDisabled(context.Background(), args[0], namespace, true); err != nil {
 				return err
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -17,10 +18,11 @@ import (
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 type MirrorConfig struct {
@@ -51,6 +53,7 @@ type MirrorStatus struct {
 // to pull — if the spoke can't reach the source registry, they must be
 // mirrored.
 func (m *Manager) ListRequiredImages(ctx context.Context, clusterName string) ([]RequiredImage, error) {
+	m.logger.Info("registry.ListRequiredImages", "cluster", clusterName)
 	mwList, err := m.client.List(ctx, client.GVRManifestWork, clusterName, "")
 	if err != nil {
 		return nil, fmt.Errorf("listing ManifestWorks in %s: %w", clusterName, err)
@@ -86,6 +89,7 @@ func (m *Manager) ListRequiredImages(ctx context.Context, clusterName string) ([
 // on the hub so that ACM rewrites image references in klusterlet manifests
 // before applying them to the spoke.
 func (m *Manager) ConfigureMirror(ctx context.Context, opts MirrorConfig) error {
+	m.logger.Info("registry.ConfigureMirror", "cluster", opts.ClusterName)
 	ns := opts.ClusterName
 	placementName := fmt.Sprintf("%s-registry-placement", opts.ClusterName)
 
@@ -119,6 +123,7 @@ func (m *Manager) ConfigureMirror(ctx context.Context, opts MirrorConfig) error 
 // RemoveMirror deletes the ManagedClusterImageRegistry, Placement, and pull
 // secret created by ConfigureMirror.
 func (m *Manager) RemoveMirror(ctx context.Context, clusterName string) error {
+	m.logger.Info("registry.RemoveMirror", "cluster", clusterName)
 	ns := clusterName
 	name := fmt.Sprintf("%s-image-registry", clusterName)
 
@@ -150,6 +155,7 @@ func (m *Manager) RemoveMirror(ctx context.Context, clusterName string) error {
 // GetMirrorStatus checks whether a ManagedClusterImageRegistry is configured
 // for a cluster.
 func (m *Manager) GetMirrorStatus(ctx context.Context, clusterName string) (*MirrorStatus, error) {
+	m.logger.Info("registry.GetMirrorStatus", "cluster", clusterName)
 	name := fmt.Sprintf("%s-image-registry", clusterName)
 	obj, err := m.client.Get(ctx, client.GVRManagedClusterImageRegistry, clusterName, name)
 	if errors.IsNotFound(err) {

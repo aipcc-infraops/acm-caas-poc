@@ -3,6 +3,8 @@ package scaling
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -16,6 +18,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // gvrKinds maps all GVRs we use to their list kind strings for the fake client.
 var gvrKinds = map[schema.GroupVersionResource]string{
@@ -31,7 +35,7 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 }
 
 func newManager(objs ...runtime.Object) *Manager {
-	return New(fakeClient(objs...), config.Config{})
+	return New(fakeClient(objs...), config.Config{}, discardLogger)
 }
 
 // ----- Helper constructors -----
@@ -689,7 +693,7 @@ func TestNoMachinePoolErrImportedNoInfo(t *testing.T) {
 func TestNewReturnsManager(t *testing.T) {
 	c := fakeClient()
 	cfg := config.Config{}
-	mgr := New(c, cfg)
+	mgr := New(c, cfg, discardLogger)
 	if mgr == nil {
 		t.Fatal("New returned nil")
 	}
@@ -711,7 +715,7 @@ func fakeClientWithReactor(verb, resource string, err error, objs ...runtime.Obj
 
 func TestClusterSupportsScalingAPIError(t *testing.T) {
 	c := fakeClientWithReactor("get", "clusterdeployments", fmt.Errorf("api server down"))
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.ClusterSupportsScaling(context.Background(), "c1")
 	if err == nil {
@@ -724,7 +728,7 @@ func TestClusterSupportsScalingAPIError(t *testing.T) {
 
 func TestGetMachinePoolListError(t *testing.T) {
 	c := fakeClientWithReactor("list", "machinepools", fmt.Errorf("connection refused"))
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.GetMachinePool(context.Background(), "c1")
 	if err == nil {
@@ -738,7 +742,7 @@ func TestGetMachinePoolListError(t *testing.T) {
 func TestListMachinePoolsNotFoundError(t *testing.T) {
 	notFound := errors.NewNotFound(schema.GroupResource{Group: "hive.openshift.io", Resource: "machinepools"}, "")
 	c := fakeClientWithReactor("list", "machinepools", notFound)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	infos, err := mgr.ListMachinePools(context.Background())
 	if err != nil {
@@ -751,7 +755,7 @@ func TestListMachinePoolsNotFoundError(t *testing.T) {
 
 func TestListMachinePoolsAPIError(t *testing.T) {
 	c := fakeClientWithReactor("list", "machinepools", fmt.Errorf("timeout"))
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.ListMachinePools(context.Background())
 	if err == nil {
@@ -770,7 +774,7 @@ func TestSetReplicasPatchError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("patch", "machinepools", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("patch denied")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.SetReplicas(context.Background(), "c1", 5)
 	if err == nil {
@@ -788,7 +792,7 @@ func TestEnableAutoscalingPatchError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("patch", "machinepools", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("patch denied")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.EnableAutoscaling(context.Background(), "c1", 2, 10)
 	if err == nil {
@@ -805,7 +809,7 @@ func TestInitMachinePoolCreateError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "machinepools", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("quota exceeded")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.InitMachinePool(context.Background(), "c1", "m5.xlarge", 3)
 	if err == nil {

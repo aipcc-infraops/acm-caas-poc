@@ -47,7 +47,7 @@ func scalingGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sc := scaling.New(c, cfg)
+			sc := scaling.New(c, cfg, logger)
 			ctx := context.Background()
 
 			info, err := sc.GetMachinePool(ctx, args[0])
@@ -82,7 +82,7 @@ func scalingSetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sc := scaling.New(c, cfg)
+			sc := scaling.New(c, cfg, logger)
 			ctx := context.Background()
 
 			if err := sc.SetReplicas(ctx, args[0], replicas); err != nil {
@@ -127,7 +127,7 @@ func scalingAutoCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sc := scaling.New(c, cfg)
+			sc := scaling.New(c, cfg, logger)
 			ctx := context.Background()
 
 			if err := sc.EnableAutoscaling(ctx, args[0], min, max); err != nil {
@@ -167,7 +167,7 @@ func scalingListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sc := scaling.New(c, cfg)
+			sc := scaling.New(c, cfg, logger)
 			ctx := context.Background()
 
 			pools, err := sc.ListMachinePools(ctx)
@@ -218,7 +218,7 @@ If --replicas differs, Hive will add or remove workers to reach the desired coun
 			if err != nil {
 				return err
 			}
-			sc := scaling.New(c, cfg)
+			sc := scaling.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// Auto-detect current workers if not provided

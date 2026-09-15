@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -15,6 +17,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func fakeClientWithClusters(clusters ...*unstructured.Unstructured) *client.Client {
 	scheme := runtime.NewScheme()
@@ -72,7 +76,7 @@ func newManagedCluster(name string, available bool) *unstructured.Unstructured {
 
 func callTool(t *testing.T, c *client.Client, toolName string, args map[string]interface{}) mcplib.JSONRPCMessage {
 	t.Helper()
-	s := NewServer(c, config.Config{})
+	s := NewServer(c, config.Config{}, discardLogger)
 
 	params := map[string]interface{}{
 		"name": toolName,
@@ -180,7 +184,7 @@ func newClusterDeployment(name string, installed bool) *unstructured.Unstructure
 
 func TestNewServerReturnsNonNil(t *testing.T) {
 	c := fakeClientWithClusters()
-	s := NewServer(c, config.Config{})
+	s := NewServer(c, config.Config{}, discardLogger)
 	if s == nil {
 		t.Fatal("NewServer returned nil")
 	}
@@ -265,7 +269,7 @@ func TestGetManagedClusterReturnsDetails(t *testing.T) {
 
 func TestGetManagedClusterNotFound(t *testing.T) {
 	c := fakeClientWithClusters()
-	s := NewServer(c, config.Config{})
+	s := NewServer(c, config.Config{}, discardLogger)
 
 	msg, _ := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -364,7 +368,7 @@ func TestClusterResourcesReturnsNodeDetails(t *testing.T) {
 
 func TestClusterResourcesNotFound(t *testing.T) {
 	c := fakeClientWithClusters()
-	s := NewServer(c, config.Config{})
+	s := NewServer(c, config.Config{}, discardLogger)
 	msg, _ := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,

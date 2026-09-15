@@ -3,6 +3,8 @@ package observability
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -14,6 +16,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func fakeClient(objs ...runtime.Object) *client.Client {
 	scheme := runtime.NewScheme()
@@ -31,7 +35,7 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 
 func TestSetupCreatesAllResources(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.Setup(context.Background()); err != nil {
 		t.Fatalf("Setup failed: %v", err)
@@ -61,7 +65,7 @@ func TestSetupCreatesAllResources(t *testing.T) {
 
 func TestSetupIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.Setup(context.Background()); err != nil {
 		t.Fatalf("first Setup failed: %v", err)
@@ -73,7 +77,7 @@ func TestSetupIsIdempotent(t *testing.T) {
 
 func TestTeardownRemovesAllResources(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.Setup(context.Background()); err != nil {
 		t.Fatalf("Setup failed: %v", err)
@@ -100,7 +104,7 @@ func TestTeardownRemovesAllResources(t *testing.T) {
 
 func TestTeardownIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.Teardown(context.Background()); err != nil {
 		t.Fatalf("Teardown on empty cluster failed (not idempotent): %v", err)
@@ -109,7 +113,7 @@ func TestTeardownIsIdempotent(t *testing.T) {
 
 func TestStatusNotInstalled(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	status, err := mgr.Status(context.Background())
 	if err != nil {
@@ -128,7 +132,7 @@ func TestStatusPending(t *testing.T) {
 	mco.SetName(MCOName)
 
 	c := fakeClient(mco)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	status, err := mgr.Status(context.Background())
 	if err != nil {
@@ -155,7 +159,7 @@ func TestStatusReady(t *testing.T) {
 	}
 
 	c := fakeClient(mco)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	status, err := mgr.Status(context.Background())
 	if err != nil {
@@ -182,7 +186,7 @@ func TestStatusProgressing(t *testing.T) {
 	}
 
 	c := fakeClient(mco)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	status, err := mgr.Status(context.Background())
 	if err != nil {
@@ -199,7 +203,7 @@ func TestStatusGetError(t *testing.T) {
 	fake.PrependReactor("get", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("api unavailable")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.Status(context.Background())
 	if err == nil {
@@ -216,7 +220,7 @@ func TestSetupStepError(t *testing.T) {
 	fake.PrependReactor("get", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("get blocked")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.Setup(context.Background())
 	if err == nil {
@@ -230,7 +234,7 @@ func TestTeardownStepError(t *testing.T) {
 	fake.PrependReactor("delete", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("delete blocked")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.Teardown(context.Background())
 	if err == nil {
@@ -255,7 +259,7 @@ func TestStatusConditionBadType(t *testing.T) {
 	}
 
 	c := fakeClient(mco)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	status, err := mgr.Status(context.Background())
 	if err != nil {

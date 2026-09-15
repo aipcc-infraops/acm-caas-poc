@@ -3,6 +3,8 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func testManifestsDir(t *testing.T) string {
 	t.Helper()
@@ -57,7 +61,7 @@ func testConfig() config.Config {
 
 func TestCreateCreatesAllResources(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:         "spoke1",
@@ -119,7 +123,7 @@ func TestCreateCreatesAllResources(t *testing.T) {
 
 func TestCreateIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	opts := ClusterOpts{Name: "spoke1", PullSecret: `{"auths":{}}`, ManifestsDir: testManifestsDir(t)}
 	if err := m.Create(context.Background(), opts); err != nil {
@@ -132,7 +136,7 @@ func TestCreateIsIdempotent(t *testing.T) {
 
 func TestCreateRequiresAPIKey(t *testing.T) {
 	c := fakeClient()
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:         "spoke1",
@@ -146,7 +150,7 @@ func TestCreateRequiresAPIKey(t *testing.T) {
 
 func TestCreateRequiresPullSecret(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{Name: "spoke1", ManifestsDir: testManifestsDir(t)})
 	if err == nil {
@@ -156,7 +160,7 @@ func TestCreateRequiresPullSecret(t *testing.T) {
 
 func TestCreateAppliesDefaults(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:         "spoke1",
@@ -188,7 +192,7 @@ func TestDestroyDeletesClusterDeployment(t *testing.T) {
 	cd.SetNamespace("spoke1")
 
 	c := fakeClient(cd)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	if err := m.Destroy(context.Background(), "spoke1"); err != nil {
 		t.Fatalf("Destroy failed: %v", err)
@@ -202,7 +206,7 @@ func TestDestroyDeletesClusterDeployment(t *testing.T) {
 
 func TestDestroyIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	if err := m.Destroy(context.Background(), "nonexistent"); err != nil {
 		t.Fatalf("Destroy of nonexistent should not error: %v", err)
@@ -237,7 +241,7 @@ func TestStatusParsesClusterDeployment(t *testing.T) {
 	}
 
 	c := fakeClient(cd)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	info, err := m.Status(context.Background(), "spoke1")
 	if err != nil {
@@ -274,7 +278,7 @@ func TestStatusParsesFailure(t *testing.T) {
 	}
 
 	c := fakeClient(cd)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	info, err := m.Status(context.Background(), "spoke1")
 	if err != nil {
@@ -296,7 +300,7 @@ func TestListClusters(t *testing.T) {
 	cd.Object["spec"] = map[string]interface{}{}
 
 	c := fakeClient(cd)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	clusters, err := m.List(context.Background())
 	if err != nil {
@@ -321,7 +325,7 @@ func TestListImageSets(t *testing.T) {
 	}
 
 	c := fakeClient(imgset)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	sets, err := m.ListImageSets(context.Background())
 	if err != nil {
@@ -337,7 +341,7 @@ func TestListImageSets(t *testing.T) {
 
 func TestCreateWithSSHKey(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:          "spoke1",
@@ -365,7 +369,7 @@ func TestWaitForProvisionInstalled(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.ProvisionTimeout = 5 * time.Second
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	go func() {
 		obj := &unstructured.Unstructured{}
@@ -393,7 +397,7 @@ func TestWaitForProvisionFailure(t *testing.T) {
 	watcher := watch.NewFake()
 	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
 
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	go func() {
 		obj := &unstructured.Unstructured{}
@@ -430,7 +434,7 @@ func TestWaitForProvisionTimeout(t *testing.T) {
 	watcher := watch.NewFake()
 	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
 
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	err := m.WaitForProvision(context.Background(), "spoke1", 100*time.Millisecond)
 	if err == nil {
@@ -448,7 +452,7 @@ func TestWaitForProvisionChannelClosed(t *testing.T) {
 	watcher := watch.NewFake()
 	fakeD.PrependWatchReactor("clusterdeployments", k8stesting.DefaultWatchReactor(watcher, nil))
 
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -473,7 +477,7 @@ func TestWaitForProvisionDefaultTimeout(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.ProvisionTimeout = 100 * time.Millisecond
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	// timeout=0 should use cfg.ProvisionTimeout
 	err := m.WaitForProvision(context.Background(), "spoke1", 0)
@@ -494,7 +498,7 @@ func TestWaitForProvisionNotYetInstalled(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.ProvisionTimeout = 5 * time.Second
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	go func() {
 		// First event: not yet installed
@@ -529,7 +533,7 @@ func TestWaitForProvisionNotYetInstalled(t *testing.T) {
 
 func TestCreateUnsupportedPlatform(t *testing.T) {
 	c := fakeClient()
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:       "spoke1",
@@ -549,7 +553,7 @@ func TestCreateAWSPlatform(t *testing.T) {
 	cfg := testConfig()
 	cfg.Platform = "aws"
 	cfg.IBMCloudAPIKey = ""
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:       "aws1",
@@ -582,7 +586,7 @@ func TestCreateGCPPlatform(t *testing.T) {
 	cfg := testConfig()
 	cfg.Platform = "gcp"
 	cfg.IBMCloudAPIKey = ""
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:       "gcp1",
@@ -600,7 +604,7 @@ func TestCreateAzurePlatform(t *testing.T) {
 	cfg := testConfig()
 	cfg.Platform = "azure"
 	cfg.IBMCloudAPIKey = ""
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
 		Name:       "azure1",
@@ -615,7 +619,7 @@ func TestCreateAzurePlatform(t *testing.T) {
 
 func TestStatusNotFound(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	_, err := m.Status(context.Background(), "nonexistent")
 	if err == nil {
@@ -625,7 +629,7 @@ func TestStatusNotFound(t *testing.T) {
 
 func TestListEmpty(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	clusters, err := m.List(context.Background())
 	if err != nil {
@@ -638,7 +642,7 @@ func TestListEmpty(t *testing.T) {
 
 func TestListImageSetsEmpty(t *testing.T) {
 	c := fakeClient()
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	sets, err := m.ListImageSets(context.Background())
 	if err != nil {
@@ -724,7 +728,7 @@ func TestDestroyWithoutAPIKey(t *testing.T) {
 	cfg := testConfig()
 	cfg.IBMCloudAPIKey = ""
 	c := fakeClient(cd)
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 
 	if err := m.Destroy(context.Background(), "spoke1"); err != nil {
 		t.Fatalf("Destroy failed: %v", err)
@@ -737,7 +741,7 @@ func TestCreateIfNotExistsAlreadyExists(t *testing.T) {
 	ns.SetName("existing")
 
 	c := fakeClient(ns)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	newNs := buildNamespace("existing")
 	err := m.createIfNotExists(context.Background(), client.GVRNamespace, "", newNs)
@@ -761,7 +765,7 @@ func TestListMultipleClusters(t *testing.T) {
 	}
 
 	c := fakeClient(objs...)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	clusters, err := m.List(context.Background())
 	if err != nil {
@@ -787,7 +791,7 @@ func TestListMultipleImageSets(t *testing.T) {
 	}
 
 	c := fakeClient(objs...)
-	m := New(c, testConfig())
+	m := New(c, testConfig(), discardLogger)
 
 	sets, err := m.ListImageSets(context.Background())
 	if err != nil {
