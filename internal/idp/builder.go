@@ -155,6 +155,45 @@ func oidcIdPEntry(opts IdPOpts) map[string]interface{} {
 	}
 }
 
+func buildOAuthClusterRole() map[string]interface{} {
+	return map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]interface{}{
+			"name": "klusterlet-oauth-manager",
+		},
+		"rules": []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{"config.openshift.io"},
+				"resources": []interface{}{"oauths"},
+				"verbs":     []interface{}{"get", "list", "watch", "create", "update", "patch", "delete"},
+			},
+		},
+	}
+}
+
+func buildOAuthClusterRoleBinding() map[string]interface{} {
+	return map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRoleBinding",
+		"metadata": map[string]interface{}{
+			"name": "klusterlet-oauth-manager",
+		},
+		"roleRef": map[string]interface{}{
+			"apiGroup": "rbac.authorization.k8s.io",
+			"kind":     "ClusterRole",
+			"name":     "klusterlet-oauth-manager",
+		},
+		"subjects": []interface{}{
+			map[string]interface{}{
+				"kind":      "ServiceAccount",
+				"name":      "klusterlet-work-sa",
+				"namespace": "open-cluster-management-agent",
+			},
+		},
+	}
+}
+
 // buildHTPasswdData generates htpasswd-format lines (user:password).
 // PoC uses plaintext passwords; production should use bcrypt hashes.
 func buildHTPasswdData(users map[string]string) string {
