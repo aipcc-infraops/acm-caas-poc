@@ -26,6 +26,7 @@ var gvrKinds = map[schema.GroupVersionResource]string{
 	client.GVRClusterDeployment:  "ClusterDeploymentList",
 	client.GVRClusterImageSet:    "ClusterImageSetList",
 	client.GVRManifestWork:       "ManifestWorkList",
+	client.GVRClusterCurator:     "ClusterCuratorList",
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -283,13 +284,21 @@ func TestSetChannelHive(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	mw, err := mgr.client.Get(context.Background(), client.GVRManifestWork, "spoke1", "spoke1-channel")
+	cc, err := mgr.client.Get(context.Background(), client.GVRClusterCurator, "spoke1", "spoke1")
 	if err != nil {
-		t.Fatalf("ManifestWork not created: %v", err)
+		t.Fatalf("ClusterCurator not created: %v", err)
 	}
-	labels := mw.GetLabels()
+	labels := cc.GetLabels()
 	if labels["caas-poc/operation"] != "upgrade" {
 		t.Errorf("missing caas-poc/operation label")
+	}
+	curation, _, _ := unstructured.NestedString(cc.Object, "spec", "desiredCuration")
+	if curation != "upgrade" {
+		t.Errorf("desiredCuration = %s, want upgrade", curation)
+	}
+	channel, _, _ := unstructured.NestedString(cc.Object, "spec", "upgrade", "channel")
+	if channel != "fast-4.16" {
+		t.Errorf("channel = %s, want fast-4.16", channel)
 	}
 }
 
@@ -330,6 +339,12 @@ func TestSetChannelIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second SetChannel failed: %v", err)
 	}
+
+	cc, _ := mgr.client.Get(context.Background(), client.GVRClusterCurator, "spoke1", "spoke1")
+	channel, _, _ := unstructured.NestedString(cc.Object, "spec", "upgrade", "channel")
+	if channel != "candidate-4.16" {
+		t.Errorf("channel = %s, want candidate-4.16", channel)
+	}
 }
 
 func TestStartUpgradeHive(t *testing.T) {
@@ -342,13 +357,17 @@ func TestStartUpgradeHive(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	mw, err := mgr.client.Get(context.Background(), client.GVRManifestWork, "spoke1", "spoke1-upgrade")
+	cc, err := mgr.client.Get(context.Background(), client.GVRClusterCurator, "spoke1", "spoke1")
 	if err != nil {
-		t.Fatalf("ManifestWork not created: %v", err)
+		t.Fatalf("ClusterCurator not created: %v", err)
 	}
-	labels := mw.GetLabels()
-	if labels["caas-poc/cluster"] != "spoke1" {
-		t.Errorf("missing caas-poc/cluster label")
+	labels := cc.GetLabels()
+	if labels["caas-poc/operation"] != "upgrade" {
+		t.Errorf("missing caas-poc/operation label")
+	}
+	desiredUpdate, _, _ := unstructured.NestedString(cc.Object, "spec", "upgrade", "desiredUpdate")
+	if desiredUpdate != "4.16.6" {
+		t.Errorf("desiredUpdate = %s, want 4.16.6", desiredUpdate)
 	}
 }
 
@@ -388,6 +407,12 @@ func TestStartUpgradeIdempotent(t *testing.T) {
 	err = mgr.StartUpgrade(context.Background(), "spoke1", "4.16.7")
 	if err != nil {
 		t.Fatalf("second StartUpgrade failed: %v", err)
+	}
+
+	cc, _ := mgr.client.Get(context.Background(), client.GVRClusterCurator, "spoke1", "spoke1")
+	desiredUpdate, _, _ := unstructured.NestedString(cc.Object, "spec", "upgrade", "desiredUpdate")
+	if desiredUpdate != "4.16.7" {
+		t.Errorf("desiredUpdate = %s, want 4.16.7", desiredUpdate)
 	}
 }
 
@@ -545,7 +570,7 @@ func TestSetChannelCreateError(t *testing.T) {
 	cd := clusterDeployment("spoke1")
 	mci := managedClusterInfo("spoke1", "4.16.5", "stable-4.16", "", nil)
 	c := fakeClient(cd, mci)
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "clustercurators", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("quota exceeded")
 	})
 	mgr := New(c, config.Config{}, discardLogger)
@@ -554,7 +579,7 @@ func TestSetChannelCreateError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "creating ManifestWork") {
+	if !strings.Contains(err.Error(), "creating ClusterCurator") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -563,7 +588,7 @@ func TestStartUpgradeCreateError(t *testing.T) {
 	cd := clusterDeployment("spoke1")
 	mci := managedClusterInfo("spoke1", "4.16.5", "stable-4.16", "", nil)
 	c := fakeClient(cd, mci)
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "clustercurators", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("network error")
 	})
 	mgr := New(c, config.Config{}, discardLogger)
@@ -572,7 +597,7 @@ func TestStartUpgradeCreateError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "creating ManifestWork") {
+	if !strings.Contains(err.Error(), "creating ClusterCurator") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -734,7 +759,7 @@ func TestSetChannelUpdateError(t *testing.T) {
 		t.Fatalf("first SetChannel failed: %v", err)
 	}
 
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("update", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("update", "clustercurators", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("update denied")
 	})
 
@@ -742,7 +767,7 @@ func TestSetChannelUpdateError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on update")
 	}
-	if !strings.Contains(err.Error(), "updating ManifestWork") {
+	if !strings.Contains(err.Error(), "updating ClusterCurator") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -758,7 +783,7 @@ func TestStartUpgradeUpdateError(t *testing.T) {
 		t.Fatalf("first StartUpgrade failed: %v", err)
 	}
 
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("update", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("update", "clustercurators", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("update denied")
 	})
 
@@ -766,7 +791,7 @@ func TestStartUpgradeUpdateError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on update")
 	}
-	if !strings.Contains(err.Error(), "updating ManifestWork") {
+	if !strings.Contains(err.Error(), "updating ClusterCurator") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -775,7 +800,7 @@ func TestSetChannelGetError(t *testing.T) {
 	cd := clusterDeployment("spoke1")
 	mci := managedClusterInfo("spoke1", "4.16.5", "stable-4.16", "", nil)
 	c := fakeClient(cd, mci)
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("get", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("get", "clustercurators", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("server error")
 	})
 	mgr := New(c, config.Config{}, discardLogger)
@@ -784,7 +809,7 @@ func TestSetChannelGetError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "checking ManifestWork") {
+	if !strings.Contains(err.Error(), "checking ClusterCurator") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -793,7 +818,7 @@ func TestStartUpgradeGetError(t *testing.T) {
 	cd := clusterDeployment("spoke1")
 	mci := managedClusterInfo("spoke1", "4.16.5", "stable-4.16", "", nil)
 	c := fakeClient(cd, mci)
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("get", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("get", "clustercurators", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("server error")
 	})
 	mgr := New(c, config.Config{}, discardLogger)
@@ -802,8 +827,46 @@ func TestStartUpgradeGetError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "checking ManifestWork") {
+	if !strings.Contains(err.Error(), "checking ClusterCurator") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildUpgradeClusterCurator(t *testing.T) {
+	cc := buildUpgradeClusterCurator("spoke1", "4.16.6", "stable-4.16")
+	if cc.GetName() != "spoke1" {
+		t.Errorf("Name = %q, want spoke1", cc.GetName())
+	}
+	desiredUpdate, _, _ := unstructured.NestedString(cc.Object, "spec", "upgrade", "desiredUpdate")
+	if desiredUpdate != "4.16.6" {
+		t.Errorf("desiredUpdate = %q, want 4.16.6", desiredUpdate)
+	}
+	channel, _, _ := unstructured.NestedString(cc.Object, "spec", "upgrade", "channel")
+	if channel != "stable-4.16" {
+		t.Errorf("channel = %q, want stable-4.16", channel)
+	}
+}
+
+func TestBuildUpgradeClusterCuratorNoChannel(t *testing.T) {
+	cc := buildUpgradeClusterCurator("spoke1", "4.16.6", "")
+	upgrade, _, _ := unstructured.NestedMap(cc.Object, "spec", "upgrade")
+	if _, exists := upgrade["channel"]; exists {
+		t.Error("channel should not be set when empty")
+	}
+}
+
+func TestBuildChannelClusterCurator(t *testing.T) {
+	cc := buildChannelClusterCurator("spoke1", "fast-4.16")
+	if cc.GetName() != "spoke1" {
+		t.Errorf("Name = %q, want spoke1", cc.GetName())
+	}
+	channel, _, _ := unstructured.NestedString(cc.Object, "spec", "upgrade", "channel")
+	if channel != "fast-4.16" {
+		t.Errorf("channel = %q, want fast-4.16", channel)
+	}
+	curation, _, _ := unstructured.NestedString(cc.Object, "spec", "desiredCuration")
+	if curation != "upgrade" {
+		t.Errorf("desiredCuration = %q, want upgrade", curation)
 	}
 }
 

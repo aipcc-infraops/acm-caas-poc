@@ -1,6 +1,8 @@
 package upgrade
 
-import "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+import (
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+)
 
 func buildChannelManifestWork(clusterName, mwName, channel string) *unstructured.Unstructured {
 	cvPatch := map[string]interface{}{
@@ -90,6 +92,55 @@ func buildUpgradeManifestWork(clusterName, mwName, version string) *unstructured
 							"type": "ServerSideApply",
 						},
 					},
+				},
+			},
+		},
+	}
+}
+
+func buildUpgradeClusterCurator(clusterName, version, channel string) *unstructured.Unstructured {
+	upgrade := map[string]interface{}{
+		"desiredUpdate": version,
+	}
+	if channel != "" {
+		upgrade["channel"] = channel
+	}
+
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1beta1",
+			"kind":       "ClusterCurator",
+			"metadata": map[string]interface{}{
+				"name":      clusterName,
+				"namespace": clusterName,
+				"labels": map[string]interface{}{
+					"caas-poc/operation": "upgrade",
+				},
+			},
+			"spec": map[string]interface{}{
+				"desiredCuration": "upgrade",
+				"upgrade":         upgrade,
+			},
+		},
+	}
+}
+
+func buildChannelClusterCurator(clusterName, channel string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1beta1",
+			"kind":       "ClusterCurator",
+			"metadata": map[string]interface{}{
+				"name":      clusterName,
+				"namespace": clusterName,
+				"labels": map[string]interface{}{
+					"caas-poc/operation": "upgrade",
+				},
+			},
+			"spec": map[string]interface{}{
+				"desiredCuration": "upgrade",
+				"upgrade": map[string]interface{}{
+					"channel": channel,
 				},
 			},
 		},
