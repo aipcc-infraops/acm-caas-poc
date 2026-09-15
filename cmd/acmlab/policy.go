@@ -169,12 +169,16 @@ func policySetRemediationCmd() *cobra.Command {
 		Short: "Change policy remediation action",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			action := args[1]
+			if action != "inform" && action != "enforce" {
+				return fmt.Errorf("invalid remediation action %q: must be 'inform' or 'enforce'", action)
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := policy.New(c, cfg, logger)
-			if err := mgr.SetRemediation(context.Background(), args[0], namespace, args[1]); err != nil {
+			if err := mgr.SetRemediation(context.Background(), args[0], namespace, action); err != nil {
 				return err
 			}
 			fmt.Printf("Policy %s remediation set to %s\n", args[0], args[1])

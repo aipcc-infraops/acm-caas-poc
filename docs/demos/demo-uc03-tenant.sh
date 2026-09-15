@@ -20,14 +20,14 @@ acmlab tenant deploy "$TENANT_NAME" \
 echo "--- Step 2: Wait for ManifestWork to sync ---"
 elapsed=0
 while true; do
-  status=$(acmlab tenant status "$TENANT_NAME" 2>&1 || true)
+  status=$(acmlab tenant status "$TENANT_NAME" --cluster "$CLUSTER" 2>&1 || true)
   if echo "$status" | grep -q "Applied"; then
     echo "$status"
     break
   fi
   if [ "$elapsed" -ge "$TIMEOUT" ]; then
     echo "WARNING: ManifestWork sync timed out after ${TIMEOUT}s"
-    acmlab tenant status "$TENANT_NAME"
+    acmlab tenant status "$TENANT_NAME" --cluster "$CLUSTER"
     break
   fi
   echo "  Waiting for sync... (${elapsed}s elapsed)"

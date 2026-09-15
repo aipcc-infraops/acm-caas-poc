@@ -146,6 +146,7 @@ func approveExpiredCSRs(ctx context.Context, clientset kubernetes.Interface) (*R
 
 		_, err := csrClient.UpdateApproval(ctx, csr.Name, csr, metav1.UpdateOptions{})
 		if err != nil {
+			result.CSRNames = append(result.CSRNames, fmt.Sprintf("%s (approval failed: %v)", csr.Name, err))
 			continue
 		}
 
