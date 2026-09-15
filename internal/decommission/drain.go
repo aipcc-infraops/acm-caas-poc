@@ -8,6 +8,7 @@ import (
 const defaultDrainTimeout = 5 * time.Minute
 
 func (m *Manager) Drain(ctx context.Context, clusterName string, timeout time.Duration) error {
+	m.logger.Info("decommission.Drain", "cluster", clusterName)
 	if timeout == 0 {
 		timeout = defaultDrainTimeout
 	}
@@ -16,6 +17,7 @@ func (m *Manager) Drain(ctx context.Context, clusterName string, timeout time.Du
 }
 
 func (m *Manager) Notify(ctx context.Context, clusterName, owner, deadline string) error {
+	m.logger.Info("decommission.Notify", "cluster", clusterName, "owner", owner)
 	state, err := getState(ctx, m.client, clusterName)
 	if err != nil {
 		return err

@@ -29,7 +29,7 @@ func fleetListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			insp := fleet.New(c, cfg)
+			insp := fleet.New(c, cfg, logger)
 			clusters, err := insp.ListClusters(context.Background())
 			if err != nil {
 				return err
@@ -75,7 +75,7 @@ func fleetStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fi := fleet.New(c, cfg)
+			fi := fleet.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// Single-cluster detailed output (original behaviour)

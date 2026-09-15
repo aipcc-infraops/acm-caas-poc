@@ -2,6 +2,8 @@ package importing
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -32,7 +36,7 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 }
 
 func newManager(objs ...runtime.Object) *Manager {
-	return New(fakeClient(objs...), config.Config{})
+	return New(fakeClient(objs...), config.Config{}, discardLogger)
 }
 
 func makeManagedCluster(name string, labels, annotations map[string]string, available, joined string) *unstructured.Unstructured {
@@ -170,7 +174,7 @@ func TestExtractConditionsSkipsBadConditionType(t *testing.T) {
 func TestNewReturnsManager(t *testing.T) {
 	c := fakeClient()
 	cfg := config.Config{}
-	m := New(c, cfg)
+	m := New(c, cfg, discardLogger)
 	if m == nil {
 		t.Fatal("expected non-nil Manager")
 	}

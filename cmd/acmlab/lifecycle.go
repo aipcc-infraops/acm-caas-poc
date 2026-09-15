@@ -80,7 +80,7 @@ func hibernateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := lifecycle.New(c, cfg)
+			m := lifecycle.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// single-item: preserve existing behavior with namespace flag
@@ -201,7 +201,7 @@ func resumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := lifecycle.New(c, cfg)
+			m := lifecycle.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// single-item: preserve existing behavior with namespace flag
@@ -331,7 +331,7 @@ func lifecycleStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := lifecycle.New(c, cfg)
+			m := lifecycle.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// single-item: preserve existing detailed output
@@ -450,7 +450,7 @@ Outputs actionable suggestions when problems are found.`,
 			if err != nil {
 				return err
 			}
-			m := lifecycle.New(c, cfg)
+			m := lifecycle.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// single-item: preserve existing detailed output
@@ -571,7 +571,7 @@ func lifecycleListCmd() *cobra.Command {
 				return err
 			}
 
-			m := lifecycle.New(c, cfg)
+			m := lifecycle.New(c, cfg, logger)
 			ctx := context.Background()
 
 			clusters, err := m.ListClustersWithLifecycle(ctx)

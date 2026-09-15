@@ -3,6 +3,8 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,6 +18,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // gvrListKinds maps every GVR used by the registry package to its list kind
 // so that the fake dynamic client can handle List calls.
@@ -34,7 +38,7 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 }
 
 func fakeManager(objs ...runtime.Object) *Manager {
-	return New(fakeClient(objs...), config.Config{})
+	return New(fakeClient(objs...), config.Config{}, discardLogger)
 }
 
 // manifestWork creates a ManifestWork with embedded container images.
@@ -158,7 +162,7 @@ func TestListRequiredImagesListError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("list", "manifestworks", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "connection refused"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.ListRequiredImages(context.Background(), "spoke-1")
 	if err == nil {
@@ -262,7 +266,7 @@ func TestConfigureMirrorClusterSetBindingError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "managedclustersetbindings", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "forbidden"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.ConfigureMirror(context.Background(), MirrorConfig{
 		ClusterName:    "spoke-1",
@@ -281,7 +285,7 @@ func TestConfigureMirrorPlacementError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "placements", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "forbidden"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.ConfigureMirror(context.Background(), MirrorConfig{
 		ClusterName:    "spoke-1",
@@ -336,7 +340,7 @@ func TestConfigureMirrorImageRegistryError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "managedclusterimageregistries", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "quota exceeded"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.ConfigureMirror(context.Background(), MirrorConfig{
 		ClusterName:    "spoke-1",
@@ -410,7 +414,7 @@ func TestRemoveMirrorImageRegistryError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "managedclusterimageregistries", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.RemoveMirror(context.Background(), "spoke-1")
 	if err == nil {
@@ -426,7 +430,7 @@ func TestRemoveMirrorPlacementError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "placements", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.RemoveMirror(context.Background(), "spoke-1")
 	if err == nil {
@@ -442,7 +446,7 @@ func TestRemoveMirrorSecretError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.RemoveMirror(context.Background(), "spoke-1")
 	if err == nil {
@@ -458,7 +462,7 @@ func TestRemoveMirrorBindingError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "managedclustersetbindings", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.RemoveMirror(context.Background(), "spoke-1")
 	if err == nil {
@@ -519,7 +523,7 @@ func TestGetMirrorStatusError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("get", "managedclusterimageregistries", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "connection refused"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.GetMirrorStatus(context.Background(), "spoke-1")
 	if err == nil {
@@ -611,7 +615,7 @@ func TestEnsureClusterSetBindingError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "managedclustersetbindings", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "forbidden"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.ensureClusterSetBinding(context.Background(), "spoke-1")
 	if err == nil {
@@ -655,7 +659,7 @@ func TestCreatePlacementError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "placements", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "forbidden"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.createPlacement(context.Background(), "spoke-1", "test-placement", "spoke-1")
 	if err == nil {
@@ -737,7 +741,7 @@ func TestCreatePullSecretCreateError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "forbidden"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.createPullSecret(context.Background(), "spoke-1", "test-secret", psPath)
 	if err == nil {
@@ -775,7 +779,7 @@ func TestCreateImageRegistryError(t *testing.T) {
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "managedclusterimageregistries", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "quota exceeded"}
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.createImageRegistry(context.Background(), "spoke-1", "spoke-1", "placement", "secret", nil)
 	if err == nil {
@@ -992,7 +996,7 @@ func TestMirrorStatusDefaults(t *testing.T) {
 func TestNewReturnsManager(t *testing.T) {
 	c := fakeClient()
 	cfg := config.Config{}
-	mgr := New(c, cfg)
+	mgr := New(c, cfg, discardLogger)
 	if mgr == nil {
 		t.Fatal("New returned nil")
 	}

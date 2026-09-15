@@ -2,6 +2,8 @@ package decommission
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func managedCluster(name string) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{}
@@ -76,7 +80,7 @@ func setupCluster(name string) []runtime.Object {
 }
 
 func newTestManager(objs ...runtime.Object) *Manager {
-	return New(fakeClient(objs...), config.Config{})
+	return New(fakeClient(objs...), config.Config{}, discardLogger)
 }
 
 // --- Audit tests ---

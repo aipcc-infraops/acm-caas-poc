@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,6 +25,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestGetPowerStateReturnsCurrentState(t *testing.T) {
 	tests := []struct {
@@ -81,7 +85,7 @@ func TestGetPowerStateReturnsCurrentState(t *testing.T) {
 			scheme := runtime.NewScheme()
 			fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 			c := &client.Client{Dynamic: fakeDynamic}
-			m := New(c, config.Config{})
+			m := New(c, config.Config{}, discardLogger)
 
 			got, err := m.GetPowerState(context.Background(), tt.namespace, tt.clusterName)
 			if err != nil {
@@ -98,7 +102,7 @@ func TestGetPowerStateReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.GetPowerState(context.Background(), "test-ns", "missing-cluster")
 	if err == nil {
@@ -127,7 +131,7 @@ func TestGetPowerStateReturnsUnknownWhenFieldMissing(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	got, err := m.GetPowerState(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -156,7 +160,7 @@ func TestHibernateIsIdempotent(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	// Hibernate an already hibernating cluster should succeed without error
 	err := m.Hibernate(context.Background(), "test-ns", "cluster1")
@@ -192,7 +196,7 @@ func TestResumeIsIdempotent(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	// Resume an already running cluster should succeed without error
 	err := m.Resume(context.Background(), "test-ns", "cluster1")
@@ -225,7 +229,7 @@ func TestClusterSupportsLifecycleReturnsTrueWhenClusterDeploymentExists(t *testi
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	supported, err := m.ClusterSupportsLifecycle(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -240,7 +244,7 @@ func TestClusterSupportsLifecycleReturnsFalseWhenClusterDeploymentMissing(t *tes
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	supported, err := m.ClusterSupportsLifecycle(context.Background(), "test-ns", "missing-cluster")
 	if err != nil {
@@ -272,7 +276,7 @@ func TestWaitForPowerStateTimesOutWhenStateNotReached(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	// Wait for Hibernating state with very short timeout (state will never be reached)
 	ctx := context.Background()
@@ -307,7 +311,7 @@ func TestListClustersWithLifecycleReturnsAllClusterDeployments(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd1, cd2)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	names, err := m.ListClustersWithLifecycle(context.Background())
 	if err != nil {
@@ -445,7 +449,7 @@ func TestDiagnoseIntegratesHiveAndACM(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, mc)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	report, err := m.Diagnose(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -491,7 +495,7 @@ func TestHibernateChangesState(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.Hibernate(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -517,7 +521,7 @@ func TestResumeChangesState(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.Resume(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -529,7 +533,7 @@ func TestHibernateReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.Hibernate(context.Background(), "test-ns", "missing")
 	if err == nil {
@@ -541,7 +545,7 @@ func TestResumeReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.Resume(context.Background(), "test-ns", "missing")
 	if err == nil {
@@ -567,7 +571,7 @@ func TestGetPowerStateStatusReturnsCurrentState(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	got, err := m.GetPowerStateStatus(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -594,7 +598,7 @@ func TestGetPowerStateStatusReturnsUnknownWhenFieldMissing(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	got, err := m.GetPowerStateStatus(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -609,7 +613,7 @@ func TestGetPowerStateStatusReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.GetPowerStateStatus(context.Background(), "test-ns", "missing")
 	if err == nil {
@@ -632,7 +636,7 @@ func TestCheckLifecycleSupportFullForHiveCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	reason, err := m.CheckLifecycleSupport(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -663,7 +667,7 @@ func TestCheckLifecycleSupportNotYetImplementedForKubernetes(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, mci)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	reason, err := m.CheckLifecycleSupport(context.Background(), "k8s-cluster", "k8s-cluster")
 	if err != nil {
@@ -700,7 +704,7 @@ func TestCheckLifecycleSupportUnsupportedForOCP(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, mci)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	reason, err := m.CheckLifecycleSupport(context.Background(), "ocp-cluster", "ocp-cluster")
 	if err != nil {
@@ -715,7 +719,7 @@ func TestCheckLifecycleSupportUnsupportedWhenTypeCheckFails(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	reason, err := m.CheckLifecycleSupport(context.Background(), "missing", "missing")
 	if err != nil {
@@ -922,7 +926,7 @@ func TestDiagnoseWithMissingManagedCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	report, err := m.Diagnose(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -951,7 +955,7 @@ func TestDiagnoseReturnsErrorForMissingClusterDeployment(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.Diagnose(context.Background(), "test-ns", "missing")
 	if err == nil {
@@ -987,7 +991,7 @@ func TestDiagnoseWithEmptyPowerStates(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, mc)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	report, err := m.Diagnose(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -1155,7 +1159,7 @@ func TestListClustersWithLifecycleEmpty(t *testing.T) {
 		},
 	)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	names, err := m.ListClustersWithLifecycle(context.Background())
 	if err != nil {
@@ -1184,7 +1188,7 @@ func TestWaitForPowerStateSucceedsImmediately(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.WaitForPowerState(context.Background(), "test-ns", "cluster1", PowerStateRunning, 5*time.Second)
 	if err != nil {
@@ -1244,7 +1248,7 @@ users:
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	cfg, err := m.getSpokeRESTConfig(context.Background(), "spoke1", "spoke1")
 	if err != nil {
@@ -1303,7 +1307,7 @@ users:
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	cfg, err := m.getSpokeRESTConfig(context.Background(), "spoke1", "spoke1")
 	if err != nil {
@@ -1345,7 +1349,7 @@ func TestGetSpokeRESTConfigMissingKubeconfig(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.getSpokeRESTConfig(context.Background(), "spoke1", "spoke1")
 	if err == nil {
@@ -1357,7 +1361,7 @@ func TestGetSpokeRESTConfigMissingClusterDeployment(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.getSpokeRESTConfig(context.Background(), "spoke1", "spoke1")
 	if err == nil {
@@ -1390,7 +1394,7 @@ func TestFindAdminKubeconfigSecret(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, secret, other)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	name, err := m.findAdminKubeconfigSecret(context.Background(), "spoke1")
 	if err != nil {
@@ -1416,7 +1420,7 @@ func TestFindAdminKubeconfigSecretNotFound(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.findAdminKubeconfigSecret(context.Background(), "spoke1")
 	if err == nil {
@@ -1502,7 +1506,7 @@ users:
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	result, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
 	if err != nil {
@@ -1520,7 +1524,7 @@ func TestPostResumeRecoveryMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
 	if err == nil {
@@ -1554,7 +1558,7 @@ func TestGetSpokeRESTConfigNoRefNoFallback(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, other)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.getSpokeRESTConfig(context.Background(), "spoke1", "spoke1")
 	if err == nil {
@@ -1583,7 +1587,7 @@ func TestGetPowerStateEmptyStringValue(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	got, err := m.GetPowerState(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -1612,7 +1616,7 @@ func TestGetPowerStateStatusEmptyStringValue(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	got, err := m.GetPowerStateStatus(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -1641,7 +1645,7 @@ func TestWaitForPowerStateCancelledContext(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -1660,7 +1664,7 @@ func TestClusterSupportsLifecycleErrorPath(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	supported, err := m.ClusterSupportsLifecycle(context.Background(), "missing", "missing")
 	if err != nil {
@@ -1959,7 +1963,7 @@ func TestDiagnoseWithFullConditions(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, mc)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	report, err := m.Diagnose(context.Background(), "test-ns", "cluster1")
 	if err != nil {
@@ -2006,7 +2010,7 @@ func TestGetSpokeRESTConfigInvalidBase64(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.getSpokeRESTConfig(context.Background(), "spoke1", "spoke1")
 	if err == nil {
@@ -2096,7 +2100,7 @@ users:
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	result, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
 	if err != nil {
@@ -2114,7 +2118,7 @@ func TestPostResumeRecoveryMissingClusterDeployment(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
 	if err == nil {
@@ -2197,7 +2201,7 @@ users:
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd, secret)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// Cancel immediately so the second round's select picks it up
@@ -2245,7 +2249,7 @@ func TestFindAdminKubeconfigSecretMultipleSecrets(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, s1, s2, s3)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	name, err := m.findAdminKubeconfigSecret(context.Background(), "ns1")
 	if err != nil {
@@ -2299,7 +2303,7 @@ func TestWaitForPowerStateMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	err := m.WaitForPowerState(context.Background(), "test-ns", "missing", PowerStateRunning, 2*time.Second)
 	if err == nil {
@@ -2327,7 +2331,7 @@ func TestGetSpokeRESTConfigSecretGetError(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd)
 	c := &client.Client{Dynamic: fakeDynamic}
-	m := New(c, config.Config{})
+	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.getSpokeRESTConfig(context.Background(), "spoke1", "spoke1")
 	if err == nil {

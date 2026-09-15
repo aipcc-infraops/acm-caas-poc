@@ -64,7 +64,7 @@ registries, these images must be mirrored.`,
 			if err != nil {
 				return err
 			}
-			m := registry.New(c, cfg)
+			m := registry.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// Single-cluster detailed output (original behaviour)
@@ -163,7 +163,7 @@ Example:
 			if err != nil {
 				return err
 			}
-			m := registry.New(c, cfg)
+			m := registry.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// Single-cluster original behaviour
@@ -286,7 +286,7 @@ func registryRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := registry.New(c, cfg)
+			m := registry.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// Single-cluster original behaviour
@@ -362,7 +362,7 @@ func registryStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m := registry.New(c, cfg)
+			m := registry.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// Single-cluster original behaviour
@@ -460,7 +460,7 @@ Example:
 			if err != nil {
 				return err
 			}
-			m := registry.New(c, cfg)
+			m := registry.New(c, cfg, logger)
 			ctx := context.Background()
 
 			// Single-cluster original behaviour

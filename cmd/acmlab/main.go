@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -11,7 +12,11 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
 
-var cfg config.Config
+var (
+	cfg     config.Config
+	logger  *slog.Logger
+	verbose bool
+)
 
 func main() {
 	_ = godotenv.Load()
@@ -23,11 +28,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	logLevel := &slog.LevelVar{}
+	logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	slog.SetDefault(logger)
+
 	root := &cobra.Command{
 		Use:   "acmlab",
 		Short: "ACM CaaS PoC Lab CLI",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if verbose {
+				logLevel.Set(slog.LevelDebug)
+			}
+		},
 	}
 
+	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable debug logging")
 	root.PersistentFlags().StringVar(&cfg.Kubeconfig, "kubeconfig", cfg.Kubeconfig, "Path to kubeconfig")
 	root.PersistentFlags().StringVar(&cfg.HubContext, "context", cfg.HubContext, "Kubernetes context for the hub")
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -28,7 +29,8 @@ func mcpServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s := acmmcp.NewServer(c, cfg)
+			mcpLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			s := acmmcp.NewServer(c, cfg, mcpLogger)
 			fmt.Fprintln(os.Stderr, "acmlab MCP server starting on stdio...")
 			return server.ServeStdio(s)
 		},

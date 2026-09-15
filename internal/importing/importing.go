@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -16,10 +17,11 @@ import (
 type Manager struct {
 	client *client.Client
 	cfg    config.Config
+	logger *slog.Logger
 }
 
-func New(c *client.Client, cfg config.Config) *Manager {
-	return &Manager{client: c, cfg: cfg}
+func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
+	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
 type ImportOptions struct {
@@ -40,6 +42,7 @@ type ImportResult struct {
 // controller picks up the secret and applies klusterlet manifests on the
 // spoke automatically.
 func (m *Manager) Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
+	m.logger.Info("importing.Import", "cluster", opts.Name)
 	name := opts.Name
 
 	if err := m.ensureNamespace(ctx, name); err != nil {
@@ -189,6 +192,7 @@ func (m *Manager) updateAutoImportSecret(ctx context.Context, name string, kubec
 // Detach removes a ManagedCluster from ACM. This does NOT destroy the
 // underlying cluster — it just removes it from ACM management.
 func (m *Manager) Detach(ctx context.Context, name string) error {
+	m.logger.Info("importing.Detach", "cluster", name)
 	err := m.client.Delete(ctx, client.GVRManagedCluster, "", name)
 	if errors.IsNotFound(err) {
 		return nil
@@ -198,6 +202,7 @@ func (m *Manager) Detach(ctx context.Context, name string) error {
 
 // WaitForImport polls the ManagedCluster until ManagedClusterConditionAvailable=True.
 func (m *Manager) WaitForImport(ctx context.Context, name string, timeout time.Duration) error {
+	m.logger.Info("importing.WaitForImport", "cluster", name)
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -223,6 +228,7 @@ func (m *Manager) WaitForImport(ctx context.Context, name string, timeout time.D
 
 // GetImportStatus returns the current import state of a cluster.
 func (m *Manager) GetImportStatus(ctx context.Context, name string) (*ImportStatus, error) {
+	m.logger.Info("importing.GetImportStatus", "cluster", name)
 	mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", name)
 	if err != nil {
 		return nil, fmt.Errorf("getting ManagedCluster %s: %w", name, err)
@@ -282,6 +288,7 @@ func extractConditions(mc *unstructured.Unstructured) (available, joined string)
 
 // IsImported checks if a cluster was imported (not provisioned via Hive).
 func (m *Manager) IsImported(ctx context.Context, name string) (bool, error) {
+	m.logger.Info("importing.IsImported", "cluster", name)
 	_, err := m.client.Get(ctx, client.GVRClusterDeployment, name, name)
 	if errors.IsNotFound(err) {
 		return true, nil
@@ -294,6 +301,7 @@ func (m *Manager) IsImported(ctx context.Context, name string) (bool, error) {
 
 // ListImported returns clusters that were imported (no ClusterDeployment).
 func (m *Manager) ListImported(ctx context.Context) ([]ImportStatus, error) {
+	m.logger.Info("importing.ListImported")
 	mcList, err := m.client.List(ctx, client.GVRManagedCluster, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("listing managed clusters: %w", err)

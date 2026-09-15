@@ -28,7 +28,7 @@ func monitorListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mon := monitoring.New(c, cfg)
+			mon := monitoring.New(c, cfg, logger)
 			results, err := mon.ListClusterResources(context.Background())
 			if err != nil {
 				return err
@@ -57,7 +57,7 @@ func monitorStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mon := monitoring.New(c, cfg)
+			mon := monitoring.New(c, cfg, logger)
 			cr, err := mon.GetClusterResources(context.Background(), args[0])
 			if err != nil {
 				return err
@@ -94,7 +94,7 @@ func monitorSetupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := observability.New(c, cfg)
+			mgr := observability.New(c, cfg, logger)
 			fmt.Println("Setting up observability (MinIO + MCO)...")
 			if err := mgr.Setup(context.Background()); err != nil {
 				return err
@@ -114,7 +114,7 @@ func monitorTeardownCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := observability.New(c, cfg)
+			mgr := observability.New(c, cfg, logger)
 			fmt.Println("Tearing down observability...")
 			if err := mgr.Teardown(context.Background()); err != nil {
 				return err
@@ -134,7 +134,7 @@ func monitorObsStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mgr := observability.New(c, cfg)
+			mgr := observability.New(c, cfg, logger)
 			status, err := mgr.Status(context.Background())
 			if err != nil {
 				return err

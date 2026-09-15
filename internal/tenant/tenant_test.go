@@ -2,6 +2,8 @@ package tenant
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -12,6 +14,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func fakeClient(objs ...runtime.Object) *client.Client {
 	scheme := runtime.NewScheme()
@@ -24,7 +28,7 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 
 func TestDeployCreatesTenantManifestWork(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := TenantOpts{
 		Name:    "team-alpha",
@@ -55,7 +59,7 @@ func TestDeployCreatesTenantManifestWork(t *testing.T) {
 
 func TestDeployIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := TenantOpts{Name: "team-alpha", Cluster: "infraops1"}
 	if err := mgr.Deploy(context.Background(), opts); err != nil {
@@ -68,7 +72,7 @@ func TestDeployIsIdempotent(t *testing.T) {
 
 func TestDeployWithCustomLimits(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := TenantOpts{
 		Name:        "team-beta",
@@ -109,7 +113,7 @@ func TestDeployWithCustomLimits(t *testing.T) {
 
 func TestRemoveDeletesManifestWork(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := TenantOpts{Name: "team-alpha", Cluster: "infraops1"}
 	if err := mgr.Deploy(context.Background(), opts); err != nil {
@@ -125,7 +129,7 @@ func TestRemoveDeletesManifestWork(t *testing.T) {
 
 func TestRemoveIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.Remove(context.Background(), "nonexistent", "infraops1"); err != nil {
 		t.Fatalf("Remove on empty cluster failed (not idempotent): %v", err)
@@ -142,7 +146,7 @@ func TestListTenants(t *testing.T) {
 	mw.SetLabels(map[string]string{"acmlab.redhat.com/tenant": "team-alpha"})
 
 	c := fakeClient(mw)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	tenants, err := mgr.List(context.Background(), "infraops1")
 	if err != nil {
@@ -177,7 +181,7 @@ func TestListTenantsWithAppliedStatus(t *testing.T) {
 	}
 
 	c := fakeClient(mw)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	tenants, err := mgr.List(context.Background(), "infraops1")
 	if err != nil {
@@ -228,7 +232,7 @@ func TestStatusParsesResourceStatus(t *testing.T) {
 	}
 
 	c := fakeClient(mw)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	ms, err := mgr.Status(context.Background(), "team-alpha", "infraops1")
 	if err != nil {
@@ -260,7 +264,7 @@ func TestStatusNoStatus(t *testing.T) {
 	mw.SetNamespace("infraops1")
 
 	c := fakeClient(mw)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	ms, err := mgr.Status(context.Background(), "team-alpha", "infraops1")
 	if err != nil {
@@ -276,7 +280,7 @@ func TestStatusNoStatus(t *testing.T) {
 
 func TestDeployDefaultsTeamToName(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := TenantOpts{Name: "team-gamma", Cluster: "infraops1"}
 	if err := mgr.Deploy(context.Background(), opts); err != nil {

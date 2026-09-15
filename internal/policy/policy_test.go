@@ -3,6 +3,8 @@ package policy
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -14,6 +16,8 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func fakeClient(objs ...runtime.Object) *client.Client {
 	scheme := runtime.NewScheme()
@@ -28,7 +32,7 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 
 func TestApplyCreatesAllResources(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := PolicyOpts{
 		Name:              "test-policy",
@@ -54,7 +58,7 @@ func TestApplyCreatesAllResources(t *testing.T) {
 
 func TestApplyIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := PolicyOpts{
 		Name:      "test-policy",
@@ -70,7 +74,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 
 func TestApplyWithRegistries(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := PolicyOpts{
 		Name:              "registry-policy",
@@ -95,7 +99,7 @@ func TestApplyWithRegistries(t *testing.T) {
 
 func TestApplyDefaultsNamespace(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := PolicyOpts{Name: "test-policy"}
 	if err := mgr.Apply(context.Background(), opts); err != nil {
@@ -108,7 +112,7 @@ func TestApplyDefaultsNamespace(t *testing.T) {
 
 func TestRemoveDeletesAllResources(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := PolicyOpts{Name: "test-policy", Namespace: DefaultNamespace}
 	if err := mgr.Apply(context.Background(), opts); err != nil {
@@ -132,7 +136,7 @@ func TestRemoveDeletesAllResources(t *testing.T) {
 
 func TestRemoveIsIdempotent(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.Remove(context.Background(), "nonexistent", DefaultNamespace); err != nil {
 		t.Fatalf("Remove on empty cluster failed (not idempotent): %v", err)
@@ -152,7 +156,7 @@ func TestListPolicies(t *testing.T) {
 	}
 
 	c := fakeClient(pol)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	policies, err := mgr.List(context.Background(), DefaultNamespace)
 	if err != nil {
@@ -191,7 +195,7 @@ func TestGetPolicy(t *testing.T) {
 	}
 
 	c := fakeClient(pol)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	info, err := mgr.Get(context.Background(), "my-policy", DefaultNamespace)
 	if err != nil {
@@ -226,7 +230,7 @@ func TestSetRemediation(t *testing.T) {
 	}
 
 	c := fakeClient(pol)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.SetRemediation(context.Background(), "my-policy", DefaultNamespace, "enforce"); err != nil {
 		t.Fatalf("SetRemediation failed: %v", err)
@@ -251,7 +255,7 @@ func TestSetDisabled(t *testing.T) {
 	}
 
 	c := fakeClient(pol)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.SetDisabled(context.Background(), "my-policy", DefaultNamespace, true); err != nil {
 		t.Fatalf("SetDisabled failed: %v", err)
@@ -340,7 +344,7 @@ func TestApplyError(t *testing.T) {
 	fake.PrependReactor("get", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("api unavailable")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	opts := PolicyOpts{Name: "test-policy", Namespace: DefaultNamespace}
 	err := mgr.Apply(context.Background(), opts)
@@ -355,7 +359,7 @@ func TestRemoveError(t *testing.T) {
 	fake.PrependReactor("delete", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("delete blocked")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.Remove(context.Background(), "test", DefaultNamespace)
 	if err == nil {
@@ -365,7 +369,7 @@ func TestRemoveError(t *testing.T) {
 
 func TestRemoveDefaultsNamespace(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 	if err := mgr.Remove(context.Background(), "x", ""); err != nil {
 		t.Fatalf("Remove with empty ns failed: %v", err)
 	}
@@ -377,7 +381,7 @@ func TestListError(t *testing.T) {
 	fake.PrependReactor("list", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("list blocked")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.List(context.Background(), DefaultNamespace)
 	if err == nil {
@@ -387,7 +391,7 @@ func TestListError(t *testing.T) {
 
 func TestListDefaultsNamespace(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 	policies, err := mgr.List(context.Background(), "")
 	if err != nil {
 		t.Fatalf("List with empty ns failed: %v", err)
@@ -399,7 +403,7 @@ func TestListDefaultsNamespace(t *testing.T) {
 
 func TestGetError(t *testing.T) {
 	c := fakeClient()
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.Get(context.Background(), "nonexistent", DefaultNamespace)
 	if err == nil {
@@ -417,7 +421,7 @@ func TestGetDefaultsNamespace(t *testing.T) {
 	pol.Object["spec"] = map[string]interface{}{"remediationAction": "inform"}
 
 	c := fakeClient(pol)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	info, err := mgr.Get(context.Background(), "my-policy", "")
 	if err != nil {
@@ -434,7 +438,7 @@ func TestSetRemediationError(t *testing.T) {
 	fake.PrependReactor("patch", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("patch blocked")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.SetRemediation(context.Background(), "test", DefaultNamespace, "enforce")
 	if err == nil {
@@ -452,7 +456,7 @@ func TestSetRemediationDefaultsNamespace(t *testing.T) {
 	pol.Object["spec"] = map[string]interface{}{"remediationAction": "inform"}
 
 	c := fakeClient(pol)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.SetRemediation(context.Background(), "my-policy", "", "enforce"); err != nil {
 		t.Fatalf("SetRemediation with empty ns failed: %v", err)
@@ -465,7 +469,7 @@ func TestSetDisabledError(t *testing.T) {
 	fake.PrependReactor("patch", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("patch blocked")
 	})
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.SetDisabled(context.Background(), "test", DefaultNamespace, true)
 	if err == nil {
@@ -483,7 +487,7 @@ func TestSetDisabledDefaultsNamespace(t *testing.T) {
 	pol.Object["spec"] = map[string]interface{}{"disabled": false}
 
 	c := fakeClient(pol)
-	mgr := New(c, config.Config{})
+	mgr := New(c, config.Config{}, discardLogger)
 
 	if err := mgr.SetDisabled(context.Background(), "my-policy", "", true); err != nil {
 		t.Fatalf("SetDisabled with empty ns failed: %v", err)

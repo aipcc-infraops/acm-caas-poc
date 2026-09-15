@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -24,42 +25,42 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
 )
 
-func NewServer(c *client.Client, cfg config.Config) *server.MCPServer {
+func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MCPServer {
 	s := server.NewMCPServer(
 		"acmlab",
 		"0.1.0",
 		server.WithToolCapabilities(false),
 	)
 
-	fleetInsp := fleet.New(c, cfg)
+	fleetInsp := fleet.New(c, cfg, log)
 	registerFleetTools(s, fleetInsp)
 	registerHealthTool(s, c)
 
-	mon := monitoring.New(c, cfg)
+	mon := monitoring.New(c, cfg, log)
 	registerMonitoringTools(s, mon)
 
-	pol := policy.New(c, cfg)
+	pol := policy.New(c, cfg, log)
 	registerPolicyTools(s, pol)
 
-	ten := tenant.New(c, cfg)
+	ten := tenant.New(c, cfg, log)
 	registerTenantTools(s, ten)
 
-	prov := provisioning.New(c, cfg)
+	prov := provisioning.New(c, cfg, log)
 	registerProvisioningTools(s, prov, cfg)
 
-	lc := lifecycle.New(c, cfg)
+	lc := lifecycle.New(c, cfg, log)
 	registerLifecycleTools(s, lc)
 
-	imp := importing.New(c, cfg)
+	imp := importing.New(c, cfg, log)
 	registerImportTools(s, imp)
 
-	reg := registry.New(c, cfg)
+	reg := registry.New(c, cfg, log)
 	registerRegistryTools(s, reg)
 
-	sc := scaling.New(c, cfg)
+	sc := scaling.New(c, cfg, log)
 	registerScalingTools(s, sc)
 
-	decomm := decommission.New(c, cfg)
+	decomm := decommission.New(c, cfg, log)
 	registerDecommissionTools(s, decomm)
 
 	return s
