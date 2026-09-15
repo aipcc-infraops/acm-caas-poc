@@ -103,16 +103,27 @@ func hibernateCmd() *cobra.Command {
 					return fmt.Errorf("hibernating cluster: %w", err)
 				}
 
-				fmt.Printf("Cluster %s/%s is hibernating\n", ns, clusterName)
-
 				if doWait {
 					fmt.Printf("Waiting for cluster to hibernate (timeout: %v)...\n", timeout)
 					if err := m.WaitForPowerState(ctx, ns, clusterName, lifecycle.PowerStateHibernating, timeout); err != nil {
 						return fmt.Errorf("waiting for hibernation: %w", err)
 					}
-					fmt.Println("Cluster successfully hibernated")
 				}
 
+				if outputJSON {
+					result := map[string]string{"cluster": clusterName, "namespace": ns, "action": "hibernate", "status": "initiated"}
+					if doWait {
+						result["status"] = "hibernating"
+					}
+					data, _ := json.MarshalIndent(result, "", "  ")
+					fmt.Println(string(data))
+					return nil
+				}
+
+				fmt.Printf("Cluster %s/%s is hibernating\n", ns, clusterName)
+				if doWait {
+					fmt.Println("Cluster successfully hibernated")
+				}
 				return nil
 			}
 
@@ -224,27 +235,46 @@ func resumeCmd() *cobra.Command {
 					return fmt.Errorf("resuming cluster: %w", err)
 				}
 
-				fmt.Printf("Cluster %s/%s is resuming\n", ns, clusterName)
-
+				var recovery *lifecycle.RecoveryResult
 				if doWait {
-					fmt.Printf("Waiting for cluster to resume (timeout: %v)...\n", timeout)
+					if !outputJSON {
+						fmt.Printf("Waiting for cluster to resume (timeout: %v)...\n", timeout)
+					}
 					if err := m.WaitForPowerState(ctx, ns, clusterName, lifecycle.PowerStateRunning, timeout); err != nil {
 						return fmt.Errorf("waiting for resume: %w", err)
 					}
-					fmt.Println("Cluster successfully resumed")
 
-					fmt.Println("Checking for expired kubelet certificates...")
-					recovery, err := m.PostResumeRecovery(ctx, ns, clusterName)
+					r, err := m.PostResumeRecovery(ctx, ns, clusterName)
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: certificate recovery failed: %v\n", err)
 					} else {
+						recovery = r
+					}
+				}
+
+				if outputJSON {
+					result := map[string]interface{}{"cluster": clusterName, "namespace": ns, "action": "resume", "status": "initiated"}
+					if doWait {
+						result["status"] = "running"
+						if recovery != nil {
+							result["recovery"] = recovery
+						}
+					}
+					data, _ := json.MarshalIndent(result, "", "  ")
+					fmt.Println(string(data))
+					return nil
+				}
+
+				fmt.Printf("Cluster %s/%s is resuming\n", ns, clusterName)
+				if doWait {
+					fmt.Println("Cluster successfully resumed")
+					if recovery != nil {
 						fmt.Println(recovery.Message)
 						for _, name := range recovery.CSRNames {
 							fmt.Printf("  - %s\n", name)
 						}
 					}
 				}
-
 				return nil
 			}
 
@@ -358,6 +388,19 @@ func lifecycleStatusCmd() *cobra.Command {
 				statusState, err := m.GetPowerStateStatus(ctx, ns, clusterName)
 				if err != nil {
 					return fmt.Errorf("getting power state status: %w", err)
+				}
+
+				if outputJSON {
+					result := map[string]interface{}{
+						"cluster":      clusterName,
+						"namespace":    ns,
+						"desiredState": string(specState),
+						"actualState":  string(statusState),
+						"transitioning": specState != statusState,
+					}
+					data, _ := json.MarshalIndent(result, "", "  ")
+					fmt.Println(string(data))
+					return nil
 				}
 
 				fmt.Printf("Cluster: %s/%s\n", ns, clusterName)
