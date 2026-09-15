@@ -9,7 +9,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -106,28 +105,28 @@ func (m *Manager) Create(ctx context.Context, opts ClusterOpts) error {
 	}
 
 	ns := buildNamespace(opts.Name)
-	if err := m.createIfNotExists(ctx, client.GVRNamespace, "", ns); err != nil {
+	if err := m.client.CreateIfNotExists(ctx, client.GVRNamespace, "", ns); err != nil {
 		return fmt.Errorf("creating namespace %s: %w", opts.Name, err)
 	}
 
 	creds := buildCredentialsSecret(opts.Name, opts.IBMCloudAPIKey)
-	if err := m.createIfNotExists(ctx, client.GVRSecret, opts.Name, creds); err != nil {
+	if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, opts.Name, creds); err != nil {
 		return fmt.Errorf("creating credentials secret: %w", err)
 	}
 
 	pull := buildPullSecret(opts.Name, opts.PullSecret)
-	if err := m.createIfNotExists(ctx, client.GVRSecret, opts.Name, pull); err != nil {
+	if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, opts.Name, pull); err != nil {
 		return fmt.Errorf("creating pull secret: %w", err)
 	}
 
 	installCfg := buildInstallConfigSecret(opts.Name, opts)
-	if err := m.createIfNotExists(ctx, client.GVRSecret, opts.Name, installCfg); err != nil {
+	if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, opts.Name, installCfg); err != nil {
 		return fmt.Errorf("creating install-config secret: %w", err)
 	}
 
 	if opts.SSHPrivateKey != "" {
 		sshKey := buildSSHPrivateKeySecret(opts.Name, opts.SSHPrivateKey)
-		if err := m.createIfNotExists(ctx, client.GVRSecret, opts.Name, sshKey); err != nil {
+		if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, opts.Name, sshKey); err != nil {
 			return fmt.Errorf("creating ssh private key secret: %w", err)
 		}
 	}
@@ -148,23 +147,23 @@ func (m *Manager) Create(ctx context.Context, opts ClusterOpts) error {
 			yamls := buildManifestYAMLs(componentCreds)
 			manifestsObj = buildManifestsSecretFromYAMLs(opts.Name, yamls)
 		}
-		if err := m.createIfNotExists(ctx, client.GVRSecret, opts.Name, manifestsObj); err != nil {
+		if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, opts.Name, manifestsObj); err != nil {
 			return fmt.Errorf("creating manifests secret: %w", err)
 		}
 	}
 
 	cd := buildClusterDeployment(opts)
-	if err := m.createIfNotExists(ctx, client.GVRClusterDeployment, opts.Name, cd); err != nil {
+	if err := m.client.CreateIfNotExists(ctx, client.GVRClusterDeployment, opts.Name, cd); err != nil {
 		return fmt.Errorf("creating ClusterDeployment %s: %w", opts.Name, err)
 	}
 
 	mc := buildManagedCluster(opts.Name, opts.Platform)
-	if err := m.createIfNotExists(ctx, client.GVRManagedCluster, "", mc); err != nil {
+	if err := m.client.CreateIfNotExists(ctx, client.GVRManagedCluster, "", mc); err != nil {
 		return fmt.Errorf("creating ManagedCluster %s: %w", opts.Name, err)
 	}
 
 	kac := buildKlusterletAddonConfig(opts.Name)
-	if err := m.createIfNotExists(ctx, client.GVRKlusterletAddonConfig, opts.Name, kac); err != nil {
+	if err := m.client.CreateIfNotExists(ctx, client.GVRKlusterletAddonConfig, opts.Name, kac); err != nil {
 		return fmt.Errorf("creating KlusterletAddonConfig %s: %w", opts.Name, err)
 	}
 
@@ -271,19 +270,6 @@ func parseImageSetInfo(obj map[string]interface{}) ImageSetInfo {
 		info.ReleaseImage, _ = spec["releaseImage"].(string)
 	}
 	return info
-}
-
-func (m *Manager) createIfNotExists(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
-	name := obj.GetName()
-	_, err := m.client.Get(ctx, gvr, namespace, name)
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-	_, err = m.client.Create(ctx, gvr, namespace, obj)
-	return err
 }
 
 func parseClusterInfo(obj map[string]interface{}) *ClusterInfo {

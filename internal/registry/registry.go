@@ -10,6 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -125,30 +126,22 @@ func (m *Manager) ConfigureMirror(ctx context.Context, opts MirrorConfig) error 
 func (m *Manager) RemoveMirror(ctx context.Context, clusterName string) error {
 	m.logger.Info("registry.RemoveMirror", "cluster", clusterName)
 	ns := clusterName
-	name := fmt.Sprintf("%s-image-registry", clusterName)
 
-	err := m.client.Delete(ctx, client.GVRManagedClusterImageRegistry, ns, name)
-	if err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("deleting ManagedClusterImageRegistry: %w", err)
+	steps := []struct {
+		label string
+		gvr   schema.GroupVersionResource
+		name  string
+	}{
+		{"ManagedClusterImageRegistry", client.GVRManagedClusterImageRegistry, fmt.Sprintf("%s-image-registry", clusterName)},
+		{"Placement", client.GVRPlacement, fmt.Sprintf("%s-registry-placement", clusterName)},
+		{"pull secret", client.GVRSecret, fmt.Sprintf("%s-registry-pull-secret", clusterName)},
+		{"ManagedClusterSetBinding", client.GVRManagedClusterSetBinding, "default"},
 	}
-
-	placementName := fmt.Sprintf("%s-registry-placement", clusterName)
-	err = m.client.Delete(ctx, client.GVRPlacement, ns, placementName)
-	if err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("deleting Placement: %w", err)
+	for _, s := range steps {
+		if err := m.client.DeleteIfExists(ctx, s.gvr, ns, s.name); err != nil {
+			return fmt.Errorf("deleting %s: %w", s.label, err)
+		}
 	}
-
-	pullSecretName := fmt.Sprintf("%s-registry-pull-secret", clusterName)
-	err = m.client.Delete(ctx, client.GVRSecret, ns, pullSecretName)
-	if err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("deleting pull secret: %w", err)
-	}
-
-	err = m.client.Delete(ctx, client.GVRManagedClusterSetBinding, ns, "default")
-	if err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("deleting ManagedClusterSetBinding: %w", err)
-	}
-
 	return nil
 }
 
@@ -237,11 +230,7 @@ func (m *Manager) ensureClusterSetBinding(ctx context.Context, namespace string)
 			},
 		},
 	}
-	_, err := m.client.Create(ctx, client.GVRManagedClusterSetBinding, namespace, binding)
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
+	return m.client.CreateIfNotExists(ctx, client.GVRManagedClusterSetBinding, namespace, binding)
 }
 
 func (m *Manager) createPlacement(ctx context.Context, namespace, name, clusterName string) error {
@@ -282,11 +271,7 @@ func (m *Manager) createPlacement(ctx context.Context, namespace, name, clusterN
 		},
 	}
 
-	_, err := m.client.Create(ctx, client.GVRPlacement, namespace, placement)
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
+	return m.client.CreateIfNotExists(ctx, client.GVRPlacement, namespace, placement)
 }
 
 func (m *Manager) createPullSecret(ctx context.Context, namespace, name, pullSecretPath string) error {
@@ -315,11 +300,7 @@ func (m *Manager) createPullSecret(ctx context.Context, namespace, name, pullSec
 		},
 	}
 
-	_, err = m.client.Create(ctx, client.GVRSecret, namespace, secret)
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
+	return m.client.CreateIfNotExists(ctx, client.GVRSecret, namespace, secret)
 }
 
 func (m *Manager) createImageRegistry(ctx context.Context, namespace, clusterName, placementName, pullSecretName string, registries []RegistryMapping) error {
@@ -355,11 +336,7 @@ func (m *Manager) createImageRegistry(ctx context.Context, namespace, clusterNam
 		},
 	}
 
-	_, err := m.client.Create(ctx, client.GVRManagedClusterImageRegistry, namespace, mcir)
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
+	return m.client.CreateIfNotExists(ctx, client.GVRManagedClusterImageRegistry, namespace, mcir)
 }
 
 func extractImagesFromObject(obj map[string]interface{}) []string {
