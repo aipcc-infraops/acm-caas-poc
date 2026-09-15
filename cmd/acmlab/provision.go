@@ -32,7 +32,7 @@ func provisionCreateCmd() *cobra.Command {
 	var workers, masters int64
 	cmd := &cobra.Command{
 		Use:   "create <cluster-name>",
-		Short: "Create a spoke cluster on IBM Cloud via Hive (idempotent)",
+		Short: "Create a spoke cluster via Hive (supports ibmcloud, aws, gcp, azure)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := buildClient()
