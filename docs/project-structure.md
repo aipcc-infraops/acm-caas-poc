@@ -15,6 +15,7 @@ acm-caas-poc/
 │   ├── registry.go                # registry list-images/mirror-script/configure/status/remove
 │   ├── scaling.go                 # scaling list/get/set/auto
 │   ├── decommission.go            # decommission start/advance/status/list/cancel/audit
+│   ├── upgrade.go                 # upgrade status/list/set-channel/start/history
 │   └── mcp.go                     # mcp serve (MCP server on stdio)
 │
 ├── internal/
@@ -26,6 +27,7 @@ acm-caas-poc/
 │   │   ├── client.go              # Dynamic k8s client wrapper (Create/Get/List/Delete/Patch/Watch)
 │   │   ├── client_test.go         # CRUD operations with dynamicfake
 │   │   ├── client_integration_test.go
+│   │   ├── clustertype.go          # ClusterType detection from ManagedClusterInfo
 │   │   └── gvr.go                 # GVR constants for all ACM resources
 │   │
 │   ├── fleet/                     # UC-04: Fleet observability
@@ -76,6 +78,11 @@ acm-caas-poc/
 │   │   ├── registry.go            # Manager — ListRequiredImages, ConfigureMirror, RemoveMirror, GenerateMirrorScript
 │   │   └── registry_test.go
 │   │
+│   ├── upgrade/                   # UC-09: Cluster version upgrades (Day-2 OCP)
+│   │   ├── upgrade.go             # Manager — GetUpgradeStatus, ListUpgradeable, SetChannel, StartUpgrade, GetHistory
+│   │   ├── builder.go             # Builds ManifestWork for ClusterVersion channel/upgrade patches
+│   │   └── upgrade_test.go
+│   │
 │   ├── decommission/              # UC-08: Legacy cluster decommissioning
 │   │   ├── manager.go             # Manager — Start, Advance, Cancel, List
 │   │   ├── state.go               # ConfigMap-based state machine (see ADR-008)
@@ -94,6 +101,7 @@ acm-caas-poc/
 │   │
 │   └── mcp/
 │       ├── server.go              # NewServer() — registers all MCP tools
+│       ├── upgrade.go             # UC-09 upgrade MCP tool registrations
 │       └── server_test.go
 │
 ├── features/                      # Gherkin .feature files (for godog)
@@ -104,6 +112,7 @@ acm-caas-poc/
 │   ├── lifecycle.feature          # UC-05 scenarios
 │   ├── monitoring.feature         # UC-06 scenarios
 │   ├── importing.feature          # UC-07 scenarios
+│   ├── upgrade.feature             # UC-09 scenarios
 │   ├── scaling.feature            # UC-10 scenarios
 │   └── registry.feature           # UC-13 scenarios
 │
@@ -131,6 +140,7 @@ acm-caas-poc/
 │   │   ├── demo-uc05-lifecycle.sh
 │   │   ├── demo-uc06-monitoring.sh
 │   │   ├── demo-uc07-import.sh
+│   │   ├── demo-uc09-upgrade.sh
 │   │   ├── demo-uc10-scaling.sh
 │   │   ├── demo-uc08-decommission.sh
 │   │   └── demo-uc13-registry.sh
@@ -142,6 +152,7 @@ acm-caas-poc/
 │   │   ├── uc-05-lifecycle.sh
 │   │   ├── uc-06-monitoring.sh
 │   │   ├── uc-07-import-detach.sh
+│   │   ├── uc-09-upgrade.sh
 │   │   ├── uc-10-scaling.sh
 │   │   ├── uc-08-decommission.sh
 │   │   └── uc-13-registry-mirror.sh
