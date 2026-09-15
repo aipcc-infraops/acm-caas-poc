@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func buildOAuthManifest(opts IdPOpts) map[string]interface{} {
@@ -194,8 +196,6 @@ func buildOAuthClusterRoleBinding() map[string]interface{} {
 	}
 }
 
-// buildHTPasswdData generates htpasswd-format lines (user:password).
-// PoC uses plaintext passwords; production should use bcrypt hashes.
 func buildHTPasswdData(users map[string]string) string {
 	if len(users) == 0 {
 		return ""
@@ -207,7 +207,12 @@ func buildHTPasswdData(users map[string]string) string {
 	sort.Strings(keys)
 	lines := make([]string, 0, len(keys))
 	for _, k := range keys {
-		lines = append(lines, fmt.Sprintf("%s:%s", k, users[k]))
+		hash, err := bcrypt.GenerateFromPassword([]byte(users[k]), bcrypt.DefaultCost)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("%s:{SSHA}invalid", k))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s:%s", k, string(hash)))
 	}
 	return strings.Join(lines, "\n")
 }
