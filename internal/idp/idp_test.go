@@ -5,7 +5,10 @@ import (
 	"encoding/base64"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -149,8 +152,13 @@ func TestConfigureHTPasswd(t *testing.T) {
 	data, _ := secret["data"].(map[string]interface{})
 	decoded, _ := base64.StdEncoding.DecodeString(data["htpasswd"].(string))
 	content := string(decoded)
-	if content != "admin:pass123\ndev:devpass" {
-		t.Errorf("htpasswd content = %q, want admin:pass123\\ndev:devpass", content)
+	lines := strings.Split(content, "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "admin:$2a$") || !strings.HasPrefix(lines[1], "dev:$2a$") {
+		t.Errorf("htpasswd should have bcrypt hashes for admin and dev, got %q", content)
+	}
+	parts := strings.SplitN(lines[0], ":", 2)
+	if err := bcrypt.CompareHashAndPassword([]byte(parts[1]), []byte("pass123")); err != nil {
+		t.Errorf("admin password hash verification failed: %v", err)
 	}
 
 	oauth, _ := manifests[1].(map[string]interface{})
@@ -506,8 +514,9 @@ func TestBuildSecretHTPasswd(t *testing.T) {
 	data, _ := s["data"].(map[string]interface{})
 	decoded, _ := base64.StdEncoding.DecodeString(data["htpasswd"].(string))
 	content := string(decoded)
-	if content != "alice:pw2\nbob:pw1" {
-		t.Errorf("htpasswd = %q, want alice:pw2\\nbob:pw1 (sorted)", content)
+	lines := strings.Split(content, "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "alice:$2a$") || !strings.HasPrefix(lines[1], "bob:$2a$") {
+		t.Errorf("htpasswd should have sorted bcrypt entries for alice and bob, got %q", content)
 	}
 }
 
@@ -534,8 +543,20 @@ func TestBuildSecretLDAP(t *testing.T) {
 func TestBuildHTPasswdData(t *testing.T) {
 	users := map[string]string{"charlie": "pw3", "alice": "pw1", "bob": "pw2"}
 	result := buildHTPasswdData(users)
-	if result != "alice:pw1\nbob:pw2\ncharlie:pw3" {
-		t.Errorf("htpasswd data = %q, want sorted", result)
+	lines := strings.Split(result, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(lines))
+	}
+	expected := []string{"alice", "bob", "charlie"}
+	passwords := []string{"pw1", "pw2", "pw3"}
+	for i, line := range lines {
+		parts := strings.SplitN(line, ":", 2)
+		if parts[0] != expected[i] {
+			t.Errorf("line %d user = %q, want %q", i, parts[0], expected[i])
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(parts[1]), []byte(passwords[i])); err != nil {
+			t.Errorf("line %d password verification failed: %v", i, err)
+		}
 	}
 }
 
