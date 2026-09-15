@@ -60,6 +60,10 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 func (m *Manager) Configure(ctx context.Context, opts IdPOpts) error {
 	m.logger.Info("idp.Configure", "name", opts.Name, "cluster", opts.Cluster, "type", string(opts.Type))
 
+	if err := m.ensureOAuthRBAC(ctx, opts.Cluster); err != nil {
+		return fmt.Errorf("ensuring OAuth RBAC on %s: %w", opts.Cluster, err)
+	}
+
 	manifests := []interface{}{
 		buildSecretManifest(opts),
 		buildOAuthManifest(opts),
@@ -85,6 +89,29 @@ func (m *Manager) Configure(ctx context.Context, opts IdPOpts) error {
 		},
 	}
 	return m.client.CreateIfNotExists(ctx, client.GVRManifestWork, opts.Cluster, obj)
+}
+
+func (m *Manager) ensureOAuthRBAC(ctx context.Context, cluster string) error {
+	rbacManifests := []interface{}{
+		buildOAuthClusterRole(),
+		buildOAuthClusterRoleBinding(),
+	}
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "work.open-cluster-management.io/v1",
+			"kind":       "ManifestWork",
+			"metadata": map[string]interface{}{
+				"name":      "idp-oauth-rbac",
+				"namespace": cluster,
+			},
+			"spec": map[string]interface{}{
+				"workload": map[string]interface{}{
+					"manifests": rbacManifests,
+				},
+			},
+		},
+	}
+	return m.client.CreateIfNotExists(ctx, client.GVRManifestWork, cluster, obj)
 }
 
 func (m *Manager) Remove(ctx context.Context, idpName, cluster string) error {
