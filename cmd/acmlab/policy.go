@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -23,6 +24,7 @@ func policyCmd() *cobra.Command {
 		policySetRemediationCmd(),
 		policyEnableCmd(),
 		policyDisableCmd(),
+		policyReportCmd(),
 	)
 	return cmd
 }
@@ -121,6 +123,10 @@ Supports three policy types:
 				return err
 			}
 			mgr := policy.New(c, cfg, logger)
+			var clusterSet string
+			if cs, _ := cmd.Flags().GetString("cluster-set"); cs != "" {
+				clusterSet = cs
+			}
 			opts := policy.PolicyOpts{
 				Name:              args[0],
 				Namespace:         namespace,
@@ -129,6 +135,7 @@ Supports three policy types:
 				OperatorVersion:   operatorVersion,
 				OperatorChannel:   operatorChannel,
 				CertExpiryDays:    certExpiry,
+				ClusterSet:        clusterSet,
 			}
 			if labels != "" {
 				opts.ClusterLabels = parseLabels(labels)
@@ -156,6 +163,7 @@ Supports three policy types:
 	cmd.Flags().StringVar(&operatorChannel, "operator-channel", "", "pin operator to this channel")
 	cmd.Flags().IntVar(&certExpiry, "cert-expiry", 0, "certificate expiry threshold in days for CertificatePolicy (UC-28)")
 	cmd.Flags().StringVar(&certNamespaces, "cert-namespaces", "", "namespaces to monitor for cert expiry (comma-separated, default: openshift-config,openshift-ingress)")
+	cmd.Flags().String("cluster-set", "", "scope policy to a ClusterSet (UC-24)")
 	return cmd
 }
 
@@ -253,6 +261,43 @@ func policyDisableCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	return cmd
+}
+
+func policyReportCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+	cmd := &cobra.Command{
+		Use:   "report",
+		Short: "Show per-ClusterSet compliance report",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			report, err := mgr.ComplianceReport(context.Background(), namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(report) == 0 {
+				fmt.Println("No compliance data found")
+				return nil
+			}
+			fmt.Printf("%-25s %-8s %-10s %-12s %s\n", "CLUSTERSET", "TOTAL", "COMPLIANT", "NONCOMPLIANT", "PENDING")
+			for _, r := range report {
+				fmt.Printf("%-25s %-8d %-10d %-12d %d\n", r.ClusterSet, r.Total, r.Compliant, r.NonCompliant, r.Pending)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 

@@ -20,6 +20,7 @@ type PolicyOpts struct {
 	OperatorChannel   string
 	CertExpiryDays    int
 	CertNamespaces    []string
+	ClusterSet        string
 }
 
 func (m *Manager) ensurePolicy(ctx context.Context, namespace string, opts PolicyOpts) error {
@@ -79,6 +80,9 @@ func (m *Manager) ensurePlacement(ctx context.Context, namespace string, opts Po
 				"operator": "Exists",
 			},
 		},
+	}
+	if opts.ClusterSet != "" {
+		spec["clusterSets"] = []interface{}{opts.ClusterSet}
 	}
 	if len(predicates) > 0 {
 		spec["predicates"] = predicates

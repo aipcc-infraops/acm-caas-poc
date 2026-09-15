@@ -26,6 +26,7 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 			client.GVRPolicy:           "PolicyList",
 			client.GVRPlacement:        "PlacementList",
 			client.GVRPlacementBinding: "PlacementBindingList",
+			client.GVRManagedCluster:   "ManagedClusterList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -690,5 +691,158 @@ func TestParsePolicyInfoBadStatusEntry(t *testing.T) {
 	info := parsePolicyInfo(obj)
 	if len(info.ClusterCompliance) != 1 {
 		t.Errorf("got %d cluster compliance, want 1 (bad entry skipped)", len(info.ClusterCompliance))
+	}
+}
+
+func TestApplyWithClusterSet(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{
+		Name:       "gpu-driver-check",
+		Namespace:  DefaultNamespace,
+		ClusterSet: "team-serving",
+	}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply with ClusterSet failed: %v", err)
+	}
+
+	placement, err := c.Get(context.Background(), client.GVRPlacement, DefaultNamespace, "gpu-driver-check-placement")
+	if err != nil {
+		t.Fatalf("placement not created: %v", err)
+	}
+
+	clusterSets, found, _ := unstructured.NestedSlice(placement.Object, "spec", "clusterSets")
+	if !found {
+		t.Fatal("placement has no spec.clusterSets")
+	}
+	if len(clusterSets) != 1 || clusterSets[0] != "team-serving" {
+		t.Errorf("clusterSets = %v, want [team-serving]", clusterSets)
+	}
+}
+
+func TestApplyWithClusterSetAndLabels(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{
+		Name:          "combined",
+		Namespace:     DefaultNamespace,
+		ClusterSet:    "team-gpu",
+		ClusterLabels: map[string]string{"gpu": "true"},
+	}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+
+	placement, _ := c.Get(context.Background(), client.GVRPlacement, DefaultNamespace, "combined-placement")
+	clusterSets, found, _ := unstructured.NestedSlice(placement.Object, "spec", "clusterSets")
+	if !found || len(clusterSets) != 1 {
+		t.Error("expected clusterSets to be set")
+	}
+	predicates, found, _ := unstructured.NestedSlice(placement.Object, "spec", "predicates")
+	if !found || len(predicates) == 0 {
+		t.Error("expected predicates to be set alongside clusterSets")
+	}
+}
+
+func TestComplianceReport(t *testing.T) {
+	pol := &unstructured.Unstructured{}
+	pol.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "policy.open-cluster-management.io", Version: "v1", Kind: "Policy",
+	})
+	pol.SetName("test-pol")
+	pol.SetNamespace(DefaultNamespace)
+	pol.Object["spec"] = map[string]interface{}{"remediationAction": "inform"}
+	pol.Object["status"] = map[string]interface{}{
+		"compliant": "NonCompliant",
+		"status": []interface{}{
+			map[string]interface{}{"clustername": "spoke1", "compliant": "Compliant"},
+			map[string]interface{}{"clustername": "spoke2", "compliant": "NonCompliant"},
+			map[string]interface{}{"clustername": "spoke3", "compliant": "Compliant"},
+		},
+	}
+
+	mc1 := &unstructured.Unstructured{}
+	mc1.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc1.SetName("spoke1")
+	mc1.SetLabels(map[string]string{"cluster.open-cluster-management.io/clusterset": "team-serving"})
+
+	mc2 := &unstructured.Unstructured{}
+	mc2.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc2.SetName("spoke2")
+	mc2.SetLabels(map[string]string{"cluster.open-cluster-management.io/clusterset": "team-serving"})
+
+	mc3 := &unstructured.Unstructured{}
+	mc3.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc3.SetName("spoke3")
+
+	c := fakeClient(pol, mc1, mc2, mc3)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	report, err := mgr.ComplianceReport(context.Background(), DefaultNamespace)
+	if err != nil {
+		t.Fatalf("ComplianceReport failed: %v", err)
+	}
+
+	if len(report) != 2 {
+		t.Fatalf("got %d sets, want 2 (team-serving + default)", len(report))
+	}
+
+	setMap := map[string]ClusterSetCompliance{}
+	for _, r := range report {
+		setMap[r.ClusterSet] = r
+	}
+
+	serving := setMap["team-serving"]
+	if serving.Total != 2 {
+		t.Errorf("team-serving total = %d, want 2", serving.Total)
+	}
+	if serving.Compliant != 1 {
+		t.Errorf("team-serving compliant = %d, want 1", serving.Compliant)
+	}
+	if serving.NonCompliant != 1 {
+		t.Errorf("team-serving noncompliant = %d, want 1", serving.NonCompliant)
+	}
+
+	def := setMap["default"]
+	if def.Total != 1 {
+		t.Errorf("default total = %d, want 1", def.Total)
+	}
+	if def.Compliant != 1 {
+		t.Errorf("default compliant = %d, want 1", def.Compliant)
+	}
+}
+
+func TestComplianceReportEmpty(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	report, err := mgr.ComplianceReport(context.Background(), DefaultNamespace)
+	if err != nil {
+		t.Fatalf("ComplianceReport failed: %v", err)
+	}
+	if len(report) != 0 {
+		t.Errorf("got %d sets, want 0", len(report))
+	}
+}
+
+func TestComplianceReportListError(t *testing.T) {
+	c := fakeClient()
+	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
+	fake.PrependReactor("list", "managedclusters", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("list blocked")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	_, err := mgr.ComplianceReport(context.Background(), DefaultNamespace)
+	if err == nil {
+		t.Fatal("expected error when cluster list fails")
 	}
 }
