@@ -42,7 +42,10 @@ func fakeClientWithClusters(clusters ...*unstructured.Unstructured) *client.Clie
 			client.GVRMachinePool:                   "MachinePoolList",
 			client.GVRManagedClusterImageRegistry:   "ManagedClusterImageRegistryList",
 			client.GVRManagedClusterSetBinding:      "ManagedClusterSetBindingList",
+			client.GVRManagedClusterSet:             "ManagedClusterSetList",
 			client.GVRPlacementRule:                 "PlacementRuleList",
+			client.GVRConfigMap:                     "ConfigMapList",
+			client.GVRClusterCurator:                "ClusterCuratorList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -596,5 +599,130 @@ func TestTenantStatusViaMCP(t *testing.T) {
 	}
 	if ms["Applied"] != true {
 		t.Errorf("Applied = %v, want true", ms["Applied"])
+	}
+}
+
+func TestConfigureIdPViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_configure_idp", map[string]interface{}{
+		"name":          "my-github",
+		"cluster":       "spoke1",
+		"type":          "github",
+		"client_id":     "placeholder-id",
+		"client_secret": "placeholder-secret",
+	})
+	text := extractToolText(t, resp)
+	if text != "IdP my-github (github) configured on cluster spoke1" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestConfigureIdPOIDCViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_configure_idp", map[string]interface{}{
+		"name":          "keycloak",
+		"cluster":       "spoke1",
+		"type":          "oidc",
+		"client_id":     "placeholder-id",
+		"client_secret": "placeholder-secret",
+		"issuer_url":    "https://keycloak.example.com/realms/main",
+	})
+	text := extractToolText(t, resp)
+	if text != "IdP keycloak (oidc) configured on cluster spoke1" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestRemoveIdPViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_remove_idp", map[string]interface{}{
+		"name":    "my-github",
+		"cluster": "spoke1",
+	})
+	text := extractToolText(t, resp)
+	if text != "IdP my-github removed from cluster spoke1" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestListIdPsViaMCP(t *testing.T) {
+	mw := &unstructured.Unstructured{}
+	mw.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
+	})
+	mw.SetName("idp-my-github")
+	mw.SetNamespace("spoke1")
+	mw.SetLabels(map[string]string{
+		"acmlab.redhat.com/idp":  "my-github",
+		"acmlab.redhat.com/type": "github",
+	})
+
+	c := fakeClientWithClusters(mw)
+	resp := callTool(t, c, "acm_list_idps", map[string]interface{}{
+		"cluster": "spoke1",
+	})
+	text := extractToolText(t, resp)
+	var idps []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &idps); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(idps) != 1 {
+		t.Fatalf("expected 1 idp, got %d", len(idps))
+	}
+	if idps[0]["name"] != "my-github" {
+		t.Errorf("name = %v, want my-github", idps[0]["name"])
+	}
+}
+
+func TestRotateIdPViaMCP(t *testing.T) {
+	mw := &unstructured.Unstructured{}
+	mw.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
+	})
+	mw.SetName("idp-my-github")
+	mw.SetNamespace("spoke1")
+	mw.SetLabels(map[string]string{
+		"acmlab.redhat.com/idp":  "my-github",
+		"acmlab.redhat.com/type": "github",
+	})
+
+	c := fakeClientWithClusters(mw)
+	resp := callTool(t, c, "acm_rotate_idp", map[string]interface{}{
+		"name":          "my-github",
+		"cluster":       "spoke1",
+		"client_secret": "new-secret-value",
+	})
+	text := extractToolText(t, resp)
+	if text != "IdP my-github credentials rotated on cluster spoke1" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestScalingSetFlavorViaMCP(t *testing.T) {
+	mp := &unstructured.Unstructured{}
+	mp.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "hive.openshift.io", Version: "v1", Kind: "MachinePool",
+	})
+	mp.SetName("spoke1-worker")
+	mp.SetNamespace("spoke1")
+	mp.Object["spec"] = map[string]interface{}{
+		"replicas": int64(3),
+		"platform": map[string]interface{}{
+			"ibmcloud": map[string]interface{}{
+				"type": "bx2-4x16",
+			},
+		},
+	}
+
+	cd := newClusterDeployment("spoke1", true)
+
+	c := fakeClientWithClusters(mp, cd)
+	resp := callTool(t, c, "acm_scaling_set_flavor", map[string]interface{}{
+		"cluster":     "spoke1",
+		"worker_type": "cx2-8x16",
+	})
+	text := extractToolText(t, resp)
+	if text != "Cluster spoke1 worker flavor changed to cx2-8x16" {
+		t.Errorf("unexpected response: %s", text)
 	}
 }
