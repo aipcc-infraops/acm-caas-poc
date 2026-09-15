@@ -102,10 +102,19 @@ func policyStatusCmd() *cobra.Command {
 
 func policyApplyCmd() *cobra.Command {
 	var namespace, remediation, labels, registries string
+	var operatorName, operatorVersion, operatorChannel string
+	var certExpiry int
+	var certNamespaces string
 	cmd := &cobra.Command{
 		Use:   "apply <name>",
 		Short: "Create a policy with placement (idempotent)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Create a governance policy with placement and binding.
+
+Supports three policy types:
+  - ConfigurationPolicy (default): enforce object state (namespaces, registry restrictions)
+  - OperatorPolicy: pin operator versions and channels (--operator)
+  - CertificatePolicy: detect expiring certificates (--cert-expiry)`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := buildClient()
 			if err != nil {
@@ -116,12 +125,19 @@ func policyApplyCmd() *cobra.Command {
 				Name:              args[0],
 				Namespace:         namespace,
 				RemediationAction: remediation,
+				OperatorName:      operatorName,
+				OperatorVersion:   operatorVersion,
+				OperatorChannel:   operatorChannel,
+				CertExpiryDays:    certExpiry,
 			}
 			if labels != "" {
 				opts.ClusterLabels = parseLabels(labels)
 			}
 			if registries != "" {
 				opts.AllowedRegistries = strings.Split(registries, ",")
+			}
+			if certNamespaces != "" {
+				opts.CertNamespaces = strings.Split(certNamespaces, ",")
 			}
 			fmt.Printf("Applying policy %s...\n", args[0])
 			if err := mgr.Apply(context.Background(), opts); err != nil {
@@ -135,6 +151,11 @@ func policyApplyCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&remediation, "remediation", "r", "inform", "remediation action: inform or enforce")
 	cmd.Flags().StringVarP(&labels, "labels", "l", "", "cluster label selector (key=value,key2=value2)")
 	cmd.Flags().StringVar(&registries, "registries", "", "allowed registries (comma-separated)")
+	cmd.Flags().StringVar(&operatorName, "operator", "", "operator name for OperatorPolicy (UC-27)")
+	cmd.Flags().StringVar(&operatorVersion, "operator-version", "", "pin operator to this version")
+	cmd.Flags().StringVar(&operatorChannel, "operator-channel", "", "pin operator to this channel")
+	cmd.Flags().IntVar(&certExpiry, "cert-expiry", 0, "certificate expiry threshold in days for CertificatePolicy (UC-28)")
+	cmd.Flags().StringVar(&certNamespaces, "cert-namespaces", "", "namespaces to monitor for cert expiry (comma-separated, default: openshift-config,openshift-ingress)")
 	return cmd
 }
 

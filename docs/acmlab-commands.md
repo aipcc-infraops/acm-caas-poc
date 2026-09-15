@@ -112,11 +112,21 @@ Lists governance policies on the hub.
 
 #### `acmlab policy apply <name>`
 
-Creates or updates an image registry restriction policy with PlacementRule and PlacementBinding.
+Creates a governance policy with Placement and PlacementBinding. Supports three policy types:
+
+- **ConfigurationPolicy** (default): enforce object state (namespaces, registry restrictions)
+- **OperatorPolicy** (UC-27): pin operator versions and channels
+- **CertificatePolicy** (UC-28): detect expiring certificates
 
 Options:
 - `--registries` — comma-separated list of allowed registries
 - `--remediation` — inform or enforce (default: inform)
+- `--labels` — cluster label selector (key=value,key2=value2)
+- `--operator` — operator name for OperatorPolicy
+- `--operator-version` — pin operator to this version
+- `--operator-channel` — pin operator to this channel
+- `--cert-expiry` — certificate expiry threshold in days for CertificatePolicy
+- `--cert-namespaces` — namespaces to monitor (default: openshift-config,openshift-ingress)
 
 #### `acmlab policy status <name>`
 
