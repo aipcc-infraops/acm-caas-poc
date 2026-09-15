@@ -127,14 +127,52 @@ Options:
 - `--operator-channel` — pin operator to this channel
 - `--cert-expiry` — certificate expiry threshold in days for CertificatePolicy
 - `--cert-namespaces` — namespaces to monitor (default: openshift-config,openshift-ingress)
+- `--cluster-set` — scope policy to a ClusterSet (UC-24)
 
 #### `acmlab policy status <name>`
 
 Shows policy compliance status across targeted clusters.
 
+#### `acmlab policy report`
+
+Shows per-ClusterSet compliance report across all policies.
+
+Options:
+- `--json` — output as JSON
+
 #### `acmlab policy remove <name>`
 
-Removes a policy and its associated PlacementRule and PlacementBinding.
+Removes a policy and its associated Placement and PlacementBinding.
+
+### ClusterSets
+
+#### `acmlab clusterset create <name>`
+
+Creates a ManagedClusterSet with a ManagedClusterSetBinding in the specified namespace.
+
+Options:
+- `--namespace` — team namespace for the binding (required)
+
+#### `acmlab clusterset list`
+
+Lists all ManagedClusterSets with member cluster counts.
+
+Options:
+- `--json` — output as JSON
+
+#### `acmlab clusterset assign <cluster>`
+
+Assigns a managed cluster to a ClusterSet by updating its label.
+
+Options:
+- `--to` — target ClusterSet name (required)
+
+#### `acmlab clusterset remove <name>`
+
+Removes a ManagedClusterSet and its binding.
+
+Options:
+- `--namespace` — namespace of the binding (required)
 
 ### Tenants
 
