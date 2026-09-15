@@ -201,6 +201,43 @@ func detectPlatform(cd *unstructured.Unstructured) string {
 	return ""
 }
 
+// SetFlavor patches the MachinePool worker instance type via the platform-specific spec path.
+func (m *Manager) SetFlavor(ctx context.Context, clusterName, workerType string) error {
+	m.logger.Info("scaling.SetFlavor", "cluster", clusterName, "workerType", workerType)
+	mp, err := m.GetMachinePool(ctx, clusterName)
+	if err != nil {
+		return err
+	}
+
+	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, clusterName, clusterName)
+	if err != nil {
+		return fmt.Errorf("getting ClusterDeployment for %s: %w", clusterName, err)
+	}
+	platform := detectPlatform(cd)
+	if platform == "" {
+		return fmt.Errorf("cannot detect platform from ClusterDeployment %s — spec.platform is empty", clusterName)
+	}
+
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"platform": map[string]interface{}{
+				platform: map[string]interface{}{
+					"type": workerType,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshaling patch: %w", err)
+	}
+	_, err = m.client.Patch(ctx, client.GVRMachinePool, mp.Namespace, mp.Name, types.MergePatchType, data)
+	if err != nil {
+		return fmt.Errorf("patching MachinePool %s/%s flavor: %w", mp.Namespace, mp.Name, err)
+	}
+	return nil
+}
+
 // SetReplicas patches the MachinePool replicas count and removes autoscaling if active.
 func (m *Manager) SetReplicas(ctx context.Context, clusterName string, replicas int) error {
 	m.logger.Info("scaling.SetReplicas", "cluster", clusterName, "replicas", replicas)

@@ -109,6 +109,42 @@ func clusterDeployment(name string) *unstructured.Unstructured {
 	return obj
 }
 
+func clusterDeploymentWithPlatform(name, platform string) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "hive.openshift.io/v1",
+			"kind":       "ClusterDeployment",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": name,
+			},
+			"spec": map[string]interface{}{
+				"platform": map[string]interface{}{
+					platform: map[string]interface{}{},
+				},
+			},
+		},
+	}
+	return obj
+}
+
+func clusterDeploymentNoPlatform(name string) *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "hive.openshift.io/v1",
+			"kind":       "ClusterDeployment",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": name,
+			},
+			"spec": map[string]interface{}{
+				"platform": map[string]interface{}{},
+			},
+		},
+	}
+	return obj
+}
+
 func managedClusterInfo(name string, nodes []interface{}, distType string) *unstructured.Unstructured {
 	status := map[string]interface{}{}
 	if nodes != nil {
@@ -686,6 +722,89 @@ func TestNoMachinePoolErrImportedNoInfo(t *testing.T) {
 		t.Error("expected IsHive=false")
 	}
 	// VendorType should be empty (GetClusterType fails on missing resource)
+}
+
+// ===== SetFlavor =====
+
+func TestSetFlavor(t *testing.T) {
+	r := int64(3)
+	mp := machinePool("c1-worker", "c1", &r, "ibmcloud")
+	cd := clusterDeploymentWithPlatform("c1", "ibmcloud")
+	mgr := newManager(mp, cd)
+
+	err := mgr.SetFlavor(context.Background(), "c1", "cx2-8x16")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetFlavorAWS(t *testing.T) {
+	r := int64(2)
+	mp := machinePool("c2-worker", "c2", &r, "aws")
+	cd := clusterDeployment("c2") // default CD helper uses aws
+	mgr := newManager(mp, cd)
+
+	err := mgr.SetFlavor(context.Background(), "c2", "m6i.2xlarge")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetFlavorNoMachinePool(t *testing.T) {
+	mgr := newManager()
+
+	err := mgr.SetFlavor(context.Background(), "c1", "cx2-8x16")
+	if err == nil {
+		t.Fatal("expected error when no MachinePool exists")
+	}
+}
+
+func TestSetFlavorNoCDPlatform(t *testing.T) {
+	r := int64(3)
+	mp := machinePool("c1-worker", "c1", &r, "ibmcloud")
+	cd := clusterDeploymentNoPlatform("c1")
+	mgr := newManager(mp, cd)
+
+	err := mgr.SetFlavor(context.Background(), "c1", "cx2-8x16")
+	if err == nil {
+		t.Fatal("expected error when platform is empty")
+	}
+	if !strings.Contains(err.Error(), "cannot detect platform") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSetFlavorPatchError(t *testing.T) {
+	r := int64(3)
+	mp := machinePool("c1-worker", "c1", &r, "aws")
+	cd := clusterDeployment("c1")
+	c := fakeClient(mp, cd)
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("patch", "machinepools", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("patch denied")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.SetFlavor(context.Background(), "c1", "m6i.xlarge")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "patching MachinePool") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSetFlavorNoCDExists(t *testing.T) {
+	r := int64(3)
+	mp := machinePool("c1-worker", "c1", &r, "aws")
+	mgr := newManager(mp) // no ClusterDeployment
+
+	err := mgr.SetFlavor(context.Background(), "c1", "m6i.xlarge")
+	if err == nil {
+		t.Fatal("expected error when no ClusterDeployment exists")
+	}
+	if !strings.Contains(err.Error(), "getting ClusterDeployment") {
+		t.Errorf("unexpected error message: %v", err)
+	}
 }
 
 // ===== New =====

@@ -59,6 +59,7 @@ func main() {
 	root.AddCommand(decommissionCmd())
 	root.AddCommand(upgradeCmd())
 	root.AddCommand(clustersetCmd())
+	root.AddCommand(idpCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {

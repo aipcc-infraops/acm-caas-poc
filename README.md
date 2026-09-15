@@ -16,11 +16,11 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-06 | Cluster resource monitoring & observability (Thanos) | ✅ Implemented | `internal/monitoring/`, `internal/observability/` |
 | UC-07 | External cluster import | ✅ Implemented | `internal/importing/` |
 | UC-13 | Registry mirror for restricted clusters (ROKS, air-gap) | ✅ Implemented | `internal/registry/` |
-| UC-08 | Legacy cluster decommissioning | 📋 Planned | `internal/decommission/` |
-| UC-09 | Cluster upgrades (Day-2 operations) | 📋 Planned | `internal/upgrades/` |
+| UC-08 | Legacy cluster decommissioning | ✅ Implemented | `internal/decommission/` |
+| UC-09 | Cluster upgrades (Day-2 operations) | ✅ Implemented | `internal/upgrade/` |
 | UC-10 | Cluster scaling (add/remove workers) | ✅ Implemented | `internal/scaling/` |
 | UC-11 | Cost tracking and chargeback | 📋 Planned | `internal/cost/` |
-| UC-12 | Identity Provider management (GitHub IdP, htpasswd rotation) | 📋 Planned | `internal/idp/` |
+| UC-12 | Identity Provider management (GitHub, Google, htpasswd, LDAP, OIDC) | ✅ Implemented | `internal/idp/` |
 | UC-14 | Automatic cluster reclamation (idle/expired) | 📋 Planned | `internal/reclamation/` |
 | UC-15 | Resource quota gates via governance policy | 📋 Planned | `internal/quota/` |
 | UC-16 | Unique IdP per cluster (security hardening) | 📋 Planned | `internal/idp/` |
@@ -29,13 +29,13 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-19 | Multi-cluster GPU workload routing via Placement | 📋 Planned | `internal/gpurouting/` |
 | UC-20 | AI platform operator version fleet segregation | 📋 Planned | `internal/gpurouting/` |
 | UC-21 | Elastic GPU capacity (auto-provision on saturation) | 📋 Planned | `internal/gpuelastic/` |
-| UC-22 | ClusterSet management — team isolation | 📋 Planned | `internal/clusterset/` |
+| UC-22 | ClusterSet management — team isolation | ✅ Implemented | `internal/clusterset/` |
 | UC-23 | Multi-architecture cluster matrix (QA) | 📋 Planned | `internal/matrix/` |
-| UC-24 | Per-team compliance reporting | 📋 Planned | `internal/policy/` |
+| UC-24 | Per-team compliance reporting | ✅ Implemented | `internal/policy/` |
 | UC-25 | ClusterPool + ClusterClaim (pre-warmed clusters) | 📋 Planned | `internal/pool/` |
 | UC-26 | Multi-cluster networking (Submariner) | 📋 Planned | `internal/submariner/` |
-| UC-27 | Operator version pinning (OperatorPolicy) | 📋 Planned | `internal/policy/` |
-| UC-28 | Certificate expiry detection fleet-wide | 📋 Planned | `internal/certpolicy/` |
+| UC-27 | Operator version pinning (OperatorPolicy) | ✅ Implemented | `internal/policy/` |
+| UC-28 | Certificate expiry detection fleet-wide | ✅ Implemented | `internal/policy/` |
 | UC-29 | Security baseline enforcement (Gatekeeper/OPA) | 📋 Planned | `internal/securitybaseline/` |
 | UC-30 | Policy automation — Ansible auto-remediation | 📋 Planned | `internal/policyautomation/` |
 | UC-31 | SCAP scanning via Compliance Operator | 📋 Planned | `internal/compliance/` |
@@ -43,7 +43,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-33 | ManifestWorkReplicaSet progressive rollout | 📋 Planned | `internal/rollout/` |
 | UC-35 | Credential-free spoke access (ManagedServiceAccount) | 📋 Planned | `internal/access/` |
 | UC-36 | Hub backup and restore | 📋 Planned | `internal/backup/` |
-| UC-37 | Worker node flavor change (rolling replacement) | 📋 Planned | `internal/scaling/` |
+| UC-37 | Worker node flavor change (rolling replacement) | ✅ Implemented | `internal/scaling/` |
 | UC-38 | HyperShift (HostedCluster) provisioning | 📋 Planned | `internal/provisioning/` |
 | UC-39 | Cloud-provider native scaling for imported clusters | 📋 Planned | `internal/scaling/` |
 | UC-40 | Cluster API (CAPI) provisioning for vanilla Kubernetes | 📋 Planned | `internal/provisioning/` |
@@ -54,8 +54,8 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 The PoC validates ACM value in 4 areas:
 
 1. **Provisioning clusters** (UC-01, UC-10) ✅
-2. **Managing imported clusters** (UC-07, UC-08, UC-09, UC-13) 🔄 UC-07, UC-13 done
-3. **Policy management & enforcement** (UC-02, UC-12) ⚠️ UC-12 needed
+2. **Managing imported clusters** (UC-07, UC-08, UC-09, UC-13) ✅
+3. **Policy management & enforcement** (UC-02, UC-12) ✅
 4. **Monitor and alert** (UC-04, UC-06) ✅
 
 ## Quick Start

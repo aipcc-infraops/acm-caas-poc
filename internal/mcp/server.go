@@ -14,6 +14,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/clusterset"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
+	"github.com/pablofelix/acm-caas-poc/internal/idp"
 	"github.com/pablofelix/acm-caas-poc/internal/decommission"
 	"github.com/pablofelix/acm-caas-poc/internal/fleet"
 	"github.com/pablofelix/acm-caas-poc/internal/importing"
@@ -70,6 +71,9 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	cs := clusterset.New(c, cfg, log)
 	registerClusterSetTools(s, cs)
+
+	idpMgr := idp.New(c, cfg, log)
+	registerIdPTools(s, idpMgr)
 
 	return s
 }
@@ -971,6 +975,22 @@ func registerScalingTools(s *server.MCPServer, sc *scaling.Manager) {
 			}
 			data, _ := json.MarshalIndent(result, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_scaling_set_flavor",
+			mcp.WithDescription("Change worker node instance type on a cluster's MachinePool. Hive performs a rolling replacement."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("worker_type", mcp.Required(), mcp.Description("New worker instance type")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			workerType, _ := req.RequireString("worker_type")
+			if err := sc.SetFlavor(ctx, cluster, workerType); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("setting worker flavor: %v", err)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Cluster %s worker flavor changed to %s", cluster, workerType)), nil
 		},
 	)
 }
