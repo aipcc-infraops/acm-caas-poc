@@ -741,12 +741,11 @@ func TestCreateIfNotExistsAlreadyExists(t *testing.T) {
 	ns.SetName("existing")
 
 	c := fakeClient(ns)
-	m := New(c, testConfig(), discardLogger)
 
 	newNs := buildNamespace("existing")
-	err := m.createIfNotExists(context.Background(), client.GVRNamespace, "", newNs)
+	err := c.CreateIfNotExists(context.Background(), client.GVRNamespace, "", newNs)
 	if err != nil {
-		t.Fatalf("createIfNotExists should succeed for existing resource: %v", err)
+		t.Fatalf("CreateIfNotExists should succeed for existing resource: %v", err)
 	}
 }
 

@@ -55,7 +55,7 @@ func (m *Manager) ensurePolicy(ctx context.Context, namespace string, opts Polic
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRPolicy, namespace, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRPolicy, namespace, obj)
 }
 
 func (m *Manager) ensurePlacement(ctx context.Context, namespace string, opts PolicyOpts) error {
@@ -105,7 +105,7 @@ func (m *Manager) ensurePlacement(ctx context.Context, namespace string, opts Po
 			"spec": spec,
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRPlacement, namespace, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRPlacement, namespace, obj)
 }
 
 func (m *Manager) ensurePlacementBinding(ctx context.Context, namespace string, opts PolicyOpts) error {
@@ -131,7 +131,7 @@ func (m *Manager) ensurePlacementBinding(ctx context.Context, namespace string, 
 			},
 		},
 	}
-	return m.createIfNotExists(ctx, client.GVRPlacementBinding, namespace, obj)
+	return m.client.CreateIfNotExists(ctx, client.GVRPlacementBinding, namespace, obj)
 }
 
 func buildObjectTemplates(opts PolicyOpts) []interface{} {

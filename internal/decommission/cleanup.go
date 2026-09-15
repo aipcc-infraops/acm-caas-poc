@@ -29,16 +29,18 @@ func (m *Manager) Cleanup(ctx context.Context, clusterName string) error {
 	mwList, err := m.client.List(ctx, client.GVRManifestWork, clusterName, "")
 	if err == nil {
 		for _, mw := range mwList.Items {
-			_ = m.client.Delete(ctx, client.GVRManifestWork, clusterName, mw.GetName())
+			if err := m.client.Delete(ctx, client.GVRManifestWork, clusterName, mw.GetName()); err != nil && !apierrors.IsNotFound(err) {
+				m.logger.Warn("cleanup: failed to delete ManifestWork", "name", mw.GetName(), "error", err)
+			}
 		}
 	}
 
 	if err := m.client.Delete(ctx, client.GVRManagedCluster, "", clusterName); err != nil && !apierrors.IsNotFound(err) {
-		// non-fatal
+		m.logger.Warn("cleanup: failed to delete ManagedCluster", "name", clusterName, "error", err)
 	}
 
 	if err := m.client.Delete(ctx, client.GVRNamespace, "", clusterName); err != nil && !apierrors.IsNotFound(err) {
-		// non-fatal
+		m.logger.Warn("cleanup: failed to delete namespace", "name", clusterName, "error", err)
 	}
 
 	return nil

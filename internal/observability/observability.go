@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -105,22 +103,3 @@ func (m *Manager) Status(ctx context.Context) (string, error) {
 	return "Progressing", nil
 }
 
-func (m *Manager) createIfNotExists(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
-	_, err := m.client.Get(ctx, gvr, namespace, obj.GetName())
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-	_, err = m.client.Create(ctx, gvr, namespace, obj)
-	return err
-}
-
-func (m *Manager) deleteIfExists(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
-	err := m.client.Delete(ctx, gvr, namespace, name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
-}

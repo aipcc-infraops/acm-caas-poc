@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -84,4 +85,24 @@ func (c *Client) Patch(ctx context.Context, gvr schema.GroupVersionResource, nam
 
 func (c *Client) Watch(ctx context.Context, gvr schema.GroupVersionResource, namespace string, opts metav1.ListOptions) (watch.Interface, error) {
 	return c.resource(gvr, namespace).Watch(ctx, opts)
+}
+
+func (c *Client) CreateIfNotExists(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
+	_, err := c.Get(ctx, gvr, namespace, obj.GetName())
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	_, err = c.Create(ctx, gvr, namespace, obj)
+	return err
+}
+
+func (c *Client) DeleteIfExists(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error {
+	err := c.Delete(ctx, gvr, namespace, name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
