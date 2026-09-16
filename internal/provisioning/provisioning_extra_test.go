@@ -3,12 +3,16 @@ package provisioning
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -94,6 +98,38 @@ func TestCreateIBMCloudMissingAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "IBM Cloud API key") {
 		t.Errorf("expected 'IBM Cloud API key' message, got: %v", err)
+	}
+}
+
+func TestCreateNamespaceError(t *testing.T) {
+	c := fakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("injected ns error")
+	})
+	m := New(c, testConfig(), discardLogger)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "spoke1",
+		PullSecret: `{"auths":{}}`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "creating namespace") {
+		t.Fatalf("expected namespace error, got: %v", err)
+	}
+}
+
+func TestCreateCredentialsSecretError(t *testing.T) {
+	c := fakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("injected secret error")
+	})
+	m := New(c, testConfig(), discardLogger)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "spoke1",
+		PullSecret: `{"auths":{}}`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "credentials secret") {
+		t.Fatalf("expected credentials secret error, got: %v", err)
 	}
 }
 
