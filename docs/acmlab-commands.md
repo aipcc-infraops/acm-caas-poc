@@ -884,6 +884,117 @@ $ acmlab decommission audit spoke2
 }
 ```
 
+### Security Baseline
+
+#### `acmlab security apply <level>`
+
+Deploys Gatekeeper/OPA security constraints to a cluster via ManifestWork. Creates ConfigurationPolicy to verify Gatekeeper health.
+
+Options:
+- `--cluster` — target cluster name
+- `--cluster-set` — apply to all clusters in a ClusterSet
+
+```
+$ acmlab security apply cis-level1 --cluster spoke2
+Security baseline cis-level1 applied to spoke2
+Constraints: K8sPSPPrivilegedContainer, K8sPSPHostNamespace, K8sRequiredResources, K8sAllowedRepos
+```
+
+#### `acmlab security status <cluster>`
+
+Shows OPA audit results and Gatekeeper health for a cluster.
+
+```
+$ acmlab security status spoke2
+Cluster:    spoke2
+Level:      cis-level1
+Gatekeeper: Healthy
+Status:     Applied
+```
+
+#### `acmlab security list`
+
+Lists all security baselines deployed across the fleet.
+
+#### `acmlab security remove <cluster>`
+
+Removes the security baseline ManifestWork from a cluster.
+
+### Progressive Rollout
+
+#### `acmlab rollout create <name>`
+
+Creates a ManifestWorkReplicaSet for fleet-wide updates with rollout strategy control.
+
+Options:
+- `--placement` — Placement name for cluster selection
+- `--strategy` — rollout strategy: All, Progressive, ProgressivePerGroup (default: All)
+- `--max-concurrency` — clusters updated simultaneously (default: 1)
+- `--max-failures` — failure threshold, e.g. "10%" or "2" (default: 0)
+- `--namespace` — namespace (default: open-cluster-management)
+
+```
+$ acmlab rollout create kueue-v12 --placement gpu-clusters --strategy progressive --max-concurrency 2 --max-failures 10%
+Rollout kueue-v12 created (strategy=Progressive, maxConcurrency=2, maxFailures=10%)
+```
+
+#### `acmlab rollout get <name>`
+
+Shows rollout progress: applied, failed, and total cluster counts.
+
+#### `acmlab rollout list`
+
+Lists all ManifestWorkReplicaSets with strategy and progress.
+
+#### `acmlab rollout delete <name>`
+
+Deletes a ManifestWorkReplicaSet.
+
+#### `acmlab rollout update-strategy <name>`
+
+Changes the rollout strategy on an existing ManifestWorkReplicaSet.
+
+Options:
+- `--strategy` — new strategy: All, Progressive, ProgressivePerGroup
+- `--max-concurrency` — updated concurrency
+- `--max-failures` — updated failure threshold
+- `--namespace` — namespace
+
+### Managed Access
+
+#### `acmlab access enable <cluster>`
+
+Creates ManagedServiceAccount and enables cluster-proxy addon for credential-free hub-to-spoke access with auto-rotated tokens.
+
+Options:
+- `--ttl` — token rotation interval (default: 720h)
+- `--roles` — RBAC roles for the service account (default: cluster-admin)
+
+```
+$ acmlab access enable spoke2 --ttl 720h
+Managed access enabled on spoke2 (token TTL: 720h)
+```
+
+#### `acmlab access disable <cluster>`
+
+Removes ManagedServiceAccount and addons from a cluster.
+
+#### `acmlab access status <cluster>`
+
+Shows access status: token availability, addon health, rotation schedule.
+
+```
+$ acmlab access status spoke2
+Cluster:        spoke2
+Enabled:        true
+Token:          available
+Addon Healthy:  true
+```
+
+#### `acmlab access list`
+
+Lists all clusters with managed access enabled.
+
 ### Batch Operations
 
 All commands that take a single cluster name also accept multiple names and a `--from-file` flag.
@@ -980,3 +1091,16 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_create_claim` | UC-25 | Claim a cluster from a pool for instant access |
 | `acm_release_claim` | UC-25 | Release a claimed cluster back to the pool |
 | `acm_list_claims` | UC-25 | List all ClusterClaims |
+| `acm_apply_security_baseline` | UC-29 | Deploy Gatekeeper CIS constraints to a cluster |
+| `acm_security_status` | UC-29 | OPA audit results and Gatekeeper health |
+| `acm_list_security_baselines` | UC-29 | List all security baselines across the fleet |
+| `acm_remove_security_baseline` | UC-29 | Remove security baseline from a cluster |
+| `acm_create_rollout` | UC-33 | Create ManifestWorkReplicaSet with rollout strategy |
+| `acm_get_rollout` | UC-33 | Get rollout progress and status |
+| `acm_list_rollouts` | UC-33 | List all ManifestWorkReplicaSets |
+| `acm_delete_rollout` | UC-33 | Delete a ManifestWorkReplicaSet |
+| `acm_update_rollout_strategy` | UC-33 | Change rollout strategy on existing MWRS |
+| `acm_enable_access` | UC-35 | Enable credential-free managed access to a cluster |
+| `acm_disable_access` | UC-35 | Disable managed access and remove addons |
+| `acm_access_status` | UC-35 | Check access status, token health, addon state |
+| `acm_list_access` | UC-35 | List clusters with managed access enabled |
