@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -20,7 +21,8 @@ func monitorCmd() *cobra.Command {
 }
 
 func monitorListCmd() *cobra.Command {
-	return &cobra.Command{
+	var outputJSON bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List cluster resource summaries",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,6 +39,11 @@ func monitorListCmd() *cobra.Command {
 				fmt.Println("No cluster info found")
 				return nil
 			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(results, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
 			fmt.Printf("%-25s %-8s %-8s %-10s %-15s %s\n", "NAME", "NODES", "READY", "CPU", "OCP VERSION", "CHANNEL")
 			for _, cr := range results {
 				fmt.Printf("%-25s %-8d %-8d %-10d %-15s %s\n",
@@ -45,6 +52,8 @@ func monitorListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
 }
 
 func monitorStatusCmd() *cobra.Command {

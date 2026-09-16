@@ -149,6 +149,11 @@ func (m *Manager) RemoveMirror(ctx context.Context, clusterName string) error {
 // for a cluster.
 func (m *Manager) GetMirrorStatus(ctx context.Context, clusterName string) (*MirrorStatus, error) {
 	m.logger.Info("registry.GetMirrorStatus", "cluster", clusterName)
+
+	if _, err := m.client.Get(ctx, client.GVRManagedCluster, "", clusterName); err != nil {
+		return nil, fmt.Errorf("cluster %s not found: %w", clusterName, err)
+	}
+
 	name := fmt.Sprintf("%s-image-registry", clusterName)
 	obj, err := m.client.Get(ctx, client.GVRManagedClusterImageRegistry, clusterName, name)
 	if errors.IsNotFound(err) {

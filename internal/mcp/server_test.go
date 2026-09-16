@@ -48,6 +48,10 @@ func fakeClientWithClusters(clusters ...*unstructured.Unstructured) *client.Clie
 			client.GVRClusterCurator:                "ClusterCuratorList",
 			client.GVRClusterPool:                   "ClusterPoolList",
 			client.GVRClusterClaim:                   "ClusterClaimList",
+			client.GVRManifestWorkReplicaSet:         "ManifestWorkReplicaSetList",
+			client.GVRManagedServiceAccount:          "ManagedServiceAccountList",
+			client.GVRManagedClusterAddOn:            "ManagedClusterAddOnList",
+			client.GVRConfigurationPolicy:            "ConfigurationPolicyList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -477,7 +481,7 @@ func TestRemovePolicyViaMCP(t *testing.T) {
 		"name": "nonexistent",
 	})
 	text := extractToolText(t, resp)
-	if text != "Policy nonexistent removed successfully" {
+	if text != "Policy nonexistent not found (nothing to remove)" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }
@@ -553,7 +557,7 @@ func TestRemoveTenantViaMCP(t *testing.T) {
 		"cluster": "hub-cluster",
 	})
 	text := extractToolText(t, resp)
-	if text != "Tenant nonexistent removed from hub-cluster" {
+	if text != "Tenant nonexistent not found on hub-cluster (nothing to remove)" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }

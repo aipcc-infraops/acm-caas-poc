@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
@@ -77,10 +78,20 @@ func (m *Manager) Deploy(ctx context.Context, opts TenantOpts) error {
 	return m.client.CreateIfNotExists(ctx, client.GVRManifestWork, opts.Cluster, obj)
 }
 
-func (m *Manager) Remove(ctx context.Context, tenantName, cluster string) error {
+func (m *Manager) Remove(ctx context.Context, tenantName, cluster string) (bool, error) {
 	m.logger.Info("tenant.Remove", "tenant", tenantName, "cluster", cluster)
 	name := manifestWorkName(tenantName)
-	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, name)
+	_, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, name); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (m *Manager) List(ctx context.Context, cluster string) ([]TenantInfo, error) {

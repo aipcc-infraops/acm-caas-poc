@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -64,10 +65,18 @@ func (m *Manager) Apply(ctx context.Context, opts PolicyOpts) error {
 	return nil
 }
 
-func (m *Manager) Remove(ctx context.Context, name, namespace string) error {
+func (m *Manager) Remove(ctx context.Context, name, namespace string) (bool, error) {
 	m.logger.Info("policy.Remove", "policy", name)
 	if namespace == "" {
 		namespace = DefaultNamespace
+	}
+
+	_, err := m.client.Get(ctx, client.GVRPolicy, namespace, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("checking policy %s: %w", name, err)
 	}
 
 	steps := []struct {
@@ -81,10 +90,10 @@ func (m *Manager) Remove(ctx context.Context, name, namespace string) error {
 	}
 	for _, s := range steps {
 		if err := m.client.DeleteIfExists(ctx, s.gvr, namespace, s.name); err != nil {
-			return fmt.Errorf("remove %s: %w", s.label, err)
+			return false, fmt.Errorf("remove %s: %w", s.label, err)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (m *Manager) List(ctx context.Context, namespace string) ([]PolicyInfo, error) {

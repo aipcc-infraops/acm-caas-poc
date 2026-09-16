@@ -25,7 +25,10 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
+	"github.com/pablofelix/acm-caas-poc/internal/access"
 	"github.com/pablofelix/acm-caas-poc/internal/pool"
+	"github.com/pablofelix/acm-caas-poc/internal/rollout"
+	"github.com/pablofelix/acm-caas-poc/internal/security"
 	"github.com/pablofelix/acm-caas-poc/internal/upgrade"
 )
 
@@ -78,6 +81,15 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	poolMgr := pool.New(c, cfg, log)
 	registerPoolTools(s, poolMgr)
+
+	secMgr := security.New(c, cfg, log)
+	registerSecurityTools(s, secMgr)
+
+	rolloutMgr := rollout.New(c, cfg, log)
+	registerRolloutTools(s, rolloutMgr)
+
+	accessMgr := access.New(c, cfg, log)
+	registerAccessTools(s, accessMgr)
 
 	return s
 }
@@ -267,8 +279,12 @@ func registerPolicyTools(s *server.MCPServer, pol *policy.Manager) {
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			name, _ := req.RequireString("name")
 			ns, _ := req.GetArguments()["namespace"].(string)
-			if err := pol.Remove(ctx, name, ns); err != nil {
+			removed, err := pol.Remove(ctx, name, ns)
+			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if !removed {
+				return mcp.NewToolResultText(fmt.Sprintf("Policy %s not found (nothing to remove)", name)), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("Policy %s removed successfully", name)), nil
 		},
@@ -381,8 +397,12 @@ func registerTenantTools(s *server.MCPServer, ten *tenant.Manager) {
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			name, _ := req.RequireString("name")
 			cluster, _ := req.RequireString("cluster")
-			if err := ten.Remove(ctx, name, cluster); err != nil {
+			removed, err := ten.Remove(ctx, name, cluster)
+			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if !removed {
+				return mcp.NewToolResultText(fmt.Sprintf("Tenant %s not found on %s (nothing to remove)", name, cluster)), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("Tenant %s removed from %s", name, cluster)), nil
 		},
