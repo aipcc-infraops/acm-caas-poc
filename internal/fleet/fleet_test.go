@@ -73,7 +73,7 @@ func TestListClustersReturnsParsedInfo(t *testing.T) {
 	)
 	insp := New(c, config.Config{}, discardLogger)
 
-	clusters, err := insp.ListClusters(context.Background())
+	clusters, err := insp.ListClusters(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListClusters failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestListClustersReturnsEmptyForNoResources(t *testing.T) {
 	c := fakeClusterClient()
 	insp := New(c, config.Config{}, discardLogger)
 
-	clusters, err := insp.ListClusters(context.Background())
+	clusters, err := insp.ListClusters(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListClusters failed: %v", err)
 	}

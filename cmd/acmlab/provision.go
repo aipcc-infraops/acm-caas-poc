@@ -28,7 +28,7 @@ func provisionCmd() *cobra.Command {
 }
 
 func provisionCreateCmd() *cobra.Command {
-	var platform, region, imageSet, workerType, masterType, sshKeyFile, sshPrivateKeyFile, pullSecretFile, manifestsDir string
+	var platform, region, baseDomain, imageSet, workerType, masterType, sshKeyFile, sshPrivateKeyFile, pullSecretFile, manifestsDir string
 	var workers, masters int64
 	cmd := &cobra.Command{
 		Use:   "create <cluster-name>",
@@ -44,6 +44,7 @@ func provisionCreateCmd() *cobra.Command {
 			opts := provisioning.ClusterOpts{
 				Name:           args[0],
 				Platform:       platform,
+				BaseDomain:     baseDomain,
 				Region:         region,
 				ImageSet:       imageSet,
 				WorkerType:     workerType,
@@ -87,6 +88,7 @@ func provisionCreateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&platform, "platform", "", "cloud platform: ibmcloud, aws, gcp, azure (default: from env)")
+	cmd.Flags().StringVar(&baseDomain, "base-domain", "", "base DNS domain for the cluster (default: from ACM_BASE_DOMAIN env)")
 	cmd.Flags().StringVar(&region, "region", "", "cloud region (default: from env)")
 	cmd.Flags().StringVar(&imageSet, "image-set", "", "ClusterImageSet name (default: from env)")
 	cmd.Flags().StringVar(&workerType, "worker-type", "", "worker instance type (default: bx2-4x16)")
