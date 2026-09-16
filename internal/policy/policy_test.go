@@ -119,8 +119,12 @@ func TestRemoveDeletesAllResources(t *testing.T) {
 	if err := mgr.Apply(context.Background(), opts); err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
-	if err := mgr.Remove(context.Background(), "test-policy", DefaultNamespace); err != nil {
+	removed, err := mgr.Remove(context.Background(), "test-policy", DefaultNamespace)
+	if err != nil {
 		t.Fatalf("Remove failed: %v", err)
+	}
+	if !removed {
+		t.Error("Remove should return true for existing policy")
 	}
 
 	ctx := context.Background()
@@ -139,8 +143,12 @@ func TestRemoveIsIdempotent(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	if err := mgr.Remove(context.Background(), "nonexistent", DefaultNamespace); err != nil {
+	removed, err := mgr.Remove(context.Background(), "nonexistent", DefaultNamespace)
+	if err != nil {
 		t.Fatalf("Remove on empty cluster failed (not idempotent): %v", err)
+	}
+	if removed {
+		t.Error("Remove should return false for nonexistent policy")
 	}
 }
 
@@ -356,13 +364,19 @@ func TestApplyError(t *testing.T) {
 
 func TestRemoveError(t *testing.T) {
 	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{Name: "test", Namespace: DefaultNamespace}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+
 	fake := c.Dynamic.(*dynamicfake.FakeDynamicClient)
 	fake.PrependReactor("delete", "*", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("delete blocked")
 	})
-	mgr := New(c, config.Config{}, discardLogger)
 
-	err := mgr.Remove(context.Background(), "test", DefaultNamespace)
+	_, err := mgr.Remove(context.Background(), "test", DefaultNamespace)
 	if err == nil {
 		t.Fatal("expected error from Remove when delete fails")
 	}
@@ -371,7 +385,7 @@ func TestRemoveError(t *testing.T) {
 func TestRemoveDefaultsNamespace(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
-	if err := mgr.Remove(context.Background(), "x", ""); err != nil {
+	if _, err := mgr.Remove(context.Background(), "x", ""); err != nil {
 		t.Fatalf("Remove with empty ns failed: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -74,10 +75,15 @@ func tenantRemoveCmd() *cobra.Command {
 			}
 			mgr := tenant.New(c, cfg, logger)
 			fmt.Printf("Removing tenant %s from cluster %s...\n", args[0], cluster)
-			if err := mgr.Remove(context.Background(), args[0], cluster); err != nil {
+			removed, err := mgr.Remove(context.Background(), args[0], cluster)
+			if err != nil {
 				return err
 			}
-			fmt.Println("Tenant removed. ManifestWork deleted, spoke resources will be cleaned up.")
+			if removed {
+				fmt.Println("Tenant removed. ManifestWork deleted, spoke resources will be cleaned up.")
+			} else {
+				fmt.Printf("Tenant %s not found on cluster %s (nothing to remove)\n", args[0], cluster)
+			}
 			return nil
 		},
 	}
@@ -88,6 +94,7 @@ func tenantRemoveCmd() *cobra.Command {
 
 func tenantListCmd() *cobra.Command {
 	var cluster string
+	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tenants deployed to a spoke cluster",
@@ -105,6 +112,11 @@ func tenantListCmd() *cobra.Command {
 				fmt.Println("No tenants found")
 				return nil
 			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(tenants, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
 			fmt.Printf("%-25s %-25s %s\n", "TENANT", "CLUSTER", "STATUS")
 			for _, t := range tenants {
 				fmt.Printf("%-25s %-25s %s\n", t.Name, t.Cluster, t.Status)
@@ -114,6 +126,7 @@ func tenantListCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&cluster, "cluster", "c", "", "spoke cluster to list tenants for (required)")
 	_ = cmd.MarkFlagRequired("cluster")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 

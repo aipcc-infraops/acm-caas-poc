@@ -29,6 +29,19 @@ var gvrListKinds = map[schema.GroupVersionResource]string{
 	client.GVRPlacement:                    "PlacementList",
 	client.GVRSecret:                       "SecretList",
 	client.GVRManagedClusterImageRegistry:  "ManagedClusterImageRegistryList",
+	client.GVRManagedCluster:               "ManagedClusterList",
+}
+
+func managedCluster(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": name,
+			},
+		},
+	}
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -483,7 +496,7 @@ func TestGetMirrorStatusFound(t *testing.T) {
 		{Source: "registry.redhat.io/rhacm2", Mirror: "quay.io/myorg/rhacm2"},
 	}
 	mcir := imageRegistry("spoke-1", "spoke-1-image-registry", regs)
-	mgr := fakeManager(mcir)
+	mgr := fakeManager(managedCluster("spoke-1"), mcir)
 
 	status, err := mgr.GetMirrorStatus(context.Background(), "spoke-1")
 	if err != nil {
@@ -504,7 +517,7 @@ func TestGetMirrorStatusFound(t *testing.T) {
 }
 
 func TestGetMirrorStatusNotFound(t *testing.T) {
-	mgr := fakeManager()
+	mgr := fakeManager(managedCluster("spoke-1"))
 
 	status, err := mgr.GetMirrorStatus(context.Background(), "spoke-1")
 	if err != nil {
@@ -518,8 +531,17 @@ func TestGetMirrorStatusNotFound(t *testing.T) {
 	}
 }
 
+func TestGetMirrorStatusClusterNotFound(t *testing.T) {
+	mgr := fakeManager()
+
+	_, err := mgr.GetMirrorStatus(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent cluster, got nil")
+	}
+}
+
 func TestGetMirrorStatusError(t *testing.T) {
-	c := fakeClient()
+	c := fakeClient(managedCluster("spoke-1"))
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("get", "managedclusterimageregistries", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "connection refused"}
 	})
@@ -533,7 +555,7 @@ func TestGetMirrorStatusError(t *testing.T) {
 
 func TestGetMirrorStatusEmptyRegistries(t *testing.T) {
 	mcir := imageRegistry("spoke-1", "spoke-1-image-registry", nil)
-	mgr := fakeManager(mcir)
+	mgr := fakeManager(managedCluster("spoke-1"), mcir)
 
 	status, err := mgr.GetMirrorStatus(context.Background(), "spoke-1")
 	if err != nil {
@@ -568,7 +590,7 @@ func TestGetMirrorStatusRegistryWithBadEntry(t *testing.T) {
 			},
 		},
 	}
-	mgr := fakeManager(mcir)
+	mgr := fakeManager(managedCluster("spoke-1"), mcir)
 
 	status, err := mgr.GetMirrorStatus(context.Background(), "spoke-1")
 	if err != nil {

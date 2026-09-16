@@ -119,8 +119,12 @@ func TestRemoveDeletesManifestWork(t *testing.T) {
 	if err := mgr.Deploy(context.Background(), opts); err != nil {
 		t.Fatalf("Deploy failed: %v", err)
 	}
-	if err := mgr.Remove(context.Background(), "team-alpha", "hub-cluster"); err != nil {
+	removed, err := mgr.Remove(context.Background(), "team-alpha", "hub-cluster")
+	if err != nil {
 		t.Fatalf("Remove failed: %v", err)
+	}
+	if !removed {
+		t.Error("Remove should return true for existing tenant")
 	}
 	if _, err := c.Get(context.Background(), client.GVRManifestWork, "hub-cluster", "tenant-team-alpha"); err == nil {
 		t.Error("ManifestWork still exists after remove")
@@ -131,8 +135,12 @@ func TestRemoveIsIdempotent(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	if err := mgr.Remove(context.Background(), "nonexistent", "hub-cluster"); err != nil {
+	removed, err := mgr.Remove(context.Background(), "nonexistent", "hub-cluster")
+	if err != nil {
 		t.Fatalf("Remove on empty cluster failed (not idempotent): %v", err)
+	}
+	if removed {
+		t.Error("Remove should return false for nonexistent tenant")
 	}
 }
 

@@ -22,7 +22,8 @@ func fleetCmd() *cobra.Command {
 }
 
 func fleetListCmd() *cobra.Command {
-	return &cobra.Command{
+	var outputJSON bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all managed clusters",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,6 +40,11 @@ func fleetListCmd() *cobra.Command {
 				fmt.Println("No managed clusters found")
 				return nil
 			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
 			fmt.Printf("%-30s %-10s %-10s %-10s %s\n", "NAME", "AVAILABLE", "JOINED", "ACCEPTED", "VERSION")
 			for _, cl := range clusters {
 				fmt.Printf("%-30s %-10v %-10v %-10v %s\n",
@@ -47,6 +53,8 @@ func fleetListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
 }
 
 func fleetStatusCmd() *cobra.Command {
