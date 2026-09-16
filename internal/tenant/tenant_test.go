@@ -32,14 +32,14 @@ func TestDeployCreatesTenantManifestWork(t *testing.T) {
 
 	opts := TenantOpts{
 		Name:    "team-alpha",
-		Cluster: "infraops1",
+		Cluster: "hub-cluster",
 		Team:    "alpha-devs",
 	}
 	if err := mgr.Deploy(context.Background(), opts); err != nil {
 		t.Fatalf("Deploy failed: %v", err)
 	}
 
-	obj, err := c.Get(context.Background(), client.GVRManifestWork, "infraops1", "tenant-team-alpha")
+	obj, err := c.Get(context.Background(), client.GVRManifestWork, "hub-cluster", "tenant-team-alpha")
 	if err != nil {
 		t.Fatalf("ManifestWork not created: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestDeployIsIdempotent(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	opts := TenantOpts{Name: "team-alpha", Cluster: "infraops1"}
+	opts := TenantOpts{Name: "team-alpha", Cluster: "hub-cluster"}
 	if err := mgr.Deploy(context.Background(), opts); err != nil {
 		t.Fatalf("first Deploy failed: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestDeployWithCustomLimits(t *testing.T) {
 
 	opts := TenantOpts{
 		Name:        "team-beta",
-		Cluster:     "infraops1",
+		Cluster:     "hub-cluster",
 		CPULimit:    "8",
 		MemoryLimit: "16Gi",
 		PodLimit:    50,
@@ -85,7 +85,7 @@ func TestDeployWithCustomLimits(t *testing.T) {
 		t.Fatalf("Deploy failed: %v", err)
 	}
 
-	obj, err := c.Get(context.Background(), client.GVRManifestWork, "infraops1", "tenant-team-beta")
+	obj, err := c.Get(context.Background(), client.GVRManifestWork, "hub-cluster", "tenant-team-beta")
 	if err != nil {
 		t.Fatalf("ManifestWork not created: %v", err)
 	}
@@ -115,14 +115,14 @@ func TestRemoveDeletesManifestWork(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	opts := TenantOpts{Name: "team-alpha", Cluster: "infraops1"}
+	opts := TenantOpts{Name: "team-alpha", Cluster: "hub-cluster"}
 	if err := mgr.Deploy(context.Background(), opts); err != nil {
 		t.Fatalf("Deploy failed: %v", err)
 	}
-	if err := mgr.Remove(context.Background(), "team-alpha", "infraops1"); err != nil {
+	if err := mgr.Remove(context.Background(), "team-alpha", "hub-cluster"); err != nil {
 		t.Fatalf("Remove failed: %v", err)
 	}
-	if _, err := c.Get(context.Background(), client.GVRManifestWork, "infraops1", "tenant-team-alpha"); err == nil {
+	if _, err := c.Get(context.Background(), client.GVRManifestWork, "hub-cluster", "tenant-team-alpha"); err == nil {
 		t.Error("ManifestWork still exists after remove")
 	}
 }
@@ -131,7 +131,7 @@ func TestRemoveIsIdempotent(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	if err := mgr.Remove(context.Background(), "nonexistent", "infraops1"); err != nil {
+	if err := mgr.Remove(context.Background(), "nonexistent", "hub-cluster"); err != nil {
 		t.Fatalf("Remove on empty cluster failed (not idempotent): %v", err)
 	}
 }
@@ -142,13 +142,13 @@ func TestListTenants(t *testing.T) {
 		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
 	})
 	mw.SetName("tenant-team-alpha")
-	mw.SetNamespace("infraops1")
+	mw.SetNamespace("hub-cluster")
 	mw.SetLabels(map[string]string{"acmlab.redhat.com/tenant": "team-alpha"})
 
 	c := fakeClient(mw)
 	mgr := New(c, config.Config{}, discardLogger)
 
-	tenants, err := mgr.List(context.Background(), "infraops1")
+	tenants, err := mgr.List(context.Background(), "hub-cluster")
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
@@ -158,8 +158,8 @@ func TestListTenants(t *testing.T) {
 	if tenants[0].Name != "team-alpha" {
 		t.Errorf("name = %q, want team-alpha", tenants[0].Name)
 	}
-	if tenants[0].Cluster != "infraops1" {
-		t.Errorf("cluster = %q, want infraops1", tenants[0].Cluster)
+	if tenants[0].Cluster != "hub-cluster" {
+		t.Errorf("cluster = %q, want hub-cluster", tenants[0].Cluster)
 	}
 	if tenants[0].Status != "Pending" {
 		t.Errorf("status = %q, want Pending", tenants[0].Status)
@@ -172,7 +172,7 @@ func TestListTenantsWithAppliedStatus(t *testing.T) {
 		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
 	})
 	mw.SetName("tenant-team-alpha")
-	mw.SetNamespace("infraops1")
+	mw.SetNamespace("hub-cluster")
 	mw.SetLabels(map[string]string{"acmlab.redhat.com/tenant": "team-alpha"})
 	mw.Object["status"] = map[string]interface{}{
 		"conditions": []interface{}{
@@ -183,7 +183,7 @@ func TestListTenantsWithAppliedStatus(t *testing.T) {
 	c := fakeClient(mw)
 	mgr := New(c, config.Config{}, discardLogger)
 
-	tenants, err := mgr.List(context.Background(), "infraops1")
+	tenants, err := mgr.List(context.Background(), "hub-cluster")
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestStatusParsesResourceStatus(t *testing.T) {
 		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
 	})
 	mw.SetName("tenant-team-alpha")
-	mw.SetNamespace("infraops1")
+	mw.SetNamespace("hub-cluster")
 	mw.SetLabels(map[string]string{"acmlab.redhat.com/tenant": "team-alpha"})
 	mw.Object["status"] = map[string]interface{}{
 		"conditions": []interface{}{
@@ -234,7 +234,7 @@ func TestStatusParsesResourceStatus(t *testing.T) {
 	c := fakeClient(mw)
 	mgr := New(c, config.Config{}, discardLogger)
 
-	ms, err := mgr.Status(context.Background(), "team-alpha", "infraops1")
+	ms, err := mgr.Status(context.Background(), "team-alpha", "hub-cluster")
 	if err != nil {
 		t.Fatalf("Status failed: %v", err)
 	}
@@ -261,12 +261,12 @@ func TestStatusNoStatus(t *testing.T) {
 		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
 	})
 	mw.SetName("tenant-team-alpha")
-	mw.SetNamespace("infraops1")
+	mw.SetNamespace("hub-cluster")
 
 	c := fakeClient(mw)
 	mgr := New(c, config.Config{}, discardLogger)
 
-	ms, err := mgr.Status(context.Background(), "team-alpha", "infraops1")
+	ms, err := mgr.Status(context.Background(), "team-alpha", "hub-cluster")
 	if err != nil {
 		t.Fatalf("Status failed: %v", err)
 	}
@@ -282,12 +282,12 @@ func TestDeployDefaultsTeamToName(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	opts := TenantOpts{Name: "team-gamma", Cluster: "infraops1"}
+	opts := TenantOpts{Name: "team-gamma", Cluster: "hub-cluster"}
 	if err := mgr.Deploy(context.Background(), opts); err != nil {
 		t.Fatalf("Deploy failed: %v", err)
 	}
 
-	obj, _ := c.Get(context.Background(), client.GVRManifestWork, "infraops1", "tenant-team-gamma")
+	obj, _ := c.Get(context.Background(), client.GVRManifestWork, "hub-cluster", "tenant-team-gamma")
 	spec, _ := obj.Object["spec"].(map[string]interface{})
 	workload, _ := spec["workload"].(map[string]interface{})
 	manifests, _ := workload["manifests"].([]interface{})

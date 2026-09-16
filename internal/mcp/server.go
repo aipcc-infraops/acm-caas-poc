@@ -14,6 +14,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/clusterset"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
+	"github.com/pablofelix/acm-caas-poc/internal/idp"
 	"github.com/pablofelix/acm-caas-poc/internal/decommission"
 	"github.com/pablofelix/acm-caas-poc/internal/fleet"
 	"github.com/pablofelix/acm-caas-poc/internal/importing"
@@ -24,6 +25,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
+	"github.com/pablofelix/acm-caas-poc/internal/pool"
 	"github.com/pablofelix/acm-caas-poc/internal/upgrade"
 )
 
@@ -70,6 +72,12 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	cs := clusterset.New(c, cfg, log)
 	registerClusterSetTools(s, cs)
+
+	idpMgr := idp.New(c, cfg, log)
+	registerIdPTools(s, idpMgr)
+
+	poolMgr := pool.New(c, cfg, log)
+	registerPoolTools(s, poolMgr)
 
 	return s
 }
@@ -263,6 +271,44 @@ func registerPolicyTools(s *server.MCPServer, pol *policy.Manager) {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("Policy %s removed successfully", name)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_apply_quota_policy",
+			mcp.WithDescription("Apply resource quota enforcement policy to a cluster. Stamps quota labels on the ManagedCluster and creates a ConfigurationPolicy to monitor compliance. Educate-first model: inform, not auto-enforce."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster name")),
+			mcp.WithNumber("max_workers", mcp.Description("Maximum worker nodes allowed (0 = skip)")),
+			mcp.WithNumber("max_gpus", mcp.Description("Maximum GPU nodes allowed (0 = skip)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			maxWorkersF, _ := req.GetArguments()["max_workers"].(float64)
+			maxGPUsF, _ := req.GetArguments()["max_gpus"].(float64)
+			maxWorkers, maxGPUs := int(maxWorkersF), int(maxGPUsF)
+			if maxWorkers <= 0 && maxGPUs <= 0 {
+				return mcp.NewToolResultError("at least one of max_workers or max_gpus must be positive"), nil
+			}
+			if err := pol.ApplyQuotaPolicy(ctx, cluster, maxWorkers, maxGPUs); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Quota policy applied to %s (max-workers=%d, max-gpus=%d)", cluster, maxWorkers, maxGPUs)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_quota_status",
+			mcp.WithDescription("Check resource quota compliance for a cluster. Shows quota labels and policy compliance status."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			status, err := pol.GetQuotaStatus(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(status, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
 		},
 	)
 
@@ -971,6 +1017,22 @@ func registerScalingTools(s *server.MCPServer, sc *scaling.Manager) {
 			}
 			data, _ := json.MarshalIndent(result, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_scaling_set_flavor",
+			mcp.WithDescription("Change worker node instance type on a cluster's MachinePool. Hive performs a rolling replacement."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+			mcp.WithString("worker_type", mcp.Required(), mcp.Description("New worker instance type")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			workerType, _ := req.RequireString("worker_type")
+			if err := sc.SetFlavor(ctx, cluster, workerType); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("setting worker flavor: %v", err)), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Cluster %s worker flavor changed to %s", cluster, workerType)), nil
 		},
 	)
 }

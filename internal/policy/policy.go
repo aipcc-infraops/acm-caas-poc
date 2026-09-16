@@ -152,6 +152,85 @@ func (m *Manager) SetDisabled(ctx context.Context, name, namespace string, disab
 	return nil
 }
 
+type QuotaStatus struct {
+	Cluster    string `json:"cluster"`
+	MaxWorkers int    `json:"maxWorkers"`
+	MaxGPUs    int    `json:"maxGpus"`
+	PolicyName string `json:"policyName"`
+	Compliant  string `json:"compliant"`
+}
+
+func (m *Manager) ApplyQuotaPolicy(ctx context.Context, cluster string, maxWorkers, maxGPUs int) error {
+	m.logger.Info("policy.ApplyQuotaPolicy", "cluster", cluster, "maxWorkers", maxWorkers, "maxGPUs", maxGPUs)
+
+	if err := m.stampQuotaLabels(ctx, cluster, maxWorkers, maxGPUs); err != nil {
+		return fmt.Errorf("stamping quota labels on %s: %w", cluster, err)
+	}
+
+	policyName := fmt.Sprintf("quota-%s", cluster)
+	opts := PolicyOpts{
+		Name:              policyName,
+		RemediationAction: "inform",
+		MaxWorkers:        maxWorkers,
+		MaxGPUs:           maxGPUs,
+		ClusterLabels:     map[string]string{"name": cluster},
+	}
+	return m.Apply(ctx, opts)
+}
+
+func (m *Manager) stampQuotaLabels(ctx context.Context, cluster string, maxWorkers, maxGPUs int) error {
+	labels := map[string]interface{}{}
+	if maxWorkers > 0 {
+		labels["caas/max-workers"] = fmt.Sprintf("%d", maxWorkers)
+	}
+	if maxGPUs > 0 {
+		labels["caas/max-gpus"] = fmt.Sprintf("%d", maxGPUs)
+	}
+
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"labels": labels,
+		},
+	}
+	data, _ := json.Marshal(patch)
+	_, err := m.client.Patch(ctx, client.GVRManagedCluster, "", cluster, types.MergePatchType, data)
+	return err
+}
+
+func (m *Manager) GetQuotaStatus(ctx context.Context, cluster string) (*QuotaStatus, error) {
+	m.logger.Info("policy.GetQuotaStatus", "cluster", cluster)
+
+	mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", cluster)
+	if err != nil {
+		return nil, fmt.Errorf("getting ManagedCluster %s: %w", cluster, err)
+	}
+
+	labels := mc.GetLabels()
+	status := &QuotaStatus{
+		Cluster:    cluster,
+		PolicyName: fmt.Sprintf("quota-%s", cluster),
+	}
+
+	if v, ok := labels["caas/max-workers"]; ok {
+		fmt.Sscanf(v, "%d", &status.MaxWorkers)
+	}
+	if v, ok := labels["caas/max-gpus"]; ok {
+		fmt.Sscanf(v, "%d", &status.MaxGPUs)
+	}
+
+	policyInfo, err := m.Get(ctx, status.PolicyName, "")
+	if err != nil {
+		status.Compliant = "NoPolicyFound"
+		return status, nil
+	}
+	status.Compliant = policyInfo.Compliant
+	if status.Compliant == "" {
+		status.Compliant = "Pending"
+	}
+
+	return status, nil
+}
+
 type ClusterSetCompliance struct {
 	ClusterSet   string `json:"clusterSet"`
 	Total        int    `json:"total"`

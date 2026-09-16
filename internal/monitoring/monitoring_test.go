@@ -89,10 +89,10 @@ func TestGetClusterResourcesReturnsNodeInfo(t *testing.T) {
 		makeNode("master-1", "8", "32911248Ki", "bx2-8x32", "us-south", "us-south-2", true),
 		makeNode("worker-0", "4", "16455624Ki", "bx2-4x16", "us-south", "us-south-1", true),
 	}
-	c := fakeClient(newClusterInfo("infraops1", nodes))
+	c := fakeClient(newClusterInfo("hub-cluster", nodes))
 	mon := New(c, config.Config{}, discardLogger)
 
-	cr, err := mon.GetClusterResources(context.Background(), "infraops1")
+	cr, err := mon.GetClusterResources(context.Background(), "hub-cluster")
 	if err != nil {
 		t.Fatalf("GetClusterResources failed: %v", err)
 	}

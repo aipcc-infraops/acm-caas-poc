@@ -31,7 +31,7 @@ Supports fixed replica counts and autoscaling (min/max bounds).
 Only works with Hive-provisioned clusters. For imported clusters, use
 your cloud provider's native scaling tools.`,
 	}
-	cmd.AddCommand(scalingGetCmd(), scalingSetCmd(), scalingAutoCmd(), scalingListCmd(), scalingInitCmd())
+	cmd.AddCommand(scalingGetCmd(), scalingSetCmd(), scalingAutoCmd(), scalingListCmd(), scalingInitCmd(), scalingSetFlavorCmd())
 	return cmd
 }
 
@@ -268,6 +268,33 @@ If --replicas differs, Hive will add or remove workers to reach the desired coun
 	cmd.Flags().StringVar(&workerType, "worker-type", "", "Worker instance type (auto-detected if not provided)")
 	cmd.Flags().IntVar(&replicas, "replicas", 0, "Worker count (auto-detected if not provided)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func scalingSetFlavorCmd() *cobra.Command {
+	var workerType string
+
+	cmd := &cobra.Command{
+		Use:   "set-flavor <cluster>",
+		Short: "Change worker node instance type via MachinePool platform update",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if workerType == "" {
+				return fmt.Errorf("--worker-type is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			sc := scaling.New(c, cfg, logger)
+			if err := sc.SetFlavor(context.Background(), args[0], workerType); err != nil {
+				return scalingErr(err)
+			}
+			fmt.Printf("Cluster %s worker flavor changed to %s\n", args[0], workerType)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&workerType, "worker-type", "", "New worker instance type (required)")
 	return cmd
 }
 

@@ -189,7 +189,7 @@ func TestGetPolicy(t *testing.T) {
 		"compliant": "NonCompliant",
 		"status": []interface{}{
 			map[string]interface{}{
-				"clustername": "infraops1",
+				"clustername": "hub-cluster",
 				"compliant":   "NonCompliant",
 			},
 		},
@@ -211,8 +211,8 @@ func TestGetPolicy(t *testing.T) {
 	if len(info.ClusterCompliance) != 1 {
 		t.Fatalf("got %d cluster compliance, want 1", len(info.ClusterCompliance))
 	}
-	if info.ClusterCompliance[0].ClusterName != "infraops1" {
-		t.Errorf("cluster = %q, want infraops1", info.ClusterCompliance[0].ClusterName)
+	if info.ClusterCompliance[0].ClusterName != "hub-cluster" {
+		t.Errorf("cluster = %q, want hub-cluster", info.ClusterCompliance[0].ClusterName)
 	}
 	if info.ClusterCompliance[0].ComplianceState != "NonCompliant" {
 		t.Errorf("state = %q, want NonCompliant", info.ClusterCompliance[0].ComplianceState)
@@ -830,6 +830,225 @@ func TestComplianceReportEmpty(t *testing.T) {
 	}
 	if len(report) != 0 {
 		t.Errorf("got %d sets, want 0", len(report))
+	}
+}
+
+func TestApplyQuotaPolicyStampsLabels(t *testing.T) {
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("spoke1")
+	mc.SetLabels(map[string]string{"vendor": "OpenShift"})
+
+	c := fakeClient(mc)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.ApplyQuotaPolicy(context.Background(), "spoke1", 5, 1); err != nil {
+		t.Fatalf("ApplyQuotaPolicy failed: %v", err)
+	}
+
+	updated, err := c.Get(context.Background(), client.GVRManagedCluster, "", "spoke1")
+	if err != nil {
+		t.Fatalf("getting ManagedCluster: %v", err)
+	}
+	labels := updated.GetLabels()
+	if labels["caas/max-workers"] != "5" {
+		t.Errorf("caas/max-workers = %q, want 5", labels["caas/max-workers"])
+	}
+	if labels["caas/max-gpus"] != "1" {
+		t.Errorf("caas/max-gpus = %q, want 1", labels["caas/max-gpus"])
+	}
+}
+
+func TestApplyQuotaPolicyCreatesConfigPolicy(t *testing.T) {
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("spoke1")
+	mc.SetLabels(map[string]string{"vendor": "OpenShift"})
+
+	c := fakeClient(mc)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.ApplyQuotaPolicy(context.Background(), "spoke1", 5, 0); err != nil {
+		t.Fatalf("ApplyQuotaPolicy failed: %v", err)
+	}
+
+	pol, err := c.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "quota-spoke1")
+	if err != nil {
+		t.Fatalf("quota policy not created: %v", err)
+	}
+
+	templates, _, _ := unstructured.NestedSlice(pol.Object, "spec", "policy-templates")
+	if len(templates) != 1 {
+		t.Fatalf("got %d policy-templates, want 1", len(templates))
+	}
+
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	if objDef["kind"] != "ConfigurationPolicy" {
+		t.Errorf("kind = %v, want ConfigurationPolicy", objDef["kind"])
+	}
+
+	spec := objDef["spec"].(map[string]interface{})
+	if spec["severity"] != "high" {
+		t.Errorf("severity = %v, want high", spec["severity"])
+	}
+	if spec["remediationAction"] != "inform" {
+		t.Errorf("remediationAction = %v, want inform", spec["remediationAction"])
+	}
+}
+
+func TestApplyQuotaPolicyBothLimits(t *testing.T) {
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("spoke1")
+	mc.SetLabels(map[string]string{"vendor": "OpenShift"})
+
+	c := fakeClient(mc)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.ApplyQuotaPolicy(context.Background(), "spoke1", 5, 2); err != nil {
+		t.Fatalf("ApplyQuotaPolicy failed: %v", err)
+	}
+
+	pol, err := c.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "quota-spoke1")
+	if err != nil {
+		t.Fatalf("quota policy not created: %v", err)
+	}
+
+	templates, _, _ := unstructured.NestedSlice(pol.Object, "spec", "policy-templates")
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	spec := objDef["spec"].(map[string]interface{})
+	objectTemplates := spec["object-templates"].([]interface{})
+	if len(objectTemplates) != 2 {
+		t.Errorf("got %d object-templates, want 2 (worker + GPU)", len(objectTemplates))
+	}
+}
+
+func TestGetQuotaStatusCompliant(t *testing.T) {
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("spoke1")
+	mc.SetLabels(map[string]string{
+		"vendor":           "OpenShift",
+		"caas/max-workers": "5",
+		"caas/max-gpus":    "1",
+	})
+
+	pol := &unstructured.Unstructured{}
+	pol.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "policy.open-cluster-management.io", Version: "v1", Kind: "Policy",
+	})
+	pol.SetName("quota-spoke1")
+	pol.SetNamespace(DefaultNamespace)
+	pol.Object["spec"] = map[string]interface{}{"remediationAction": "inform"}
+	pol.Object["status"] = map[string]interface{}{"compliant": "Compliant"}
+
+	c := fakeClient(mc, pol)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	status, err := mgr.GetQuotaStatus(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("GetQuotaStatus failed: %v", err)
+	}
+	if status.MaxWorkers != 5 {
+		t.Errorf("MaxWorkers = %d, want 5", status.MaxWorkers)
+	}
+	if status.MaxGPUs != 1 {
+		t.Errorf("MaxGPUs = %d, want 1", status.MaxGPUs)
+	}
+	if status.Compliant != "Compliant" {
+		t.Errorf("Compliant = %q, want Compliant", status.Compliant)
+	}
+}
+
+func TestGetQuotaStatusNoPolicy(t *testing.T) {
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("spoke1")
+	mc.SetLabels(map[string]string{"vendor": "OpenShift"})
+
+	c := fakeClient(mc)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	status, err := mgr.GetQuotaStatus(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("GetQuotaStatus failed: %v", err)
+	}
+	if status.Compliant != "NoPolicyFound" {
+		t.Errorf("Compliant = %q, want NoPolicyFound", status.Compliant)
+	}
+}
+
+func TestGetQuotaStatusClusterNotFound(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	_, err := mgr.GetQuotaStatus(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent cluster")
+	}
+}
+
+func TestBuildQuotaPolicyTemplateWorkersOnly(t *testing.T) {
+	opts := PolicyOpts{Name: "quota-test", MaxWorkers: 5}
+	templates := buildPolicyTemplates(opts, "inform")
+	if len(templates) != 1 {
+		t.Fatalf("got %d templates, want 1", len(templates))
+	}
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	if objDef["kind"] != "ConfigurationPolicy" {
+		t.Errorf("kind = %v, want ConfigurationPolicy", objDef["kind"])
+	}
+	spec := objDef["spec"].(map[string]interface{})
+	objectTemplates := spec["object-templates"].([]interface{})
+	if len(objectTemplates) != 1 {
+		t.Errorf("got %d object-templates, want 1 (workers only)", len(objectTemplates))
+	}
+}
+
+func TestBuildQuotaPolicyTemplateGPUOnly(t *testing.T) {
+	opts := PolicyOpts{Name: "gpu-quota", MaxGPUs: 2}
+	templates := buildPolicyTemplates(opts, "inform")
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	spec := objDef["spec"].(map[string]interface{})
+	objectTemplates := spec["object-templates"].([]interface{})
+	if len(objectTemplates) != 1 {
+		t.Errorf("got %d object-templates, want 1 (GPU only)", len(objectTemplates))
+	}
+}
+
+func TestBuildQuotaPolicyTemplateBothLimits(t *testing.T) {
+	opts := PolicyOpts{Name: "both-quota", MaxWorkers: 5, MaxGPUs: 2}
+	templates := buildPolicyTemplates(opts, "inform")
+	tmpl := templates[0].(map[string]interface{})
+	objDef := tmpl["objectDefinition"].(map[string]interface{})
+	spec := objDef["spec"].(map[string]interface{})
+	objectTemplates := spec["object-templates"].([]interface{})
+	if len(objectTemplates) != 2 {
+		t.Errorf("got %d object-templates, want 2 (worker + GPU)", len(objectTemplates))
+	}
+}
+
+func TestApplyQuotaPolicyLabelStampError(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.ApplyQuotaPolicy(context.Background(), "nonexistent", 5, 0)
+	if err == nil {
+		t.Fatal("expected error when cluster doesn't exist for label stamping")
 	}
 }
 

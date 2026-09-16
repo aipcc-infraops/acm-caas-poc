@@ -25,6 +25,8 @@ func policyCmd() *cobra.Command {
 		policyEnableCmd(),
 		policyDisableCmd(),
 		policyReportCmd(),
+		policyApplyQuotaCmd(),
+		policyQuotaStatusCmd(),
 	)
 	return cmd
 }
@@ -297,6 +299,71 @@ func policyReportCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func policyApplyQuotaCmd() *cobra.Command {
+	var cluster string
+	var maxWorkers, maxGPUs int
+	cmd := &cobra.Command{
+		Use:   "apply-quota",
+		Short: "Apply resource quota policy to a cluster (UC-15)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cluster == "" {
+				return fmt.Errorf("--cluster is required")
+			}
+			if maxWorkers <= 0 && maxGPUs <= 0 {
+				return fmt.Errorf("at least one of --max-workers or --max-gpus must be positive")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			fmt.Printf("Applying quota policy to %s (max-workers=%d, max-gpus=%d)...\n", cluster, maxWorkers, maxGPUs)
+			if err := mgr.ApplyQuotaPolicy(context.Background(), cluster, maxWorkers, maxGPUs); err != nil {
+				return err
+			}
+			fmt.Println("Quota policy applied. Use 'acmlab policy quota-status' to check compliance.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster name (required)")
+	cmd.Flags().IntVar(&maxWorkers, "max-workers", 0, "maximum worker nodes allowed")
+	cmd.Flags().IntVar(&maxGPUs, "max-gpus", 0, "maximum GPU nodes allowed")
+	return cmd
+}
+
+func policyQuotaStatusCmd() *cobra.Command {
+	var outputJSON bool
+	cmd := &cobra.Command{
+		Use:   "quota-status <cluster>",
+		Short: "Show quota compliance for a cluster (UC-15)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			status, err := mgr.GetQuotaStatus(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(status, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Cluster:      %s\n", status.Cluster)
+			fmt.Printf("Max Workers:  %d\n", status.MaxWorkers)
+			fmt.Printf("Max GPUs:     %d\n", status.MaxGPUs)
+			fmt.Printf("Policy:       %s\n", status.PolicyName)
+			fmt.Printf("Compliant:    %s\n", status.Compliant)
+			return nil
+		},
+	}
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
