@@ -7,15 +7,22 @@ acm-caas-poc/
 │   ├── main.go                    # Cobra root command, .env loading, global flags
 │   ├── fleet.go                   # fleet list, fleet status <name>
 │   ├── provision.go               # provision create/destroy/status/list/image-sets
-│   ├── policy.go                  # policy list/apply/status/remove
+│   ├── policy.go                  # policy list/apply/status/remove/apply-quota/quota-status
 │   ├── tenant.go                  # tenant deploy/status/list/remove
 │   ├── monitor.go                 # monitor list/status/setup/teardown/obs-status
 │   ├── lifecycle.go               # lifecycle hibernate/resume/status/diagnose/list
 │   ├── import.go                  # import cluster/detach/status/list
 │   ├── registry.go                # registry list-images/mirror-script/configure/status/remove
-│   ├── scaling.go                 # scaling list/get/set/auto
+│   ├── scaling.go                 # scaling list/get/set/auto/set-flavor/init
 │   ├── decommission.go            # decommission start/advance/status/list/cancel/audit
 │   ├── upgrade.go                 # upgrade status/list/set-channel/start/history
+│   ├── clusterset.go              # clusterset create/list/assign/remove
+│   ├── idp.go                     # idp configure/list/rotate/remove/configure-unique/enforce-sso
+│   ├── pool.go                    # pool create/list/get/delete
+│   ├── claim.go                   # claim create/list/release (UC-25 ClusterClaim)
+│   ├── security.go                # security apply/status/list/remove (UC-29 Gatekeeper)
+│   ├── rollout.go                 # rollout create/get/list/delete/update-strategy (UC-33)
+│   ├── access.go                  # access enable/disable/status/list (UC-35)
 │   └── mcp.go                     # mcp serve (MCP server on stdio)
 │
 ├── internal/
@@ -70,12 +77,12 @@ acm-caas-poc/
 │   │   ├── importing.go           # Manager — Import, Detach, WaitForImport, GetImportStatus, ListImported
 │   │   └── importing_test.go
 │   │
-│   ├── scaling/                   # UC-10: Cluster scaling (add/remove workers)
-│   │   ├── scaling.go             # Manager — GetMachinePool, SetReplicas, EnableAutoscaling, InitMachinePool
+│   ├── scaling/                   # UC-10, UC-37: Cluster scaling + flavor change
+│   │   ├── scaling.go             # Manager — GetMachinePool, SetReplicas, EnableAutoscaling, SetFlavor
 │   │   └── scaling_test.go
 │   │
 │   ├── registry/                  # UC-13: Registry mirror (ROKS, air-gapped)
-│   │   ├── registry.go            # Manager — ListRequiredImages, ConfigureMirror, RemoveMirror, GenerateMirrorScript
+│   │   ├── registry.go            # Manager — ListRequiredImages, ConfigureMirror, RemoveMirror, GetMirrorStatus
 │   │   └── registry_test.go
 │   │
 │   ├── upgrade/                   # UC-09: Cluster version upgrades (Day-2 OCP)
@@ -93,6 +100,34 @@ acm-caas-poc/
 │   │   ├── state_test.go          # State machine unit tests
 │   │   └── decommission_test.go   # Manager, audit, backup, drain, cleanup tests
 │   │
+│   ├── idp/                       # UC-12, UC-16: Identity Provider management
+│   │   ├── idp.go                 # Manager — Configure, Remove, List, Rotate, ConfigureUnique, EnforceSSO
+│   │   ├── builder.go             # Builds ManifestWork with OAuth CR + Secrets (htpasswd, GitHub, OIDC)
+│   │   └── idp_test.go
+│   │
+│   ├── clusterset/                # UC-22, UC-24: ClusterSet management + compliance
+│   │   ├── clusterset.go          # Manager — Create, List, Assign, Remove, ComplianceReport
+│   │   └── clusterset_test.go
+│   │
+│   ├── pool/                      # UC-25: ClusterPool + ClusterClaim
+│   │   ├── pool.go                # Manager — CreatePool, ListPools, GetPool, DeletePool, Claim, ReleaseClaim
+│   │   └── pool_test.go
+│   │
+│   ├── security/                  # UC-29: Gatekeeper/OPA security baseline
+│   │   ├── security.go            # Manager — ApplyBaseline, GetStatus, ListBaselines, RemoveBaseline
+│   │   ├── builder.go             # Builds ManifestWork with ConstraintTemplates + Constraints
+│   │   └── security_test.go
+│   │
+│   ├── rollout/                   # UC-33: ManifestWorkReplicaSet progressive rollout
+│   │   ├── rollout.go             # Manager — Create, Get, List, Delete, UpdateStrategy
+│   │   ├── builder.go             # Builds ManifestWorkReplicaSet with rollout strategies
+│   │   └── rollout_test.go
+│   │
+│   ├── access/                    # UC-35: ManagedServiceAccount + cluster-proxy
+│   │   ├── access.go              # Manager — Enable, Disable, GetStatus, List
+│   │   ├── builder.go             # Builds ManagedServiceAccount + ManagedClusterAddOn
+│   │   └── access_test.go
+│   │
 │   ├── batch/                     # Batch/parallel operations (shared CLI utility)
 │   │   ├── batch.go               # Execute(), PrintSummary(), ToJSON()
 │   │   ├── loader.go              # LoadFile(), NamesFromArgs(), ClusterItem
@@ -101,8 +136,15 @@ acm-caas-poc/
 │   │
 │   └── mcp/
 │       ├── server.go              # NewServer() — registers all MCP tools
-│       ├── upgrade.go             # UC-09 upgrade MCP tool registrations
-│       └── server_test.go
+│       ├── access.go              # UC-35 access MCP tools
+│       ├── idp.go                 # UC-12/16 IdP MCP tools
+│       ├── pool.go                # UC-25 pool/claim MCP tools
+│       ├── rollout.go             # UC-33 rollout MCP tools
+│       ├── security.go            # UC-29 security MCP tools
+│       ├── upgrade.go             # UC-09 upgrade MCP tools
+│       ├── server_test.go
+│       ├── server_import_registry_scaling_test.go
+│       └── server_security_rollout_access_test.go
 │
 ├── features/                      # Gherkin .feature files (for godog)
 │   ├── provisioning.feature       # UC-01 scenarios
@@ -112,9 +154,21 @@ acm-caas-poc/
 │   ├── lifecycle.feature          # UC-05 scenarios
 │   ├── monitoring.feature         # UC-06 scenarios
 │   ├── importing.feature          # UC-07 scenarios
-│   ├── upgrade.feature             # UC-09 scenarios
+│   ├── upgrade.feature            # UC-09 scenarios
 │   ├── scaling.feature            # UC-10 scenarios
-│   └── registry.feature           # UC-13 scenarios
+│   ├── registry.feature           # UC-13 scenarios
+│   ├── idp-management.feature     # UC-12 scenarios
+│   ├── resource-quota.feature     # UC-15 scenarios
+│   ├── unique-idp.feature         # UC-16 scenarios
+│   ├── clusterset.feature         # UC-22 scenarios
+│   ├── compliance-report.feature  # UC-24 scenarios
+│   ├── cluster-pool.feature       # UC-25 scenarios
+│   ├── operator-policy.feature    # UC-27 scenarios
+│   ├── certificate-policy.feature # UC-28 scenarios
+│   ├── security-baseline.feature  # UC-29 scenarios
+│   ├── progressive-rollout.feature # UC-33 scenarios
+│   ├── managed-access.feature     # UC-35 scenarios
+│   └── worker-flavor.feature      # UC-37 scenarios
 │
 ├── integration/                   # Godog step definitions (//go:build integration)
 │   └── *_steps.go                 # Step defs per UC + test runner
@@ -132,7 +186,7 @@ acm-caas-poc/
 │   │   ├── 006-idempotent-operations.md
 │   │   ├── 007-minio-for-observability-object-storage.md
 │   │   └── 008-configmap-state-machine-for-workflows.md
-│   ├── demos/                      # Interactive demo scripts (phase-based for long ops)
+│   ├── demos/                      # Interactive demo scripts using acmlab CLI
 │   │   ├── demo-uc01-provision.sh
 │   │   ├── demo-uc02-policy.sh
 │   │   ├── demo-uc03-tenant.sh
@@ -140,22 +194,25 @@ acm-caas-poc/
 │   │   ├── demo-uc05-lifecycle.sh
 │   │   ├── demo-uc06-monitoring.sh
 │   │   ├── demo-uc07-import.sh
+│   │   ├── demo-uc08-decommission.sh
 │   │   ├── demo-uc09-upgrade.sh
 │   │   ├── demo-uc10-scaling.sh
-│   │   ├── demo-uc08-decommission.sh
-│   │   └── demo-uc13-registry.sh
-│   ├── manual/                     # Kubectl/curl manual reference scripts per UC
-│   │   ├── uc-01-provision.sh
-│   │   ├── uc-02-policy.sh
-│   │   ├── uc-03-tenant.sh
-│   │   ├── uc-04-fleet.sh
-│   │   ├── uc-05-lifecycle.sh
-│   │   ├── uc-06-monitoring.sh
-│   │   ├── uc-07-import-detach.sh
-│   │   ├── uc-09-upgrade.sh
-│   │   ├── uc-10-scaling.sh
-│   │   ├── uc-08-decommission.sh
-│   │   └── uc-13-registry-mirror.sh
+│   │   ├── demo-uc12-idp.sh
+│   │   ├── demo-uc13-registry.sh
+│   │   ├── demo-uc15-resource-quota.sh
+│   │   ├── demo-uc16-unique-idp.sh
+│   │   ├── demo-uc22-clusterset.sh
+│   │   ├── demo-uc24-compliance-report.sh
+│   │   ├── demo-uc25-cluster-pool.sh
+│   │   ├── demo-uc27-operator-pin.sh
+│   │   ├── demo-uc28-cert-expiry.sh
+│   │   ├── demo-uc29-security-baseline.sh
+│   │   ├── demo-uc33-progressive-rollout.sh
+│   │   ├── demo-uc35-managed-access.sh
+│   │   └── demo-uc37-flavor-change.sh
+│   ├── manual/                     # Raw oc/kubectl reference scripts per UC
+│   │   ├── uc-01-provision.sh      ... uc-13-registry-mirror.sh
+│   │   └── (+ uc-12 through uc-37 for all implemented UCs)
 │   ├── project-structure.md        # This file
 │   └── acmlab-commands.md          # CLI + MCP command reference
 │
