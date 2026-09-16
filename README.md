@@ -36,12 +36,12 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-26 | Multi-cluster networking (Submariner) | 📋 Planned | `internal/submariner/` |
 | UC-27 | Operator version pinning (OperatorPolicy) | ✅ Implemented | `internal/policy/` |
 | UC-28 | Certificate expiry detection fleet-wide | ✅ Implemented | `internal/policy/` |
-| UC-29 | Security baseline enforcement (Gatekeeper/OPA) | 📋 Planned | `internal/securitybaseline/` |
+| UC-29 | Security baseline enforcement (Gatekeeper/OPA) | ✅ Implemented | `internal/security/` |
 | UC-30 | Policy automation — Ansible auto-remediation | 📋 Planned | `internal/policyautomation/` |
 | UC-31 | SCAP scanning via Compliance Operator | 📋 Planned | `internal/compliance/` |
 | UC-32 | GitOps fleet deployment via ApplicationSet | 📋 Planned | `internal/gitops/` |
-| UC-33 | ManifestWorkReplicaSet progressive rollout | 📋 Planned | `internal/rollout/` |
-| UC-35 | Credential-free spoke access (ManagedServiceAccount) | 📋 Planned | `internal/access/` |
+| UC-33 | ManifestWorkReplicaSet progressive rollout | ✅ Implemented | `internal/rollout/` |
+| UC-35 | Credential-free spoke access (ManagedServiceAccount) | ✅ Implemented | `internal/access/` |
 | UC-36 | Hub backup and restore | 📋 Planned | `internal/backup/` |
 | UC-37 | Worker node flavor change (rolling replacement) | ✅ Implemented | `internal/scaling/` |
 | UC-38 | HyperShift (HostedCluster) provisioning | 📋 Planned | `internal/provisioning/` |
