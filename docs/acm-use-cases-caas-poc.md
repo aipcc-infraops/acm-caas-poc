@@ -2101,6 +2101,124 @@ Extends `internal/provisioning/` with HyperShift provisioning path
 
 ---
 
+## UC-39: Cloud-provider native scaling for imported clusters
+
+**Feature**: Scaling imported clusters using cloud-provider native APIs via ManifestWork or direct API calls
+
+As a platform operator
+I want to scale imported clusters that have no Hive MachinePool
+So that the CaaS platform can adjust capacity for clusters not provisioned by ACM
+
+### Scenario: Scale an imported cluster via cloud-provider API
+
+**Given** a ManagedCluster was imported (not provisioned by Hive)
+**And** the cluster's cloud provider API credentials are available
+**When** I trigger a scaling operation targeting the cloud-provider native API
+**Then** worker nodes are added or removed via the provider's scaling mechanism
+**And** ManagedClusterInfo reflects the updated node count
+
+### Scenario: Detect scaling is unavailable for imported clusters without provider config
+
+**Given** an imported cluster has no cloud-provider API credentials configured
+**When** I attempt to scale via native API
+**Then** the operation reports that cloud-provider credentials are required
+**And** suggests configuring the provider or using the cluster's native scaling tools
+
+### Relationship to UC-10
+
+UC-10 scales Hive-provisioned clusters via MachinePool patches. UC-39 covers the complementary path for imported clusters where no MachinePool exists.
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` (imported, no ClusterDeployment)
+`internal.open-cluster-management.io/v1beta1.ManagedClusterInfo` (node verification)
+`work.open-cluster-management.io/v1.ManifestWork` (deploy scaling manifests if applicable)
+
+### Package
+
+Extends `internal/scaling/` (UC-10)
+
+---
+
+## UC-40: Cluster API (CAPI) provisioning for vanilla Kubernetes
+
+**Feature**: Provision non-OpenShift Kubernetes clusters using Cluster API as an alternative to Hive
+
+As a platform operator
+I want to provision vanilla Kubernetes clusters via CAPI
+So that the CaaS platform supports workloads that do not require OpenShift
+
+### Scenario: Provision a CAPI cluster
+
+**Given** CAPI controllers are installed on the hub cluster
+**And** an infrastructure provider (e.g., AWS, vSphere) is configured
+**When** I create a CAPI Cluster, KubeadmControlPlane, and MachineDeployment
+**Then** a vanilla Kubernetes cluster is provisioned
+**And** the cluster is registered as a ManagedCluster in ACM
+**And** I can manage it alongside OpenShift clusters in the fleet
+
+### Scenario: Destroy a CAPI cluster
+
+**Given** a CAPI-provisioned cluster exists
+**When** I delete the CAPI Cluster resource
+**Then** the infrastructure is deprovisioned
+**And** the ManagedCluster is removed from ACM
+
+### Relationship to UC-01
+
+UC-01 provisions OpenShift clusters via Hive ClusterDeployment. UC-40 covers the alternative path for vanilla Kubernetes via Cluster API.
+
+### ACM types
+
+`cluster.x-k8s.io/v1beta1.Cluster`
+`controlplane.cluster.x-k8s.io/v1beta1.KubeadmControlPlane`
+`cluster.x-k8s.io/v1beta1.MachineDeployment`
+`cluster.open-cluster-management.io/v1.ManagedCluster`
+
+### Package
+
+Extends `internal/provisioning/` with CAPI provisioning path
+
+---
+
+## UC-41: Kubernetes cluster hibernate via CAPI scale-to-zero
+
+**Feature**: Hibernate vanilla Kubernetes clusters provisioned via CAPI by scaling worker nodes to zero
+
+As a platform operator
+I want to hibernate CAPI-provisioned clusters by scaling workers to zero
+So that I can reduce cost for idle vanilla Kubernetes clusters
+
+### Scenario: Hibernate a CAPI cluster by scaling to zero
+
+**Given** a CAPI-provisioned cluster has a MachineDeployment with replicas > 0
+**When** I patch the MachineDeployment to set replicas to 0
+**Then** all worker nodes are drained and removed
+**And** the control plane remains running (or is also scaled down depending on provider)
+**And** the ManagedCluster condition `Available` transitions to `Unknown`
+
+### Scenario: Resume a CAPI cluster by scaling up
+
+**Given** a CAPI cluster has MachineDeployment replicas set to 0
+**When** I patch the MachineDeployment to restore the original replica count
+**Then** worker nodes are provisioned
+**And** the cluster becomes Available again
+
+### Relationship to UC-05
+
+UC-05 hibernates Hive-provisioned OpenShift clusters via `ClusterDeployment.spec.powerState`. UC-41 covers the equivalent for CAPI-provisioned vanilla Kubernetes clusters using MachineDeployment scale-to-zero.
+
+### ACM types
+
+`cluster.x-k8s.io/v1beta1.MachineDeployment` (replica count)
+`cluster.open-cluster-management.io/v1.ManagedCluster` (availability tracking)
+
+### Package
+
+Extends `internal/lifecycle/` with CAPI hibernate path
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -2142,6 +2260,9 @@ Extends `internal/provisioning/` with HyperShift provisioning path
 | UC-36  |  Hub backup and restore  |  `BackupSchedule` + `Restore` + OADP  |  spec.backup |
 | UC-37  |  Worker node flavor change (rolling replacement)  |  `hive/v1.MachinePool` platform patch  |  spec.workers.type |
 | UC-38  |  HyperShift (HostedCluster) provisioning  |  `hypershift.io/v1beta1.HostedCluster` + `NodePool`  |  spec.type=hypershift |
+| UC-39  |  Cloud-provider native scaling for imported clusters  |  `ManagedCluster` + `ManagedClusterInfo` + cloud API  |  spec.scaling.cloudProvider |
+| UC-40  |  CAPI provisioning for vanilla Kubernetes  |  `cluster.x-k8s.io/v1beta1.Cluster` + `MachineDeployment`  |  spec.type=capi |
+| UC-41  |  CAPI hibernate via scale-to-zero  |  `cluster.x-k8s.io/v1beta1.MachineDeployment`  |  spec.lifecycle.capiHibernate |
 
 ## Go Dependencies (for the lab repo)
 

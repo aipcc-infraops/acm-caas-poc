@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
@@ -126,11 +128,14 @@ func TestDestroyWithIBMCloudCleanup(t *testing.T) {
 	}
 	defer func() { newIAMClient = origNew }()
 
-	c := fakeClient()
+	cd := &unstructured.Unstructured{}
+	cd.SetGroupVersionKind(client.GVRClusterDeployment.GroupVersion().WithKind("ClusterDeployment"))
+	cd.SetNamespace("spoke1")
+	cd.SetName("spoke1")
+	c := fakeClient(cd)
 	cfg := testConfig()
 	m := New(c, cfg, discardLogger)
 
-	// Destroy of nonexistent is idempotent but should still run IBM cleanup
 	if err := m.Destroy(context.Background(), "spoke1"); err != nil {
 		t.Fatalf("Destroy failed: %v", err)
 	}
