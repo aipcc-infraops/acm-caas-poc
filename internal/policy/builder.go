@@ -21,6 +21,8 @@ type PolicyOpts struct {
 	CertExpiryDays    int
 	CertNamespaces    []string
 	ClusterSet        string
+	MaxWorkers        int
+	MaxGPUs           int
 }
 
 func (m *Manager) ensurePolicy(ctx context.Context, namespace string, opts PolicyOpts) error {
@@ -135,6 +137,9 @@ func buildPolicyTemplates(opts PolicyOpts, remediation string) []interface{} {
 	if opts.CertExpiryDays > 0 {
 		return buildCertificatePolicyTemplate(opts, remediation)
 	}
+	if opts.MaxWorkers > 0 || opts.MaxGPUs > 0 {
+		return buildQuotaPolicyTemplate(opts, remediation)
+	}
 	return buildConfigurationPolicyTemplate(opts, remediation)
 }
 
@@ -234,6 +239,71 @@ func buildNamespaceTemplate(name string) []interface{} {
 				"kind":       "Namespace",
 				"metadata": map[string]interface{}{
 					"name": name,
+				},
+			},
+		},
+	}
+}
+
+func buildQuotaPolicyTemplate(opts PolicyOpts, remediation string) []interface{} {
+	var objectTemplates []interface{}
+
+	if opts.MaxWorkers > 0 {
+		objectTemplates = append(objectTemplates, buildWorkerQuotaTemplate(opts.MaxWorkers))
+	}
+	if opts.MaxGPUs > 0 {
+		objectTemplates = append(objectTemplates, buildGPUQuotaTemplate(opts.MaxGPUs))
+	}
+
+	return []interface{}{
+		map[string]interface{}{
+			"objectDefinition": map[string]interface{}{
+				"apiVersion": "policy.open-cluster-management.io/v1",
+				"kind":       "ConfigurationPolicy",
+				"metadata": map[string]interface{}{
+					"name": opts.Name + "-quota",
+				},
+				"spec": map[string]interface{}{
+					"remediationAction":   remediation,
+					"severity":            "high",
+					"object-templates":    objectTemplates,
+					"pruneObjectBehavior": "None",
+				},
+			},
+		},
+	}
+}
+
+func buildWorkerQuotaTemplate(maxWorkers int) map[string]interface{} {
+	return map[string]interface{}{
+		"complianceType": "musthave",
+		"objectDefinition": map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "caas-worker-quota",
+				"namespace": "open-cluster-management-agent",
+				"annotations": map[string]interface{}{
+					"caas/max-workers":   fmt.Sprintf("%d", maxWorkers),
+					"caas/quota-enforced": "true",
+				},
+			},
+		},
+	}
+}
+
+func buildGPUQuotaTemplate(maxGPUs int) map[string]interface{} {
+	return map[string]interface{}{
+		"complianceType": "musthave",
+		"objectDefinition": map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "caas-gpu-quota",
+				"namespace": "open-cluster-management-agent",
+				"annotations": map[string]interface{}{
+					"caas/max-gpus":      fmt.Sprintf("%d", maxGPUs),
+					"caas/quota-enforced": "true",
 				},
 			},
 		},

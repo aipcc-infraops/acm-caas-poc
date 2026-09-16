@@ -18,9 +18,11 @@ func idpCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		idpConfigureCmd(),
+		idpConfigureUniqueCmd(),
 		idpRemoveCmd(),
 		idpListCmd(),
 		idpRotateCmd(),
+		idpEnforceSSOCmd(),
 	)
 	return cmd
 }
@@ -212,6 +214,64 @@ func idpRotateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&clientSecret, "client-secret", "", "new OAuth client secret")
 	cmd.Flags().StringVar(&users, "users", "", "new htpasswd users (user1:pass1,user2:pass2)")
 	cmd.Flags().StringVar(&bindPassword, "bind-password", "", "new LDAP bind password")
+	return cmd
+}
+
+func idpConfigureUniqueCmd() *cobra.Command {
+	var (
+		cluster   string
+		adminUser string
+	)
+	cmd := &cobra.Command{
+		Use:   "configure-unique",
+		Short: "Deploy unique emergency htpasswd credentials to a cluster",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cluster == "" {
+				return fmt.Errorf("--cluster is required")
+			}
+			if adminUser == "" {
+				adminUser = "cluster-admin"
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := idp.New(c, cfg, logger)
+			password, err := mgr.ConfigureUnique(context.Background(), cluster, adminUser)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Unique emergency IdP deployed to cluster %s\n", cluster)
+			fmt.Printf("  User:     %s\n", adminUser)
+			fmt.Printf("  Password: %s\n", password)
+			fmt.Println("  (save this password — it will not be shown again)")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster (required)")
+	cmd.Flags().StringVar(&adminUser, "admin-user", "cluster-admin", "admin username")
+	return cmd
+}
+
+func idpEnforceSSOCmd() *cobra.Command {
+	var namespace string
+	cmd := &cobra.Command{
+		Use:   "enforce-sso",
+		Short: "Create fleet-wide SSO compliance policy",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := idp.New(c, cfg, logger)
+			if err := mgr.EnforceSSO(context.Background(), namespace); err != nil {
+				return err
+			}
+			fmt.Println("SSO enforcement policy created — clusters without OpenID IdP will be marked NonCompliant")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "policy namespace (default: global-set)")
 	return cmd
 }
 

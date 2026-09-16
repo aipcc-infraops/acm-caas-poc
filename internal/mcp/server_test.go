@@ -46,6 +46,8 @@ func fakeClientWithClusters(clusters ...*unstructured.Unstructured) *client.Clie
 			client.GVRPlacementRule:                 "PlacementRuleList",
 			client.GVRConfigMap:                     "ConfigMapList",
 			client.GVRClusterCurator:                "ClusterCuratorList",
+			client.GVRClusterPool:                   "ClusterPoolList",
+			client.GVRClusterClaim:                   "ClusterClaimList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -536,10 +538,10 @@ func TestDeployTenantViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
 	resp := callTool(t, c, "acm_deploy_tenant", map[string]interface{}{
 		"name":    "team-alpha",
-		"cluster": "infraops1",
+		"cluster": "hub-cluster",
 	})
 	text := extractToolText(t, resp)
-	if text != "Tenant team-alpha deployed to infraops1" {
+	if text != "Tenant team-alpha deployed to hub-cluster" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }
@@ -548,10 +550,10 @@ func TestRemoveTenantViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
 	resp := callTool(t, c, "acm_remove_tenant", map[string]interface{}{
 		"name":    "nonexistent",
-		"cluster": "infraops1",
+		"cluster": "hub-cluster",
 	})
 	text := extractToolText(t, resp)
-	if text != "Tenant nonexistent removed from infraops1" {
+	if text != "Tenant nonexistent removed from hub-cluster" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }
@@ -559,7 +561,7 @@ func TestRemoveTenantViaMCP(t *testing.T) {
 func TestListTenantsViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
 	resp := callTool(t, c, "acm_list_tenants", map[string]interface{}{
-		"cluster": "infraops1",
+		"cluster": "hub-cluster",
 	})
 	text := extractToolText(t, resp)
 
@@ -578,7 +580,7 @@ func TestTenantStatusViaMCP(t *testing.T) {
 		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
 	})
 	mw.SetName("tenant-team-alpha")
-	mw.SetNamespace("infraops1")
+	mw.SetNamespace("hub-cluster")
 	mw.SetLabels(map[string]string{"acmlab.redhat.com/tenant": "team-alpha"})
 	mw.Object["status"] = map[string]interface{}{
 		"conditions": []interface{}{
@@ -589,7 +591,7 @@ func TestTenantStatusViaMCP(t *testing.T) {
 	c := fakeClientWithClusters(mw)
 	resp := callTool(t, c, "acm_tenant_status", map[string]interface{}{
 		"name":    "team-alpha",
-		"cluster": "infraops1",
+		"cluster": "hub-cluster",
 	})
 	text := extractToolText(t, resp)
 
@@ -698,6 +700,99 @@ func TestRotateIdPViaMCP(t *testing.T) {
 	}
 }
 
+func TestApplyQuotaPolicyViaMCP(t *testing.T) {
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("spoke1")
+	mc.SetLabels(map[string]string{"vendor": "OpenShift"})
+
+	c := fakeClientWithClusters(mc)
+	resp := callTool(t, c, "acm_apply_quota_policy", map[string]interface{}{
+		"cluster":     "spoke1",
+		"max_workers": float64(5),
+		"max_gpus":    float64(1),
+	})
+	text := extractToolText(t, resp)
+	if text != "Quota policy applied to spoke1 (max-workers=5, max-gpus=1)" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestApplyQuotaPolicyViaMCPNoLimits(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_apply_quota_policy", map[string]interface{}{
+		"cluster": "spoke1",
+	})
+	text, isError := extractToolResult(t, resp)
+	if !isError {
+		t.Errorf("expected error for no limits, got: %s", text)
+	}
+}
+
+func TestQuotaStatusViaMCP(t *testing.T) {
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("spoke1")
+	mc.SetLabels(map[string]string{
+		"vendor":           "OpenShift",
+		"caas/max-workers": "5",
+	})
+
+	c := fakeClientWithClusters(mc)
+	resp := callTool(t, c, "acm_quota_status", map[string]interface{}{
+		"cluster": "spoke1",
+	})
+	text := extractToolText(t, resp)
+
+	var status map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &status); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if status["cluster"] != "spoke1" {
+		t.Errorf("cluster = %v, want spoke1", status["cluster"])
+	}
+	if status["maxWorkers"].(float64) != 5 {
+		t.Errorf("maxWorkers = %v, want 5", status["maxWorkers"])
+	}
+}
+
+func TestConfigureUniqueIdPViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_configure_unique_idp", map[string]interface{}{
+		"cluster":    "spoke1",
+		"admin_user": "emergency-admin",
+	})
+	text := extractToolText(t, resp)
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["cluster"] != "spoke1" {
+		t.Errorf("cluster = %v, want spoke1", result["cluster"])
+	}
+	if result["user"] != "emergency-admin" {
+		t.Errorf("user = %v, want emergency-admin", result["user"])
+	}
+	password, _ := result["password"].(string)
+	if len(password) != 24 {
+		t.Errorf("password length = %d, want 24", len(password))
+	}
+}
+
+func TestEnforceSSOViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_enforce_sso", map[string]interface{}{})
+	text := extractToolText(t, resp)
+	if text != "SSO enforcement policy created — clusters without OpenID IdP will be marked NonCompliant" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
 func TestScalingSetFlavorViaMCP(t *testing.T) {
 	mp := &unstructured.Unstructured{}
 	mp.SetGroupVersionKind(schema.GroupVersionKind{
@@ -723,6 +818,78 @@ func TestScalingSetFlavorViaMCP(t *testing.T) {
 	})
 	text := extractToolText(t, resp)
 	if text != "Cluster spoke1 worker flavor changed to cx2-8x16" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestCreatePoolViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_create_pool", map[string]interface{}{
+		"name":      "amd64-419",
+		"size":      float64(3),
+		"image_set": "img4.19-multi",
+	})
+	text := extractToolText(t, resp)
+	if text != "ClusterPool amd64-419 created (size=3)" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestListPoolsViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_list_pools", nil)
+	text := extractToolText(t, resp)
+
+	var pools []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &pools); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(pools) != 0 {
+		t.Errorf("got %d pools, want 0", len(pools))
+	}
+}
+
+func TestCreateClaimViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_create_claim", map[string]interface{}{
+		"pool":      "my-pool",
+		"name":      "my-claim",
+		"namespace": "my-pool",
+		"ttl":       "48h",
+	})
+	text := extractToolText(t, resp)
+
+	var info map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &info); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if info["name"] != "my-claim" {
+		t.Errorf("name = %v, want my-claim", info["name"])
+	}
+	if info["pool"] != "my-pool" {
+		t.Errorf("pool = %v, want my-pool", info["pool"])
+	}
+}
+
+func TestReleaseClaimViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_release_claim", map[string]interface{}{
+		"name":      "my-claim",
+		"namespace": "my-pool",
+	})
+	text := extractToolText(t, resp)
+	if text != "ClusterClaim my-claim released" {
+		t.Errorf("unexpected response: %s", text)
+	}
+}
+
+func TestDeletePoolViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_delete_pool", map[string]interface{}{
+		"name": "old-pool",
+	})
+	text := extractToolText(t, resp)
+	if text != "ClusterPool old-pool deleted" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }

@@ -1,13 +1,17 @@
 package idp
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+const passwordCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
 
 func buildOAuthManifest(opts IdPOpts) map[string]interface{} {
 	var entry map[string]interface{}
@@ -193,6 +197,28 @@ func buildOAuthClusterRoleBinding() map[string]interface{} {
 				"namespace": "open-cluster-management-agent",
 			},
 		},
+	}
+}
+
+func generatePassword(length int) (string, error) {
+	result := make([]byte, length)
+	charsetLen := big.NewInt(int64(len(passwordCharset)))
+	for i := range result {
+		n, err := rand.Int(rand.Reader, charsetLen)
+		if err != nil {
+			return "", fmt.Errorf("generating random byte: %w", err)
+		}
+		result[i] = passwordCharset[n.Int64()]
+	}
+	return string(result), nil
+}
+
+func buildUniqueHTPasswdOpts(cluster, adminUser, password string) IdPOpts {
+	return IdPOpts{
+		Name:    "emergency-" + cluster,
+		Cluster: cluster,
+		Type:    IdPHTPasswd,
+		Users:   map[string]string{adminUser: password},
 	}
 }
 

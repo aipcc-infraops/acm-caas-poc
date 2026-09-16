@@ -60,6 +60,8 @@ func main() {
 	root.AddCommand(upgradeCmd())
 	root.AddCommand(clustersetCmd())
 	root.AddCommand(idpCmd())
+	root.AddCommand(poolCmd())
+	root.AddCommand(claimCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {

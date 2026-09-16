@@ -25,6 +25,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
+	"github.com/pablofelix/acm-caas-poc/internal/pool"
 	"github.com/pablofelix/acm-caas-poc/internal/upgrade"
 )
 
@@ -74,6 +75,9 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	idpMgr := idp.New(c, cfg, log)
 	registerIdPTools(s, idpMgr)
+
+	poolMgr := pool.New(c, cfg, log)
+	registerPoolTools(s, poolMgr)
 
 	return s
 }
@@ -267,6 +271,44 @@ func registerPolicyTools(s *server.MCPServer, pol *policy.Manager) {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("Policy %s removed successfully", name)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_apply_quota_policy",
+			mcp.WithDescription("Apply resource quota enforcement policy to a cluster. Stamps quota labels on the ManagedCluster and creates a ConfigurationPolicy to monitor compliance. Educate-first model: inform, not auto-enforce."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster name")),
+			mcp.WithNumber("max_workers", mcp.Description("Maximum worker nodes allowed (0 = skip)")),
+			mcp.WithNumber("max_gpus", mcp.Description("Maximum GPU nodes allowed (0 = skip)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			maxWorkersF, _ := req.GetArguments()["max_workers"].(float64)
+			maxGPUsF, _ := req.GetArguments()["max_gpus"].(float64)
+			maxWorkers, maxGPUs := int(maxWorkersF), int(maxGPUsF)
+			if maxWorkers <= 0 && maxGPUs <= 0 {
+				return mcp.NewToolResultError("at least one of max_workers or max_gpus must be positive"), nil
+			}
+			if err := pol.ApplyQuotaPolicy(ctx, cluster, maxWorkers, maxGPUs); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("Quota policy applied to %s (max-workers=%d, max-gpus=%d)", cluster, maxWorkers, maxGPUs)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_quota_status",
+			mcp.WithDescription("Check resource quota compliance for a cluster. Shows quota labels and policy compliance status."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			status, err := pol.GetQuotaStatus(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(status, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
 		},
 	)
 

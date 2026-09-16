@@ -25,7 +25,10 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 	scheme := runtime.NewScheme()
 	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			client.GVRManifestWork: "ManifestWorkList",
+			client.GVRManifestWork:     "ManifestWorkList",
+			client.GVRPolicy:          "PolicyList",
+			client.GVRPlacement:       "PlacementList",
+			client.GVRPlacementBinding: "PlacementBindingList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -625,5 +628,165 @@ func TestGitHubNoOrganizations(t *testing.T) {
 	gh, _ := entry["github"].(map[string]interface{})
 	if _, ok := gh["organizations"]; ok {
 		t.Error("organizations should be absent when empty")
+	}
+}
+
+func TestGeneratePasswordLength(t *testing.T) {
+	pw, err := generatePassword(24)
+	if err != nil {
+		t.Fatalf("generatePassword failed: %v", err)
+	}
+	if len(pw) != 24 {
+		t.Errorf("password length = %d, want 24", len(pw))
+	}
+}
+
+func TestGeneratePasswordRandomness(t *testing.T) {
+	pw1, _ := generatePassword(24)
+	pw2, _ := generatePassword(24)
+	if pw1 == pw2 {
+		t.Error("two generated passwords should not be identical")
+	}
+}
+
+func TestGeneratePasswordCharset(t *testing.T) {
+	pw, _ := generatePassword(100)
+	for _, c := range pw {
+		if !strings.ContainsRune(passwordCharset, c) {
+			t.Errorf("password contains unexpected char %q", string(c))
+		}
+	}
+}
+
+func TestBuildUniqueHTPasswdOpts(t *testing.T) {
+	opts := buildUniqueHTPasswdOpts("spoke1", "admin", "secret123")
+	if opts.Name != "emergency-spoke1" {
+		t.Errorf("name = %q, want emergency-spoke1", opts.Name)
+	}
+	if opts.Cluster != "spoke1" {
+		t.Errorf("cluster = %q, want spoke1", opts.Cluster)
+	}
+	if opts.Type != IdPHTPasswd {
+		t.Errorf("type = %q, want htpasswd", opts.Type)
+	}
+	if opts.Users["admin"] != "secret123" {
+		t.Errorf("users[admin] = %q, want secret123", opts.Users["admin"])
+	}
+}
+
+func TestConfigureUniqueCreatesManifestWork(t *testing.T) {
+	mgr, c := newManager()
+	password, err := mgr.ConfigureUnique(context.Background(), "spoke1", "cluster-admin")
+	if err != nil {
+		t.Fatalf("ConfigureUnique failed: %v", err)
+	}
+	if len(password) != 24 {
+		t.Errorf("password length = %d, want 24", len(password))
+	}
+
+	mw, err := c.Get(context.Background(), client.GVRManifestWork, "spoke1", "idp-emergency-spoke1")
+	if err != nil {
+		t.Fatalf("ManifestWork not created: %v", err)
+	}
+	labels := mw.GetLabels()
+	if labels[idpLabel] != "emergency-spoke1" {
+		t.Errorf("idp label = %q, want emergency-spoke1", labels[idpLabel])
+	}
+	if labels["acmlab.redhat.com/type"] != "htpasswd" {
+		t.Errorf("type label = %q, want htpasswd", labels["acmlab.redhat.com/type"])
+	}
+
+	manifests := getManifests(t, c, "spoke1", "idp-emergency-spoke1")
+	secret, _ := manifests[0].(map[string]interface{})
+	data, _ := secret["data"].(map[string]interface{})
+	decoded, _ := base64.StdEncoding.DecodeString(data["htpasswd"].(string))
+	content := string(decoded)
+	if !strings.HasPrefix(content, "cluster-admin:$2a$") {
+		t.Errorf("htpasswd should contain bcrypt hash for cluster-admin, got %q", content)
+	}
+}
+
+func TestConfigureUniquePasswordIsDifferentPerCall(t *testing.T) {
+	mgr1, _ := newManager()
+	pw1, err := mgr1.ConfigureUnique(context.Background(), "spoke1", "admin")
+	if err != nil {
+		t.Fatalf("first ConfigureUnique failed: %v", err)
+	}
+
+	mgr2, _ := newManager()
+	pw2, err := mgr2.ConfigureUnique(context.Background(), "spoke2", "admin")
+	if err != nil {
+		t.Fatalf("second ConfigureUnique failed: %v", err)
+	}
+
+	if pw1 == pw2 {
+		t.Error("passwords for different clusters should be unique")
+	}
+}
+
+func TestConfigureUniqueSetsRotationAnnotation(t *testing.T) {
+	mgr, c := newManager()
+	_, err := mgr.ConfigureUnique(context.Background(), "spoke1", "admin")
+	if err != nil {
+		t.Fatalf("ConfigureUnique failed: %v", err)
+	}
+
+	mw, _ := c.Get(context.Background(), client.GVRManifestWork, "spoke1", "idp-emergency-spoke1")
+	annotations := mw.GetAnnotations()
+	if annotations == nil {
+		t.Fatal("annotations should not be nil")
+	}
+	rotation, ok := annotations["acmlab.redhat.com/last-rotation"]
+	if !ok {
+		t.Fatal("last-rotation annotation missing")
+	}
+	if rotation == "" {
+		t.Error("last-rotation annotation is empty")
+	}
+}
+
+func TestEnforceSSOCreatesPolicy(t *testing.T) {
+	mgr, c := newManager()
+	if err := mgr.EnforceSSO(context.Background(), ""); err != nil {
+		t.Fatalf("EnforceSSO failed: %v", err)
+	}
+
+	ns := "open-cluster-management-global-set"
+
+	_, err := c.Get(context.Background(), client.GVRPolicy, ns, "sso-enforcement")
+	if err != nil {
+		t.Fatalf("SSO policy not created: %v", err)
+	}
+
+	_, err = c.Get(context.Background(), client.GVRPlacement, ns, "sso-enforcement-placement")
+	if err != nil {
+		t.Fatalf("SSO placement not created: %v", err)
+	}
+
+	_, err = c.Get(context.Background(), client.GVRPlacementBinding, ns, "sso-enforcement-placement-binding")
+	if err != nil {
+		t.Fatalf("SSO placement binding not created: %v", err)
+	}
+}
+
+func TestEnforceSSOIdempotent(t *testing.T) {
+	mgr, _ := newManager()
+	if err := mgr.EnforceSSO(context.Background(), ""); err != nil {
+		t.Fatalf("first EnforceSSO failed: %v", err)
+	}
+	if err := mgr.EnforceSSO(context.Background(), ""); err != nil {
+		t.Fatalf("second EnforceSSO should be idempotent: %v", err)
+	}
+}
+
+func TestEnforceSSOCustomNamespace(t *testing.T) {
+	mgr, c := newManager()
+	if err := mgr.EnforceSSO(context.Background(), "my-namespace"); err != nil {
+		t.Fatalf("EnforceSSO failed: %v", err)
+	}
+
+	_, err := c.Get(context.Background(), client.GVRPolicy, "my-namespace", "sso-enforcement")
+	if err != nil {
+		t.Fatalf("SSO policy not created in custom namespace: %v", err)
 	}
 }

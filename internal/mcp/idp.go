@@ -84,6 +84,47 @@ func registerIdPTools(s *server.MCPServer, mgr *idp.Manager) {
 	)
 
 	s.AddTool(
+		mcp.NewTool("acm_configure_unique_idp",
+			mcp.WithDescription("Deploy unique emergency htpasswd credentials to a cluster. Generates a random password, deploys via ManifestWork. Each cluster gets different credentials — a leak on one cluster does not affect the fleet."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+			mcp.WithString("admin_user", mcp.Description("Admin username (default: cluster-admin)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster, _ := req.RequireString("cluster")
+			adminUser := "cluster-admin"
+			if v, ok := req.GetArguments()["admin_user"].(string); ok && v != "" {
+				adminUser = v
+			}
+			password, err := mgr.ConfigureUnique(ctx, cluster, adminUser)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			result := map[string]interface{}{
+				"cluster":  cluster,
+				"user":     adminUser,
+				"password": password,
+				"message":  "Unique emergency IdP deployed. Save this password — it will not be shown again.",
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_enforce_sso",
+			mcp.WithDescription("Create a fleet-wide SSO compliance policy. Clusters without an OpenID (SSO) Identity Provider will be marked NonCompliant."),
+			mcp.WithString("namespace", mcp.Description("Policy namespace (default: global-set)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			ns, _ := req.GetArguments()["namespace"].(string)
+			if err := mgr.EnforceSSO(ctx, ns); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText("SSO enforcement policy created — clusters without OpenID IdP will be marked NonCompliant"), nil
+		},
+	)
+
+	s.AddTool(
 		mcp.NewTool("acm_remove_idp",
 			mcp.WithDescription("Remove an Identity Provider from a cluster. Idempotent."),
 			mcp.WithString("name", mcp.Required(), mcp.Description("IdP name")),
