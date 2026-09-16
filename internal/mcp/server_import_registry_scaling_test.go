@@ -175,14 +175,13 @@ func TestProvisionDestroyViaMCP(t *testing.T) {
 }
 
 func TestProvisionDestroyNotFound(t *testing.T) {
-	// Destroy is idempotent -- Hive Delete returns not-found which is swallowed
 	c := fakeClientWithClusters()
 	resp := callTool(t, c, "acm_provision_destroy", map[string]interface{}{
 		"name": "nonexistent",
 	})
-	text := extractToolText(t, resp)
-	if text != "Cluster nonexistent destruction initiated" {
-		t.Errorf("unexpected response: %s", text)
+	text, isErr := extractToolResult(t, resp)
+	if !isErr {
+		t.Errorf("expected error for nonexistent cluster, got success: %s", text)
 	}
 }
 

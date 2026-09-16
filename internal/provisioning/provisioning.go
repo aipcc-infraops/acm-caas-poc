@@ -172,10 +172,23 @@ func (m *Manager) Create(ctx context.Context, opts ClusterOpts) error {
 
 func (m *Manager) Destroy(ctx context.Context, name string) error {
 	m.logger.Info("provisioning.Destroy", "cluster", name)
-	err := m.client.Delete(ctx, client.GVRClusterDeployment, name, name)
-	if err != nil && !apierrors.IsNotFound(err) {
+
+	_, err := m.client.Get(ctx, client.GVRClusterDeployment, name, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("cluster %s not found (no ClusterDeployment)", name)
+		}
+		return fmt.Errorf("checking ClusterDeployment %s: %w", name, err)
+	}
+
+	if err := m.client.Delete(ctx, client.GVRClusterDeployment, name, name); err != nil {
 		return fmt.Errorf("deleting ClusterDeployment %s: %w", name, err)
 	}
+
+	if err := m.client.DeleteIfExists(ctx, client.GVRManagedCluster, "", name); err != nil {
+		m.logger.Error("failed to delete ManagedCluster (manual cleanup may be needed)", "cluster", name, "error", err)
+	}
+
 	if m.cfg.IBMCloudAPIKey != "" {
 		cleanupIBMCloudCredentials(m.cfg.IBMCloudAPIKey, name)
 	}

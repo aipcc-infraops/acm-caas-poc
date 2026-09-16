@@ -81,12 +81,15 @@ func (m *Manager) Deploy(ctx context.Context, opts TenantOpts) error {
 func (m *Manager) Remove(ctx context.Context, tenantName, cluster string) (bool, error) {
 	m.logger.Info("tenant.Remove", "tenant", tenantName, "cluster", cluster)
 	name := manifestWorkName(tenantName)
-	_, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
+	obj, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err
+	}
+	if obj.GetDeletionTimestamp() != nil {
+		return false, nil
 	}
 	if err := m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, name); err != nil {
 		return false, err

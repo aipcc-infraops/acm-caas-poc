@@ -112,7 +112,7 @@ func registerFleetTools(s *server.MCPServer, fi *fleet.Inspector) {
 			mcp.WithDescription("Get complete fleet status — all managed clusters with health, labels, version, and conditions. Returns a summary with total/healthy/degraded counts."),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			clusters, err := fi.ListClusters(ctx)
+			clusters, err := fi.ListClusters(ctx, "")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -138,7 +138,7 @@ func registerFleetTools(s *server.MCPServer, fi *fleet.Inspector) {
 			mcp.WithDescription("List all ManagedCluster resources on the ACM hub with status, labels, and conditions."),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			clusters, err := fi.ListClusters(ctx)
+			clusters, err := fi.ListClusters(ctx, "")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

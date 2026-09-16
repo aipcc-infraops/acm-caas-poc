@@ -39,6 +39,7 @@ func policyCmd() *cobra.Command {
 
 func policyListCmd() *cobra.Command {
 	var namespace string
+	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List policies and compliance status",
@@ -56,6 +57,11 @@ func policyListCmd() *cobra.Command {
 				fmt.Println("No policies found")
 				return nil
 			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(policies, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
 			fmt.Printf("%-35s %-12s %-10s %-15s\n", "NAME", "REMEDIATION", "DISABLED", "COMPLIANT")
 			for _, p := range policies {
 				compliant := p.Compliant
@@ -68,6 +74,7 @@ func policyListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
