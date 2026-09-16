@@ -16,26 +16,26 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-06 | Cluster resource monitoring & observability (Thanos) | ✅ Implemented | `internal/monitoring/`, `internal/observability/` |
 | UC-07 | External cluster import | ✅ Implemented | `internal/importing/` |
 | UC-13 | Registry mirror for restricted clusters (ROKS, air-gap) | ✅ Implemented | `internal/registry/` |
-| UC-08 | Legacy cluster decommissioning | 📋 Planned | `internal/decommission/` |
-| UC-09 | Cluster upgrades (Day-2 operations) | 📋 Planned | `internal/upgrades/` |
+| UC-08 | Legacy cluster decommissioning | ✅ Implemented | `internal/decommission/` |
+| UC-09 | Cluster upgrades (Day-2 operations) | ✅ Implemented | `internal/upgrade/` |
 | UC-10 | Cluster scaling (add/remove workers) | ✅ Implemented | `internal/scaling/` |
 | UC-11 | Cost tracking and chargeback | 📋 Planned | `internal/cost/` |
-| UC-12 | Identity Provider management (GitHub IdP, htpasswd rotation) | 📋 Planned | `internal/idp/` |
+| UC-12 | Identity Provider management (GitHub, Google, htpasswd, LDAP, OIDC) | ✅ Implemented | `internal/idp/` |
 | UC-14 | Automatic cluster reclamation (idle/expired) | 📋 Planned | `internal/reclamation/` |
-| UC-15 | Resource quota gates via governance policy | 📋 Planned | `internal/quota/` |
-| UC-16 | Unique IdP per cluster (security hardening) | 📋 Planned | `internal/idp/` |
+| UC-15 | Resource quota gates via governance policy | ✅ Implemented | `internal/policy/` |
+| UC-16 | Unique IdP per cluster (security hardening) | ✅ Implemented | `internal/idp/` |
 | UC-17 | Cost center attribution and budget alerting | 📋 Planned | `internal/cost/` |
 | UC-18 | GPU sharing stack deployment (Kueue + Kyverno) | 📋 Planned | `internal/gpusharing/` |
 | UC-19 | Multi-cluster GPU workload routing via Placement | 📋 Planned | `internal/gpurouting/` |
 | UC-20 | AI platform operator version fleet segregation | 📋 Planned | `internal/gpurouting/` |
 | UC-21 | Elastic GPU capacity (auto-provision on saturation) | 📋 Planned | `internal/gpuelastic/` |
-| UC-22 | ClusterSet management — team isolation | 📋 Planned | `internal/clusterset/` |
+| UC-22 | ClusterSet management — team isolation | ✅ Implemented | `internal/clusterset/` |
 | UC-23 | Multi-architecture cluster matrix (QA) | 📋 Planned | `internal/matrix/` |
-| UC-24 | Per-team compliance reporting | 📋 Planned | `internal/policy/` |
-| UC-25 | ClusterPool + ClusterClaim (pre-warmed clusters) | 📋 Planned | `internal/pool/` |
+| UC-24 | Per-team compliance reporting | ✅ Implemented | `internal/policy/` |
+| UC-25 | ClusterPool + ClusterClaim (pre-warmed clusters) | ✅ Implemented | `internal/pool/` |
 | UC-26 | Multi-cluster networking (Submariner) | 📋 Planned | `internal/submariner/` |
-| UC-27 | Operator version pinning (OperatorPolicy) | 📋 Planned | `internal/policy/` |
-| UC-28 | Certificate expiry detection fleet-wide | 📋 Planned | `internal/certpolicy/` |
+| UC-27 | Operator version pinning (OperatorPolicy) | ✅ Implemented | `internal/policy/` |
+| UC-28 | Certificate expiry detection fleet-wide | ✅ Implemented | `internal/policy/` |
 | UC-29 | Security baseline enforcement (Gatekeeper/OPA) | 📋 Planned | `internal/securitybaseline/` |
 | UC-30 | Policy automation — Ansible auto-remediation | 📋 Planned | `internal/policyautomation/` |
 | UC-31 | SCAP scanning via Compliance Operator | 📋 Planned | `internal/compliance/` |
@@ -43,7 +43,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-33 | ManifestWorkReplicaSet progressive rollout | 📋 Planned | `internal/rollout/` |
 | UC-35 | Credential-free spoke access (ManagedServiceAccount) | 📋 Planned | `internal/access/` |
 | UC-36 | Hub backup and restore | 📋 Planned | `internal/backup/` |
-| UC-37 | Worker node flavor change (rolling replacement) | 📋 Planned | `internal/scaling/` |
+| UC-37 | Worker node flavor change (rolling replacement) | ✅ Implemented | `internal/scaling/` |
 | UC-38 | HyperShift (HostedCluster) provisioning | 📋 Planned | `internal/provisioning/` |
 | UC-39 | Cloud-provider native scaling for imported clusters | 📋 Planned | `internal/scaling/` |
 | UC-40 | Cluster API (CAPI) provisioning for vanilla Kubernetes | 📋 Planned | `internal/provisioning/` |
@@ -54,8 +54,8 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 The PoC validates ACM value in 4 areas:
 
 1. **Provisioning clusters** (UC-01, UC-10) ✅
-2. **Managing imported clusters** (UC-07, UC-08, UC-09, UC-13) 🔄 UC-07, UC-13 done
-3. **Policy management & enforcement** (UC-02, UC-12) ⚠️ UC-12 needed
+2. **Managing imported clusters** (UC-07, UC-08, UC-09, UC-13) ✅
+3. **Policy management & enforcement** (UC-02, UC-12) ✅
 4. **Monitor and alert** (UC-04, UC-06) ✅
 
 ## Quick Start
@@ -144,6 +144,23 @@ bin/acmlab registry status c1 c2 c3 --json
 
 # 12. Fleet batch
 bin/acmlab fleet status spoke1 spoke2 spoke3 --json
+
+# 13. Resource quota enforcement
+bin/acmlab policy apply-quota --cluster spoke1 --max-workers 5 --max-gpus 1
+bin/acmlab policy quota-status spoke1
+
+# 14. Unique IdP per cluster
+bin/acmlab idp configure-unique --cluster spoke1 --admin-user cluster-admin
+bin/acmlab idp enforce-sso
+
+# 15. ClusterPool & ClusterClaim
+bin/acmlab pool create amd64-419 --size 3 --image-set img4.19-multi --platform ibmcloud --region us-south --base-domain example.com
+bin/acmlab pool list
+bin/acmlab pool get amd64-419
+bin/acmlab claim create amd64-419 --name my-claim --ttl 48h
+bin/acmlab claim list
+bin/acmlab claim release my-claim
+bin/acmlab pool delete amd64-419
 ```
 
 ## MCP Server
@@ -168,7 +185,7 @@ Register in Claude Code's MCP config:
 }
 ```
 
-Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_deploy_tenant`, `acm_remove_tenant`, `acm_list_tenants`, `acm_tenant_status`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`, `acm_hibernate_cluster`, `acm_resume_cluster`, `acm_lifecycle_status`, `acm_lifecycle_diagnose`, `acm_lifecycle_recover_certs`, `acm_list_lifecycle_clusters`, `acm_import_cluster`, `acm_detach_cluster`, `acm_import_status`, `acm_list_imported_clusters`, `acm_registry_list_images`, `acm_registry_configure_mirror`, `acm_registry_mirror_status`, `acm_registry_generate_mirror_script`.
+Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_deploy_tenant`, `acm_remove_tenant`, `acm_list_tenants`, `acm_tenant_status`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_apply_quota_policy`, `acm_quota_status`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`, `acm_hibernate_cluster`, `acm_resume_cluster`, `acm_lifecycle_status`, `acm_lifecycle_diagnose`, `acm_lifecycle_recover_certs`, `acm_list_lifecycle_clusters`, `acm_import_cluster`, `acm_detach_cluster`, `acm_import_status`, `acm_list_imported_clusters`, `acm_registry_list_images`, `acm_registry_configure_mirror`, `acm_registry_mirror_status`, `acm_registry_generate_mirror_script`, `acm_configure_idp`, `acm_remove_idp`, `acm_list_idps`, `acm_rotate_idp`, `acm_configure_unique_idp`, `acm_enforce_sso`, `acm_scaling_set_flavor`, `acm_create_pool`, `acm_list_pools`, `acm_get_pool`, `acm_delete_pool`, `acm_create_claim`, `acm_release_claim`, `acm_list_claims`.
 
 See [docs/acmlab-commands.md](docs/acmlab-commands.md) for the full command and tool reference.
 

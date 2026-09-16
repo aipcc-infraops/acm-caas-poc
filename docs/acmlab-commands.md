@@ -174,6 +174,251 @@ Removes a ManagedClusterSet and its binding.
 Options:
 - `--namespace` — namespace of the binding (required)
 
+### Identity Providers
+
+#### `acmlab idp configure <name>`
+
+Configures an Identity Provider on a cluster via ManifestWork. Creates an OAuth CR and Secret in openshift-config. Supports five IdP types: GitHub, Google, htpasswd, LDAP, OIDC (Keycloak).
+
+Options:
+- `--cluster` — target cluster (required)
+- `--type` — IdP type: github, google, htpasswd, ldap, oidc (required)
+- `--client-id` — OAuth client ID (github, google, oidc)
+- `--client-secret` — OAuth client secret (github, google, oidc)
+- `--organizations` — GitHub organizations (comma-separated)
+- `--issuer-url` — OIDC issuer URL (oidc)
+- `--users` — htpasswd users (user1:pass1,user2:pass2)
+- `--ldap-url` — LDAP server URL
+- `--bind-dn` — LDAP bind DN
+- `--bind-password` — LDAP bind password
+- `--insecure` — LDAP insecure connection
+
+```
+$ acmlab idp configure corp-github --cluster spoke1 --type github \
+    --client-id placeholder-id --client-secret placeholder-secret \
+    --organizations example-org
+IdP corp-github (github) configured on cluster spoke1
+```
+
+#### `acmlab idp list`
+
+Lists Identity Providers configured on a cluster.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--json` — output as JSON
+
+```
+$ acmlab idp list --cluster spoke1
+NAME                 TYPE       STATUS
+corp-github          github     Applied
+corp-ldap            ldap       Applied
+keycloak             oidc       Pending
+```
+
+#### `acmlab idp rotate <name>`
+
+Rotates credentials for an Identity Provider by updating the ManifestWork Secret.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--client-id` — new OAuth client ID
+- `--client-secret` — new OAuth client secret
+- `--users` — new htpasswd users
+- `--bind-password` — new LDAP bind password
+
+#### `acmlab idp remove <name>`
+
+Removes an Identity Provider from a cluster.
+
+Options:
+- `--cluster` — target cluster (required)
+
+#### `acmlab idp configure-unique`
+
+Deploys unique emergency htpasswd credentials to a cluster. Generates a cryptographically random password, creates an htpasswd IdP named `emergency-<cluster>`, and stores a rotation timestamp.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--admin-user` — admin username (default: cluster-admin)
+
+```
+$ acmlab idp configure-unique --cluster spoke1 --admin-user cluster-admin
+Unique IdP configured on spoke1
+Admin user: cluster-admin
+Password: <generated-password>
+Save this password — it will not be shown again.
+```
+
+#### `acmlab idp enforce-sso`
+
+Creates a fleet-wide compliance policy that marks clusters without an OpenID (SSO) IdP as NonCompliant.
+
+Options:
+- `--namespace` — policy namespace (default: global-set)
+
+```
+$ acmlab idp enforce-sso
+SSO enforcement policy created
+```
+
+### Resource Quota
+
+#### `acmlab policy apply-quota`
+
+Stamps quota labels on a ManagedCluster and creates a ConfigurationPolicy to monitor compliance.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--max-workers` — maximum worker nodes allowed
+- `--max-gpus` — maximum GPU nodes allowed
+
+```
+$ acmlab policy apply-quota --cluster spoke1 --max-workers 5 --max-gpus 1
+Quota policy applied to spoke1 (max-workers=5, max-gpus=1)
+```
+
+#### `acmlab policy quota-status <cluster>`
+
+Shows quota labels and compliance status for a cluster.
+
+```
+$ acmlab policy quota-status spoke1
+Cluster:     spoke1
+Max Workers: 5
+Max GPUs:    1
+Compliant:   true
+```
+
+### ClusterPool
+
+#### `acmlab pool create <name>`
+
+Creates a Hive ClusterPool for pre-warmed cluster access. Clusters are provisioned and hibernated, ready for instant claiming.
+
+Options:
+- `--size` — number of ready clusters (default: 3)
+- `--platform` — cloud platform: ibmcloud, aws, gcp, azure
+- `--region` — cloud region
+- `--image-set` — ClusterImageSet name
+- `--base-domain` — base domain for clusters
+- `--namespace` — pool namespace (default: pool name)
+
+```
+$ acmlab pool create amd64-419 --size 3 --image-set img4.19-multi --platform ibmcloud --region us-south --base-domain example.com
+ClusterPool amd64-419 created (size=3)
+```
+
+#### `acmlab pool list`
+
+Lists all ClusterPools with size, ready count, and claimed count.
+
+```
+$ acmlab pool list
+NAME             SIZE  READY  CLAIMED  STANDBY
+amd64-419        3     2      1        0
+```
+
+#### `acmlab pool get <name>`
+
+Shows detailed ClusterPool info.
+
+Options:
+- `--namespace` — pool namespace (default: pool name)
+- `--json` — output as JSON
+
+#### `acmlab pool delete <name>`
+
+Deletes a ClusterPool and all its clusters.
+
+Options:
+- `--namespace` — pool namespace (default: pool name)
+
+### ClusterClaim
+
+#### `acmlab claim create <pool-name>`
+
+Claims a pre-warmed cluster from a pool for instant access.
+
+Options:
+- `--name` — claim name (auto-generated if not provided)
+- `--namespace` — pool namespace (default: pool name)
+- `--ttl` — time-to-live for the claim (e.g., 48h)
+
+```
+$ acmlab claim create amd64-419 --name my-test --ttl 48h
+ClusterClaim my-test created from pool amd64-419
+```
+
+#### `acmlab claim list`
+
+Lists all ClusterClaims with their status and bound cluster.
+
+Options:
+- `--namespace` — filter by namespace
+- `--json` — output as JSON
+
+#### `acmlab claim release <name>`
+
+Releases a claimed cluster back to the pool.
+
+Options:
+- `--namespace` — claim namespace (default: claim name)
+
+### Scaling
+
+#### `acmlab scaling get <cluster>`
+
+Shows MachinePool info: replicas, autoscaling bounds, platform.
+
+Options:
+- `--json` — output as JSON
+
+#### `acmlab scaling set <cluster>`
+
+Sets a fixed worker replica count.
+
+Options:
+- `--replicas` — number of worker nodes (default: 2)
+- `--json` — output as JSON
+
+#### `acmlab scaling auto <cluster>`
+
+Enables autoscaling with min/max bounds.
+
+Options:
+- `--min` — minimum worker nodes (default: 1)
+- `--max` — maximum worker nodes (default: 5)
+- `--json` — output as JSON
+
+#### `acmlab scaling set-flavor <cluster>`
+
+Changes worker node instance type via MachinePool platform update. Hive performs a rolling replacement — new workers are created with the new type, old workers are drained and removed.
+
+Options:
+- `--worker-type` — new worker instance type (required)
+
+```
+$ acmlab scaling set-flavor spoke1 --worker-type cx2-8x16
+Cluster spoke1 worker flavor changed to cx2-8x16
+```
+
+#### `acmlab scaling list`
+
+Lists all MachinePools across the fleet.
+
+Options:
+- `--json` — output as JSON
+
+#### `acmlab scaling init <cluster>`
+
+Creates a MachinePool for a Hive cluster that does not have one. Auto-detects current workers.
+
+Options:
+- `--worker-type` — worker instance type (auto-detected if omitted)
+- `--replicas` — worker count (auto-detected if omitted)
+- `--json` — output as JSON
+
 ### Tenants
 
 #### `acmlab tenant deploy <name>`
@@ -495,7 +740,7 @@ Options:
 ```
 $ acmlab upgrade list
 CLUSTER              VERSION      CHANNEL          METHOD       AVAILABLE
-infraops1            4.21.29      stable-4.21      manifestwork 4.21.30, 4.21.31
+hub-cluster          4.21.29      stable-4.21      manifestwork 4.21.30, 4.21.31
 spoke2               4.22.9       stable-4.22      hive         4.22.10, 4.22.11, 4.22.12
 ```
 
@@ -543,11 +788,11 @@ Options:
 - `--kubeconfig-path` — spoke kubeconfig for imported clusters
 
 ```
-$ acmlab decommission start spoke2 --owner "pestevez@redhat.com"
+$ acmlab decommission start spoke2 --owner "admin@example.com"
 {
   "clusterName": "spoke2",
   "phase": "audited",
-  "owner": "pestevez@redhat.com",
+  "owner": "admin@example.com",
   "deadline": "2026-09-28T15:10:16Z",
   "audit": {
     "nodeCount": 5,
@@ -589,7 +834,7 @@ Shows current phase, owner, deadline, audit data, and full history.
 $ acmlab decommission status spoke2
 Cluster:  spoke2
 Phase:    audited
-Owner:    pestevez@redhat.com
+Owner:    admin@example.com
 Deadline: 2026-09-28T15:10:16Z
 Nodes:    5
 CPU:      32
@@ -611,7 +856,7 @@ Options:
 ```
 $ acmlab decommission list
 CLUSTER              PHASE        OWNER                          DEADLINE
-spoke2               audited      pestevez@redhat.com            2026-09-28T15:10:16Z
+spoke2               audited      admin@example.com            2026-09-28T15:10:16Z
 ```
 
 #### `acmlab decommission cancel <cluster>`
@@ -710,8 +955,28 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_decommission_list` | UC-08 | List all active decommission workflows |
 | `acm_decommission_cancel` | UC-08 | Cancel workflow (keeps cluster intact) |
 | `acm_decommission_audit` | UC-08 | Standalone audit without starting decommission |
+| `acm_scaling_get` | UC-10 | MachinePool info: replicas, autoscaling, platform |
+| `acm_scaling_set` | UC-10 | Set fixed worker replica count |
+| `acm_scaling_auto` | UC-10 | Enable autoscaling with min/max bounds |
+| `acm_scaling_set_flavor` | UC-37 | Change worker node instance type via MachinePool |
+| `acm_scaling_list` | UC-10 | List all MachinePools across the fleet |
 | `acm_upgrade_status` | UC-09 | Upgrade status: version, channel, available updates, method |
 | `acm_upgrade_list` | UC-09 | List clusters with available OCP upgrades |
 | `acm_upgrade_set_channel` | UC-09 | Set OCP update channel via ManifestWork |
 | `acm_upgrade_start` | UC-09 | Start OCP version upgrade via ManifestWork |
 | `acm_upgrade_history` | UC-09 | Version upgrade history with state and timestamps |
+| `acm_configure_idp` | UC-12 | Configure Identity Provider on a cluster via ManifestWork |
+| `acm_remove_idp` | UC-12 | Remove Identity Provider from a cluster |
+| `acm_list_idps` | UC-12 | List Identity Providers configured on a cluster |
+| `acm_rotate_idp` | UC-12 | Rotate credentials for an Identity Provider |
+| `acm_configure_unique_idp` | UC-16 | Deploy unique emergency credentials to a cluster |
+| `acm_enforce_sso` | UC-16 | Create fleet-wide SSO compliance policy |
+| `acm_apply_quota_policy` | UC-15 | Apply resource quota enforcement policy to a cluster |
+| `acm_quota_status` | UC-15 | Check quota compliance for a cluster |
+| `acm_create_pool` | UC-25 | Create a Hive ClusterPool for pre-warmed clusters |
+| `acm_list_pools` | UC-25 | List all ClusterPools with size and status |
+| `acm_get_pool` | UC-25 | Get detailed ClusterPool info |
+| `acm_delete_pool` | UC-25 | Delete a ClusterPool |
+| `acm_create_claim` | UC-25 | Claim a cluster from a pool for instant access |
+| `acm_release_claim` | UC-25 | Release a claimed cluster back to the pool |
+| `acm_list_claims` | UC-25 | List all ClusterClaims |
