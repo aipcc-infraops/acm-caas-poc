@@ -26,6 +26,9 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
 	"github.com/pablofelix/acm-caas-poc/internal/access"
+	"github.com/pablofelix/acm-caas-poc/internal/automation"
+	"github.com/pablofelix/acm-caas-poc/internal/backup"
+	"github.com/pablofelix/acm-caas-poc/internal/gitops"
 	"github.com/pablofelix/acm-caas-poc/internal/pool"
 	"github.com/pablofelix/acm-caas-poc/internal/rollout"
 	"github.com/pablofelix/acm-caas-poc/internal/security"
@@ -90,6 +93,15 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	accessMgr := access.New(c, cfg, log)
 	registerAccessTools(s, accessMgr)
+
+	backupMgr := backup.New(c, cfg, log)
+	registerBackupTools(s, backupMgr)
+
+	autoMgr := automation.New(c, cfg, log)
+	registerAutomationTools(s, autoMgr)
+
+	gitopsMgr := gitops.New(c, cfg, log)
+	registerGitOpsTools(s, gitopsMgr)
 
 	return s
 }

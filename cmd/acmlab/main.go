@@ -70,6 +70,8 @@ func main() {
 	root.AddCommand(securityCmd())
 	root.AddCommand(rolloutCmd())
 	root.AddCommand(accessCmd())
+	root.AddCommand(backupCmd())
+	root.AddCommand(gitopsCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {
