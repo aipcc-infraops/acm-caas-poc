@@ -605,7 +605,9 @@ Outputs actionable suggestions when problems are found.`,
 }
 
 func lifecycleListCmd() *cobra.Command {
-	return &cobra.Command{
+	var outputJSON bool
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all clusters that support lifecycle operations",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -627,6 +629,12 @@ func lifecycleListCmd() *cobra.Command {
 				return nil
 			}
 
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+
 			fmt.Printf("Clusters with lifecycle support (%d):\n", len(clusters))
 			for _, cluster := range clusters {
 				fmt.Printf("  - %s\n", cluster)
@@ -635,4 +643,6 @@ func lifecycleListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
 }

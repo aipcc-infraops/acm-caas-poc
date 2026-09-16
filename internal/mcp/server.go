@@ -267,8 +267,12 @@ func registerPolicyTools(s *server.MCPServer, pol *policy.Manager) {
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			name, _ := req.RequireString("name")
 			ns, _ := req.GetArguments()["namespace"].(string)
-			if err := pol.Remove(ctx, name, ns); err != nil {
+			removed, err := pol.Remove(ctx, name, ns)
+			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if !removed {
+				return mcp.NewToolResultText(fmt.Sprintf("Policy %s not found (nothing to remove)", name)), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("Policy %s removed successfully", name)), nil
 		},
@@ -381,8 +385,12 @@ func registerTenantTools(s *server.MCPServer, ten *tenant.Manager) {
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			name, _ := req.RequireString("name")
 			cluster, _ := req.RequireString("cluster")
-			if err := ten.Remove(ctx, name, cluster); err != nil {
+			removed, err := ten.Remove(ctx, name, cluster)
+			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if !removed {
+				return mcp.NewToolResultText(fmt.Sprintf("Tenant %s not found on %s (nothing to remove)", name, cluster)), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("Tenant %s removed from %s", name, cluster)), nil
 		},

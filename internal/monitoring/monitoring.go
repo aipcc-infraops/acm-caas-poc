@@ -48,7 +48,11 @@ func (m *Monitor) GetClusterResources(ctx context.Context, name string) (*Cluste
 	if err != nil {
 		return nil, fmt.Errorf("getting ManagedClusterInfo %s: %w", name, err)
 	}
-	return parseClusterResources(name, obj.Object), nil
+	cr := parseClusterResources(name, obj.Object)
+	if cr.OCPVersion == "" {
+		m.enrichOCPVersionFromManagedCluster(ctx, name, cr)
+	}
+	return cr, nil
 }
 
 func (m *Monitor) ListClusterResources(ctx context.Context) ([]ClusterResources, error) {
@@ -62,9 +66,23 @@ func (m *Monitor) ListClusterResources(ctx context.Context) ([]ClusterResources,
 	for _, item := range list.Items {
 		name := item.GetName()
 		cr := parseClusterResources(name, item.Object)
+		if cr.OCPVersion == "" {
+			m.enrichOCPVersionFromManagedCluster(ctx, name, cr)
+		}
 		results = append(results, *cr)
 	}
 	return results, nil
+}
+
+func (m *Monitor) enrichOCPVersionFromManagedCluster(ctx context.Context, name string, cr *ClusterResources) {
+	mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", name)
+	if err != nil {
+		return
+	}
+	labels := mc.GetLabels()
+	if v, ok := labels["openshiftVersion"]; ok {
+		cr.OCPVersion = v
+	}
 }
 
 func parseClusterResources(name string, obj map[string]interface{}) *ClusterResources {

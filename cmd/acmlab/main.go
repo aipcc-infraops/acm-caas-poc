@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -38,6 +39,10 @@ func main() {
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if verbose {
 				logLevel.Set(slog.LevelDebug)
+			}
+			if jsonFlag, _ := cmd.Flags().GetBool("json"); jsonFlag {
+				logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+				slog.SetDefault(logger)
 			}
 		},
 	}
