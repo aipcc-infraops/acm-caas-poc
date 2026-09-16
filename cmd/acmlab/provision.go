@@ -252,7 +252,8 @@ func provisionStatusCmd() *cobra.Command {
 }
 
 func provisionListCmd() *cobra.Command {
-	return &cobra.Command{
+	var outputJSON bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List clusters provisioned via acmlab",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -269,6 +270,11 @@ func provisionListCmd() *cobra.Command {
 				fmt.Println("No clusters provisioned via acmlab")
 				return nil
 			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
 			fmt.Printf("%-20s %-25s %-12s %-10s %s\n", "NAME", "DOMAIN", "REGION", "INSTALLED", "IMAGE SET")
 			for _, c := range clusters {
 				fmt.Printf("%-20s %-25s %-12s %-10v %s\n", c.Name, c.BaseDomain, c.Region, c.Installed, c.ImageSet)
@@ -276,6 +282,8 @@ func provisionListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
 }
 
 func provisionImageSetsCmd() *cobra.Command {

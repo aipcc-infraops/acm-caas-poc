@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -693,7 +694,12 @@ func TestRegistryConfigureMirrorViaMCP(t *testing.T) {
 }
 
 func TestRegistryMirrorStatusNotConfiguredViaMCP(t *testing.T) {
-	c := fakeClientWithClusters()
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "cluster.open-cluster-management.io", Version: "v1", Kind: "ManagedCluster",
+	})
+	mc.SetName("my-cluster")
+	c := fakeClientWithClusters(mc)
 	resp := callTool(t, c, "acm_registry_mirror_status", map[string]interface{}{
 		"cluster": "my-cluster",
 	})
@@ -704,6 +710,20 @@ func TestRegistryMirrorStatusNotConfiguredViaMCP(t *testing.T) {
 	}
 	if status["configured"] != false {
 		t.Errorf("configured = %v, want false", status["configured"])
+	}
+}
+
+func TestRegistryMirrorStatusNonexistentClusterViaMCP(t *testing.T) {
+	c := fakeClientWithClusters()
+	resp := callTool(t, c, "acm_registry_mirror_status", map[string]interface{}{
+		"cluster": "nonexistent",
+	})
+	text, isError := extractToolResult(t, resp)
+	if !isError {
+		t.Error("expected error for nonexistent cluster")
+	}
+	if !strings.Contains(text, "not found") {
+		t.Errorf("expected not-found error, got: %s", text)
 	}
 }
 

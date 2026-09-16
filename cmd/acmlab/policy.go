@@ -182,10 +182,15 @@ func policyRemoveCmd() *cobra.Command {
 			}
 			mgr := policy.New(c, cfg, logger)
 			fmt.Printf("Removing policy %s...\n", args[0])
-			if err := mgr.Remove(context.Background(), args[0], namespace); err != nil {
+			removed, err := mgr.Remove(context.Background(), args[0], namespace)
+			if err != nil {
 				return err
 			}
-			fmt.Println("Policy removed. All resources cleaned up.")
+			if removed {
+				fmt.Println("Policy removed. All resources cleaned up.")
+			} else {
+				fmt.Printf("Policy %s not found (nothing to remove)\n", args[0])
+			}
 			return nil
 		},
 	}

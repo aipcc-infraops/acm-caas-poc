@@ -477,7 +477,7 @@ func TestRemovePolicyViaMCP(t *testing.T) {
 		"name": "nonexistent",
 	})
 	text := extractToolText(t, resp)
-	if text != "Policy nonexistent removed successfully" {
+	if text != "Policy nonexistent not found (nothing to remove)" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }
@@ -553,7 +553,7 @@ func TestRemoveTenantViaMCP(t *testing.T) {
 		"cluster": "hub-cluster",
 	})
 	text := extractToolText(t, resp)
-	if text != "Tenant nonexistent removed from hub-cluster" {
+	if text != "Tenant nonexistent not found on hub-cluster (nothing to remove)" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }
