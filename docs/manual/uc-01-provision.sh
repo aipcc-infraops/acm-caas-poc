@@ -7,7 +7,7 @@
 #
 # Prerequisites:
 #   - oc/kubectl logged into the ACM hub
-#   - Pull secret file (from cloud.redhat.com)
+#   - Pull secret file (from console.example.com)
 #   - Cloud credentials (IBM Cloud API key, AWS keys, etc.)
 #   - SSH key pair for node access
 #

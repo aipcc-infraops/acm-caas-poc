@@ -234,6 +234,137 @@ Removes an Identity Provider from a cluster.
 Options:
 - `--cluster` — target cluster (required)
 
+#### `acmlab idp configure-unique`
+
+Deploys unique emergency htpasswd credentials to a cluster. Generates a cryptographically random password, creates an htpasswd IdP named `emergency-<cluster>`, and stores a rotation timestamp.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--admin-user` — admin username (default: cluster-admin)
+
+```
+$ acmlab idp configure-unique --cluster spoke1 --admin-user cluster-admin
+Unique IdP configured on spoke1
+Admin user: cluster-admin
+Password: <generated-password>
+Save this password — it will not be shown again.
+```
+
+#### `acmlab idp enforce-sso`
+
+Creates a fleet-wide compliance policy that marks clusters without an OpenID (SSO) IdP as NonCompliant.
+
+Options:
+- `--namespace` — policy namespace (default: global-set)
+
+```
+$ acmlab idp enforce-sso
+SSO enforcement policy created
+```
+
+### Resource Quota
+
+#### `acmlab policy apply-quota`
+
+Stamps quota labels on a ManagedCluster and creates a ConfigurationPolicy to monitor compliance.
+
+Options:
+- `--cluster` — target cluster (required)
+- `--max-workers` — maximum worker nodes allowed
+- `--max-gpus` — maximum GPU nodes allowed
+
+```
+$ acmlab policy apply-quota --cluster spoke1 --max-workers 5 --max-gpus 1
+Quota policy applied to spoke1 (max-workers=5, max-gpus=1)
+```
+
+#### `acmlab policy quota-status <cluster>`
+
+Shows quota labels and compliance status for a cluster.
+
+```
+$ acmlab policy quota-status spoke1
+Cluster:     spoke1
+Max Workers: 5
+Max GPUs:    1
+Compliant:   true
+```
+
+### ClusterPool
+
+#### `acmlab pool create <name>`
+
+Creates a Hive ClusterPool for pre-warmed cluster access. Clusters are provisioned and hibernated, ready for instant claiming.
+
+Options:
+- `--size` — number of ready clusters (default: 3)
+- `--platform` — cloud platform: ibmcloud, aws, gcp, azure
+- `--region` — cloud region
+- `--image-set` — ClusterImageSet name
+- `--base-domain` — base domain for clusters
+- `--namespace` — pool namespace (default: pool name)
+
+```
+$ acmlab pool create amd64-419 --size 3 --image-set img4.19-multi --platform ibmcloud --region us-south --base-domain example.com
+ClusterPool amd64-419 created (size=3)
+```
+
+#### `acmlab pool list`
+
+Lists all ClusterPools with size, ready count, and claimed count.
+
+```
+$ acmlab pool list
+NAME             SIZE  READY  CLAIMED  STANDBY
+amd64-419        3     2      1        0
+```
+
+#### `acmlab pool get <name>`
+
+Shows detailed ClusterPool info.
+
+Options:
+- `--namespace` — pool namespace (default: pool name)
+- `--json` — output as JSON
+
+#### `acmlab pool delete <name>`
+
+Deletes a ClusterPool and all its clusters.
+
+Options:
+- `--namespace` — pool namespace (default: pool name)
+
+### ClusterClaim
+
+#### `acmlab claim create <pool-name>`
+
+Claims a pre-warmed cluster from a pool for instant access.
+
+Options:
+- `--name` — claim name (auto-generated if not provided)
+- `--namespace` — pool namespace (default: pool name)
+- `--ttl` — time-to-live for the claim (e.g., 48h)
+
+```
+$ acmlab claim create amd64-419 --name my-test --ttl 48h
+ClusterClaim my-test created from pool amd64-419
+```
+
+#### `acmlab claim list`
+
+Lists all ClusterClaims with their status and bound cluster.
+
+Options:
+- `--namespace` — filter by namespace
+- `--json` — output as JSON
+
+#### `acmlab claim release <name>`
+
+Releases a claimed cluster back to the pool.
+
+Options:
+- `--namespace` — claim namespace (default: claim name)
+
 ### Scaling
 
 #### `acmlab scaling get <cluster>`
@@ -838,3 +969,14 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_remove_idp` | UC-12 | Remove Identity Provider from a cluster |
 | `acm_list_idps` | UC-12 | List Identity Providers configured on a cluster |
 | `acm_rotate_idp` | UC-12 | Rotate credentials for an Identity Provider |
+| `acm_configure_unique_idp` | UC-16 | Deploy unique emergency credentials to a cluster |
+| `acm_enforce_sso` | UC-16 | Create fleet-wide SSO compliance policy |
+| `acm_apply_quota_policy` | UC-15 | Apply resource quota enforcement policy to a cluster |
+| `acm_quota_status` | UC-15 | Check quota compliance for a cluster |
+| `acm_create_pool` | UC-25 | Create a Hive ClusterPool for pre-warmed clusters |
+| `acm_list_pools` | UC-25 | List all ClusterPools with size and status |
+| `acm_get_pool` | UC-25 | Get detailed ClusterPool info |
+| `acm_delete_pool` | UC-25 | Delete a ClusterPool |
+| `acm_create_claim` | UC-25 | Claim a cluster from a pool for instant access |
+| `acm_release_claim` | UC-25 | Release a claimed cluster back to the pool |
+| `acm_list_claims` | UC-25 | List all ClusterClaims |

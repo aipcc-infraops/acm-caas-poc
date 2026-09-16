@@ -78,4 +78,10 @@ var (
 	GVRCertificatePolicy = schema.GroupVersionResource{
 		Group: "policy.open-cluster-management.io", Version: "v1", Resource: "certificatepolicies",
 	}
+	GVRClusterPool = schema.GroupVersionResource{
+		Group: "hive.openshift.io", Version: "v1", Resource: "clusterpools",
+	}
+	GVRClusterClaim = schema.GroupVersionResource{
+		Group: "hive.openshift.io", Version: "v1", Resource: "clusterclaims",
+	}
 )

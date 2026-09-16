@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -170,6 +171,145 @@ func (m *Manager) Rotate(ctx context.Context, idpName, cluster string, newOpts I
 	if err != nil {
 		return fmt.Errorf("patching idp manifestwork %s: %w", idpName, err)
 	}
+	return nil
+}
+
+func (m *Manager) ConfigureUnique(ctx context.Context, cluster, adminUser string) (string, error) {
+	m.logger.Info("idp.ConfigureUnique", "cluster", cluster, "adminUser", adminUser)
+
+	password, err := generatePassword(24)
+	if err != nil {
+		return "", fmt.Errorf("generating password: %w", err)
+	}
+
+	opts := buildUniqueHTPasswdOpts(cluster, adminUser, password)
+	if err := m.Configure(ctx, opts); err != nil {
+		return "", fmt.Errorf("configuring unique IdP on %s: %w", cluster, err)
+	}
+
+	annotation := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": map[string]interface{}{
+				"acmlab.redhat.com/last-rotation": time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+	}
+	data, _ := json.Marshal(annotation)
+	_, _ = m.client.Patch(ctx, client.GVRManifestWork, cluster, manifestWorkName(opts.Name), types.MergePatchType, data)
+
+	return password, nil
+}
+
+func (m *Manager) EnforceSSO(ctx context.Context, namespace string) error {
+	m.logger.Info("idp.EnforceSSO")
+	if namespace == "" {
+		namespace = "open-cluster-management-global-set"
+	}
+
+	policyName := "sso-enforcement"
+	placementName := policyName + "-placement"
+	bindingName := policyName + "-placement-binding"
+
+	placement := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1beta1",
+			"kind":       "Placement",
+			"metadata": map[string]interface{}{
+				"name":      placementName,
+				"namespace": namespace,
+			},
+			"spec": map[string]interface{}{
+				"tolerations": []interface{}{
+					map[string]interface{}{
+						"key":      "cluster.open-cluster-management.io/unreachable",
+						"operator": "Exists",
+					},
+				},
+			},
+		},
+	}
+	if err := m.client.CreateIfNotExists(ctx, client.GVRPlacement, namespace, placement); err != nil {
+		return fmt.Errorf("creating SSO placement: %w", err)
+	}
+
+	pol := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1",
+			"kind":       "Policy",
+			"metadata": map[string]interface{}{
+				"name":      policyName,
+				"namespace": namespace,
+			},
+			"spec": map[string]interface{}{
+				"disabled":          false,
+				"remediationAction": "inform",
+				"policy-templates": []interface{}{
+					map[string]interface{}{
+						"objectDefinition": map[string]interface{}{
+							"apiVersion": "policy.open-cluster-management.io/v1",
+							"kind":       "ConfigurationPolicy",
+							"metadata": map[string]interface{}{
+								"name": "sso-enforcement-config",
+							},
+							"spec": map[string]interface{}{
+								"remediationAction": "inform",
+								"severity":          "high",
+								"object-templates": []interface{}{
+									map[string]interface{}{
+										"complianceType": "musthave",
+										"objectDefinition": map[string]interface{}{
+											"apiVersion": "config.openshift.io/v1",
+											"kind":       "OAuth",
+											"metadata": map[string]interface{}{
+												"name": "cluster",
+											},
+											"spec": map[string]interface{}{
+												"identityProviders": []interface{}{
+													map[string]interface{}{
+														"type": "OpenID",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := m.client.CreateIfNotExists(ctx, client.GVRPolicy, namespace, pol); err != nil {
+		return fmt.Errorf("creating SSO policy: %w", err)
+	}
+
+	binding := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1",
+			"kind":       "PlacementBinding",
+			"metadata": map[string]interface{}{
+				"name":      bindingName,
+				"namespace": namespace,
+			},
+			"placementRef": map[string]interface{}{
+				"apiGroup": "cluster.open-cluster-management.io",
+				"kind":     "Placement",
+				"name":     placementName,
+			},
+			"subjects": []interface{}{
+				map[string]interface{}{
+					"apiGroup": "policy.open-cluster-management.io",
+					"kind":     "Policy",
+					"name":     policyName,
+				},
+			},
+		},
+	}
+	if err := m.client.CreateIfNotExists(ctx, client.GVRPlacementBinding, namespace, binding); err != nil {
+		return fmt.Errorf("creating SSO placement binding: %w", err)
+	}
+
 	return nil
 }
 
