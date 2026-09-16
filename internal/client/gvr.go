@@ -93,4 +93,19 @@ var (
 	GVRManagedClusterAddOn = schema.GroupVersionResource{
 		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "managedclusteraddons",
 	}
+	GVRPolicyAutomation = schema.GroupVersionResource{
+		Group: "policy.open-cluster-management.io", Version: "v1beta1", Resource: "policyautomations",
+	}
+	GVRApplicationSet = schema.GroupVersionResource{
+		Group: "argoproj.io", Version: "v1alpha1", Resource: "applicationsets",
+	}
+	GVRApplication = schema.GroupVersionResource{
+		Group: "argoproj.io", Version: "v1alpha1", Resource: "applications",
+	}
+	GVRBackupSchedule = schema.GroupVersionResource{
+		Group: "cluster.open-cluster-management.io", Version: "v1beta1", Resource: "backupschedules",
+	}
+	GVRRestore = schema.GroupVersionResource{
+		Group: "cluster.open-cluster-management.io", Version: "v1beta1", Resource: "restores",
+	}
 )
