@@ -87,6 +87,15 @@ func (m *Manager) GetUpgradeStatus(ctx context.Context, clusterName string) (*Up
 		}
 	}
 
+	if status.CurrentVersion == "" {
+		mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", clusterName)
+		if err == nil {
+			if v, ok := mc.GetLabels()["openshiftVersion"]; ok {
+				status.CurrentVersion = v
+			}
+		}
+	}
+
 	if method == UpgradeMethodHive {
 		m.fillHiveDesiredVersion(ctx, clusterName, status)
 	}
