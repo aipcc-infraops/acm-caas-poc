@@ -25,7 +25,10 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
+	"github.com/pablofelix/acm-caas-poc/internal/access"
 	"github.com/pablofelix/acm-caas-poc/internal/pool"
+	"github.com/pablofelix/acm-caas-poc/internal/rollout"
+	"github.com/pablofelix/acm-caas-poc/internal/security"
 	"github.com/pablofelix/acm-caas-poc/internal/upgrade"
 )
 
@@ -78,6 +81,15 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	poolMgr := pool.New(c, cfg, log)
 	registerPoolTools(s, poolMgr)
+
+	secMgr := security.New(c, cfg, log)
+	registerSecurityTools(s, secMgr)
+
+	rolloutMgr := rollout.New(c, cfg, log)
+	registerRolloutTools(s, rolloutMgr)
+
+	accessMgr := access.New(c, cfg, log)
+	registerAccessTools(s, accessMgr)
 
 	return s
 }

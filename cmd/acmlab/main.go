@@ -67,6 +67,9 @@ func main() {
 	root.AddCommand(idpCmd())
 	root.AddCommand(poolCmd())
 	root.AddCommand(claimCmd())
+	root.AddCommand(securityCmd())
+	root.AddCommand(rolloutCmd())
+	root.AddCommand(accessCmd())
 	root.AddCommand(mcpCmd())
 
 	if err := root.Execute(); err != nil {

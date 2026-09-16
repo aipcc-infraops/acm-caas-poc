@@ -84,4 +84,13 @@ var (
 	GVRClusterClaim = schema.GroupVersionResource{
 		Group: "hive.openshift.io", Version: "v1", Resource: "clusterclaims",
 	}
+	GVRManifestWorkReplicaSet = schema.GroupVersionResource{
+		Group: "work.open-cluster-management.io", Version: "v1alpha1", Resource: "manifestworkreplicasets",
+	}
+	GVRManagedServiceAccount = schema.GroupVersionResource{
+		Group: "authentication.open-cluster-management.io", Version: "v1beta1", Resource: "managedserviceaccounts",
+	}
+	GVRManagedClusterAddOn = schema.GroupVersionResource{
+		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "managedclusteraddons",
+	}
 )
