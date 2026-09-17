@@ -1004,92 +1004,60 @@ Lists all security baselines deployed across the fleet.
 
 Removes the security baseline ManifestWork from a cluster.
 
-#### `acmlab security apply-rego`
+#### `acmlab security apply-policy`
 
-Deploys a custom Rego policy to a cluster via Gatekeeper. Reads a `.rego` file, extracts the package name, builds a ConstraintTemplate + Constraint, and pushes via ManifestWork.
+Deploys a custom admission policy to a spoke cluster via ManifestWork. Supports both Gatekeeper (Rego) and Kyverno (YAML) engines. The engine is auto-detected from file extension (`.rego` = Gatekeeper, `.yaml`/`.yml` = Kyverno) or set explicitly with `--engine`.
 
-*Source: `cmd/acmlab/security.go`: `securityApplyRegoCmd()`*
-
-Options:
-- `--cluster`: target cluster name (required)
-- `--rego-file`: path to `.rego` file (required)
-- `--name`: policy name (defaults to package name from Rego)
-- `--match`: Kubernetes kinds to match (default: Pod)
-
-```
-$ acmlab security apply-rego --cluster spoke1 --rego-file deny-latest.rego
-Applying custom Rego policy from deny-latest.rego to spoke1...
-Custom Rego policy deployed via ManifestWork.
-```
-
-#### `acmlab security list-rego`
-
-Lists all custom Rego policies deployed across the fleet.
-
-*Source: `cmd/acmlab/security.go`: `securityListRegoCmd()`*
-
-Options:
-- `--json`: output as JSON
-
-#### `acmlab security remove-rego <name>`
-
-Removes a custom Rego policy from a cluster.
-
-*Source: `cmd/acmlab/security.go`: `securityRemoveRegoCmd()`*
+*Source: `cmd/acmlab/security.go`: `securityApplyPolicyCmd()`*
 
 Options:
 - `--cluster`: target cluster name (required)
+- `--policy-file`: path to policy file — `.rego` or `.yaml` (required)
+- `--name`: policy name (auto-detected from file if omitted)
+- `--engine`: policy engine: gatekeeper, kyverno (auto-detected from extension)
+- `--match`: Kubernetes kinds to match (Gatekeeper only, default: Pod)
 
 ```
-$ acmlab security remove-rego deny_latest --cluster spoke1
-Custom Rego policy deny_latest removed from spoke1
-```
+$ acmlab security apply-policy --cluster spoke1 --policy-file deny-latest.rego
+Applying Gatekeeper policy from deny-latest.rego to spoke1...
+Gatekeeper policy deployed via ManifestWork.
 
-#### `acmlab security apply-kyverno`
-
-Applies a Kyverno ClusterPolicy to a spoke cluster via ManifestWork. Reads a YAML file containing the ClusterPolicy and wraps it for delivery.
-
-*Source: `cmd/acmlab/security.go`: `securityApplyKyvernoCmd()`*
-
-Options:
-- `--cluster`: target cluster name (required)
-- `--policy-file`: path to Kyverno ClusterPolicy YAML (required)
-- `--name`: policy name (defaults to metadata.name in YAML)
-
-```
-$ acmlab security apply-kyverno --cluster spoke1 --policy-file disallow-latest.yaml
-Applying Kyverno policy from disallow-latest.yaml to spoke1...
+$ acmlab security apply-policy --cluster spoke1 --policy-file gpu-limits.yaml
+Applying Kyverno policy from gpu-limits.yaml to spoke1...
 Kyverno ClusterPolicy deployed via ManifestWork.
 ```
 
-#### `acmlab security list-kyverno`
+#### `acmlab security list-policies`
 
-Lists all Kyverno policies deployed across the fleet.
+Lists all custom policies (Gatekeeper and Kyverno) deployed across the fleet.
 
-*Source: `cmd/acmlab/security.go`: `securityListKyvernoCmd()`*
+*Source: `cmd/acmlab/security.go`: `securityListPoliciesCmd()`*
 
 Options:
+- `--engine`: filter by engine: gatekeeper, kyverno (default: all)
 - `--json`: output as JSON
 
 ```
-$ acmlab security list-kyverno
-CLUSTER                   POLICY               STATUS
-spoke1                    disallow-latest      Applied
-spoke2                    gpu-resource-limits  Pending
+$ acmlab security list-policies
+ENGINE       CLUSTER                   POLICY               STATUS
+gatekeeper   spoke1                    deny-latest          Applied
+kyverno      spoke1                    disallow-latest      Applied
+kyverno      spoke2                    gpu-resource-limits  Pending
 ```
 
-#### `acmlab security remove-kyverno <name>`
+#### `acmlab security remove-policy <name>`
 
-Removes a Kyverno policy from a cluster.
+Removes a custom policy from a cluster.
 
-*Source: `cmd/acmlab/security.go`: `securityRemoveKyvernoCmd()`*
+*Source: `cmd/acmlab/security.go`: `securityRemovePolicyCmd()`*
 
 Options:
 - `--cluster`: target cluster name (required)
+- `--engine`: policy engine: gatekeeper, kyverno (required)
 
 ```
-$ acmlab security remove-kyverno disallow-latest --cluster spoke1
-Kyverno policy disallow-latest removed from spoke1
+$ acmlab security remove-policy deny_latest --cluster spoke1 --engine gatekeeper
+Policy deny_latest removed from spoke1
 ```
 
 ### GitOps
