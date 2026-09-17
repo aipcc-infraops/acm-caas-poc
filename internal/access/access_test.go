@@ -497,7 +497,7 @@ func TestDisableProxyNotFound(t *testing.T) {
 }
 
 func TestGetProxyStatusEnabled(t *testing.T) {
-	mgr := newManager(proxyAddonHealthy("spoke1"))
+	mgr := newManager(managedClusterObj("spoke1"), proxyAddonHealthy("spoke1"))
 	status, err := mgr.GetProxyStatus(context.Background(), "spoke1")
 	if err != nil {
 		t.Fatalf("GetProxyStatus failed: %v", err)
@@ -514,7 +514,7 @@ func TestGetProxyStatusEnabled(t *testing.T) {
 }
 
 func TestGetProxyStatusDisabled(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("spoke1"))
 	status, err := mgr.GetProxyStatus(context.Background(), "spoke1")
 	if err != nil {
 		t.Fatalf("GetProxyStatus failed: %v", err)
