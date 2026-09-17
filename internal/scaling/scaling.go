@@ -312,6 +312,155 @@ func (m *Manager) ListMachinePools(ctx context.Context) ([]MachinePoolInfo, erro
 	return infos, nil
 }
 
+type NodePoolInfo struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Replicas  *int64 `json:"replicas,omitempty"`
+	Platform  string `json:"platform,omitempty"`
+}
+
+type MachineDeploymentInfo struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Replicas  *int64 `json:"replicas,omitempty"`
+}
+
+func (m *Manager) GetNodePool(ctx context.Context, clusterName string) (*NodePoolInfo, error) {
+	m.logger.Info("scaling.GetNodePool", "cluster", clusterName)
+	for _, ns := range []string{"clusters", clusterName} {
+		list, err := m.client.List(ctx, client.GVRNodePool, ns, "")
+		if err != nil {
+			continue
+		}
+		for i := range list.Items {
+			np := &list.Items[i]
+			spec, _, _ := unstructured.NestedString(np.Object, "spec", "clusterName")
+			if spec == clusterName || np.GetNamespace() == clusterName {
+				return nodePoolInfoFromUnstructured(np), nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no NodePool found for cluster %s", clusterName)
+}
+
+func (m *Manager) GetMachineDeployment(ctx context.Context, clusterName string) (*MachineDeploymentInfo, error) {
+	m.logger.Info("scaling.GetMachineDeployment", "cluster", clusterName)
+	for _, ns := range []string{clusterName, "default"} {
+		list, err := m.client.List(ctx, client.GVRCAPIMachineDeployment, ns, "")
+		if err != nil {
+			continue
+		}
+		for i := range list.Items {
+			md := &list.Items[i]
+			clusterLabel, _, _ := unstructured.NestedString(md.Object, "metadata", "labels", "cluster.x-k8s.io/cluster-name")
+			if clusterLabel == clusterName || md.GetNamespace() == clusterName {
+				return machineDeploymentInfoFromUnstructured(md), nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no CAPI MachineDeployment found for cluster %s", clusterName)
+}
+
+func (m *Manager) SetNodePoolReplicas(ctx context.Context, clusterName string, replicas int) error {
+	m.logger.Info("scaling.SetNodePoolReplicas", "cluster", clusterName, "replicas", replicas)
+	np, err := m.GetNodePool(ctx, clusterName)
+	if err != nil {
+		return err
+	}
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"replicas": int64(replicas),
+		},
+	}
+	data, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshaling patch: %w", err)
+	}
+	_, err = m.client.Patch(ctx, client.GVRNodePool, np.Namespace, np.Name, types.MergePatchType, data)
+	if err != nil {
+		return fmt.Errorf("patching NodePool %s/%s replicas: %w", np.Namespace, np.Name, err)
+	}
+	return nil
+}
+
+func (m *Manager) SetMachineDeploymentReplicas(ctx context.Context, clusterName string, replicas int) error {
+	m.logger.Info("scaling.SetMachineDeploymentReplicas", "cluster", clusterName, "replicas", replicas)
+	md, err := m.GetMachineDeployment(ctx, clusterName)
+	if err != nil {
+		return err
+	}
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"replicas": int64(replicas),
+		},
+	}
+	data, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshaling patch: %w", err)
+	}
+	_, err = m.client.Patch(ctx, client.GVRCAPIMachineDeployment, md.Namespace, md.Name, types.MergePatchType, data)
+	if err != nil {
+		return fmt.Errorf("patching MachineDeployment %s/%s replicas: %w", md.Namespace, md.Name, err)
+	}
+	return nil
+}
+
+// SetReplicasAuto tries MachinePool, then NodePool, then CAPI MachineDeployment.
+func (m *Manager) SetReplicasAuto(ctx context.Context, clusterName string, replicas int) error {
+	m.logger.Info("scaling.SetReplicasAuto", "cluster", clusterName, "replicas", replicas)
+	err := m.SetReplicas(ctx, clusterName, replicas)
+	if err == nil {
+		return nil
+	}
+	var noMP *ErrNoMachinePool
+	if !isNoMachinePool(err, &noMP) {
+		return err
+	}
+
+	if npErr := m.SetNodePoolReplicas(ctx, clusterName, replicas); npErr == nil {
+		return nil
+	}
+
+	if mdErr := m.SetMachineDeploymentReplicas(ctx, clusterName, replicas); mdErr == nil {
+		return nil
+	}
+
+	return err
+}
+
+func isNoMachinePool(err error, target **ErrNoMachinePool) bool {
+	e, ok := err.(*ErrNoMachinePool)
+	if ok && target != nil {
+		*target = e
+	}
+	return ok
+}
+
+func nodePoolInfoFromUnstructured(np *unstructured.Unstructured) *NodePoolInfo {
+	info := &NodePoolInfo{
+		Name:      np.GetName(),
+		Namespace: np.GetNamespace(),
+	}
+	if replicas, found, err := unstructured.NestedInt64(np.Object, "spec", "replicas"); err == nil && found {
+		info.Replicas = &replicas
+	}
+	if pt, found, err := unstructured.NestedString(np.Object, "spec", "platform", "type"); err == nil && found {
+		info.Platform = pt
+	}
+	return info
+}
+
+func machineDeploymentInfoFromUnstructured(md *unstructured.Unstructured) *MachineDeploymentInfo {
+	info := &MachineDeploymentInfo{
+		Name:      md.GetName(),
+		Namespace: md.GetNamespace(),
+	}
+	if replicas, found, err := unstructured.NestedInt64(md.Object, "spec", "replicas"); err == nil && found {
+		info.Replicas = &replicas
+	}
+	return info
+}
+
 func coalesce(s, fallback string) string {
 	if s == "" {
 		return fallback

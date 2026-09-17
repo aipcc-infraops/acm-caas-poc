@@ -23,9 +23,11 @@ var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // gvrKinds maps all GVRs we use to their list kind strings for the fake client.
 var gvrKinds = map[schema.GroupVersionResource]string{
-	client.GVRMachinePool:        "MachinePoolList",
-	client.GVRClusterDeployment:  "ClusterDeploymentList",
-	client.GVRManagedClusterInfo: "ManagedClusterInfoList",
+	client.GVRMachinePool:           "MachinePoolList",
+	client.GVRClusterDeployment:     "ClusterDeploymentList",
+	client.GVRManagedClusterInfo:    "ManagedClusterInfoList",
+	client.GVRNodePool:              "NodePoolList",
+	client.GVRCAPIMachineDeployment: "MachineDeploymentList",
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -948,4 +950,308 @@ func isErrNoMachinePool(err error, target **ErrNoMachinePool) bool {
 		*target = e
 	}
 	return ok
+}
+
+// ----- NodePool / MachineDeployment helpers -----
+
+func nodePool(name, namespace, clusterName string, replicas int64) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "hypershift.openshift.io/v1beta1",
+			"kind":       "NodePool",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": map[string]interface{}{
+				"clusterName": clusterName,
+				"replicas":    replicas,
+				"platform": map[string]interface{}{
+					"type": "AWS",
+				},
+			},
+		},
+	}
+}
+
+func capiMachineDeployment(name, namespace, clusterLabel string, replicas int64) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.x-k8s.io/v1beta1",
+			"kind":       "MachineDeployment",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"cluster.x-k8s.io/cluster-name": clusterLabel,
+				},
+			},
+			"spec": map[string]interface{}{
+				"replicas": replicas,
+			},
+		},
+	}
+}
+
+// ===== GetNodePool =====
+
+func TestGetNodePoolSuccess(t *testing.T) {
+	np := nodePool("c1-workers", "clusters", "c1", 3)
+	mgr := newManager(np)
+
+	info, err := mgr.GetNodePool(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.Name != "c1-workers" {
+		t.Errorf("Name = %q, want %q", info.Name, "c1-workers")
+	}
+	if info.Replicas == nil || *info.Replicas != 3 {
+		t.Errorf("Replicas = %v, want 3", info.Replicas)
+	}
+	if info.Platform != "AWS" {
+		t.Errorf("Platform = %q, want %q", info.Platform, "AWS")
+	}
+}
+
+func TestGetNodePoolFallbackNamespace(t *testing.T) {
+	np := nodePool("c1-workers", "c1", "c1", 2)
+	mgr := newManager(np)
+
+	info, err := mgr.GetNodePool(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.Namespace != "c1" {
+		t.Errorf("Namespace = %q, want %q", info.Namespace, "c1")
+	}
+}
+
+func TestGetNodePoolNotFound(t *testing.T) {
+	mgr := newManager()
+
+	_, err := mgr.GetNodePool(context.Background(), "c1")
+	if err == nil {
+		t.Fatal("expected error for missing NodePool")
+	}
+	if !strings.Contains(err.Error(), "no NodePool found") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ===== GetMachineDeployment =====
+
+func TestGetMachineDeploymentSuccess(t *testing.T) {
+	md := capiMachineDeployment("c1-md-0", "c1", "c1", 3)
+	mgr := newManager(md)
+
+	info, err := mgr.GetMachineDeployment(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.Name != "c1-md-0" {
+		t.Errorf("Name = %q, want %q", info.Name, "c1-md-0")
+	}
+	if info.Replicas == nil || *info.Replicas != 3 {
+		t.Errorf("Replicas = %v, want 3", info.Replicas)
+	}
+}
+
+func TestGetMachineDeploymentNotFound(t *testing.T) {
+	mgr := newManager()
+
+	_, err := mgr.GetMachineDeployment(context.Background(), "c1")
+	if err == nil {
+		t.Fatal("expected error for missing MachineDeployment")
+	}
+	if !strings.Contains(err.Error(), "no CAPI MachineDeployment found") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ===== SetNodePoolReplicas =====
+
+func TestSetNodePoolReplicasSuccess(t *testing.T) {
+	np := nodePool("c1-workers", "clusters", "c1", 3)
+	mgr := newManager(np)
+
+	err := mgr.SetNodePoolReplicas(context.Background(), "c1", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetNodePoolReplicasNoNodePool(t *testing.T) {
+	mgr := newManager()
+
+	err := mgr.SetNodePoolReplicas(context.Background(), "c1", 5)
+	if err == nil {
+		t.Fatal("expected error when no NodePool exists")
+	}
+}
+
+func TestSetNodePoolReplicasPatchError(t *testing.T) {
+	np := nodePool("c1-workers", "clusters", "c1", 3)
+	c := fakeClient(np)
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("patch", "nodepools", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("patch denied")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.SetNodePoolReplicas(context.Background(), "c1", 5)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "patching NodePool") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ===== SetMachineDeploymentReplicas =====
+
+func TestSetMachineDeploymentReplicasSuccess(t *testing.T) {
+	md := capiMachineDeployment("c1-md-0", "c1", "c1", 3)
+	mgr := newManager(md)
+
+	err := mgr.SetMachineDeploymentReplicas(context.Background(), "c1", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetMachineDeploymentReplicasNoMD(t *testing.T) {
+	mgr := newManager()
+
+	err := mgr.SetMachineDeploymentReplicas(context.Background(), "c1", 5)
+	if err == nil {
+		t.Fatal("expected error when no MachineDeployment exists")
+	}
+}
+
+func TestSetMachineDeploymentReplicasPatchError(t *testing.T) {
+	md := capiMachineDeployment("c1-md-0", "c1", "c1", 3)
+	c := fakeClient(md)
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("patch", "machinedeployments", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("patch denied")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.SetMachineDeploymentReplicas(context.Background(), "c1", 5)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "patching MachineDeployment") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ===== SetReplicasAuto =====
+
+func TestSetReplicasAutoMachinePool(t *testing.T) {
+	r := int64(3)
+	mp := machinePool("c1-worker", "c1", &r, "aws")
+	mgr := newManager(mp)
+
+	err := mgr.SetReplicasAuto(context.Background(), "c1", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetReplicasAutoFallbackToNodePool(t *testing.T) {
+	np := nodePool("c1-workers", "clusters", "c1", 3)
+	mgr := newManager(np)
+
+	err := mgr.SetReplicasAuto(context.Background(), "c1", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetReplicasAutoFallbackToMachineDeployment(t *testing.T) {
+	md := capiMachineDeployment("c1-md-0", "c1", "c1", 3)
+	mgr := newManager(md)
+
+	err := mgr.SetReplicasAuto(context.Background(), "c1", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetReplicasAutoNothingFound(t *testing.T) {
+	mgr := newManager()
+
+	err := mgr.SetReplicasAuto(context.Background(), "c1", 5)
+	if err == nil {
+		t.Fatal("expected error when no scaling resource found")
+	}
+}
+
+// ===== nodePoolInfoFromUnstructured =====
+
+func TestNodePoolInfoFromUnstructured(t *testing.T) {
+	np := nodePool("np1", "clusters", "c1", 4)
+	info := nodePoolInfoFromUnstructured(np)
+	if info.Name != "np1" {
+		t.Errorf("Name = %q, want %q", info.Name, "np1")
+	}
+	if info.Replicas == nil || *info.Replicas != 4 {
+		t.Errorf("Replicas = %v, want 4", info.Replicas)
+	}
+	if info.Platform != "AWS" {
+		t.Errorf("Platform = %q, want %q", info.Platform, "AWS")
+	}
+}
+
+func TestNodePoolInfoFromUnstructuredNoSpec(t *testing.T) {
+	np := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "hypershift.openshift.io/v1beta1",
+			"kind":       "NodePool",
+			"metadata": map[string]interface{}{
+				"name":      "bare",
+				"namespace": "clusters",
+			},
+		},
+	}
+	info := nodePoolInfoFromUnstructured(np)
+	if info.Name != "bare" {
+		t.Errorf("Name = %q, want %q", info.Name, "bare")
+	}
+	if info.Replicas != nil {
+		t.Error("Replicas should be nil when no spec")
+	}
+}
+
+// ===== machineDeploymentInfoFromUnstructured =====
+
+func TestMachineDeploymentInfoFromUnstructured(t *testing.T) {
+	md := capiMachineDeployment("md1", "c1", "c1", 5)
+	info := machineDeploymentInfoFromUnstructured(md)
+	if info.Name != "md1" {
+		t.Errorf("Name = %q, want %q", info.Name, "md1")
+	}
+	if info.Replicas == nil || *info.Replicas != 5 {
+		t.Errorf("Replicas = %v, want 5", info.Replicas)
+	}
+}
+
+func TestMachineDeploymentInfoFromUnstructuredNoSpec(t *testing.T) {
+	md := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.x-k8s.io/v1beta1",
+			"kind":       "MachineDeployment",
+			"metadata": map[string]interface{}{
+				"name":      "bare",
+				"namespace": "ns",
+			},
+		},
+	}
+	info := machineDeploymentInfoFromUnstructured(md)
+	if info.Name != "bare" {
+		t.Errorf("Name = %q, want %q", info.Name, "bare")
+	}
+	if info.Replicas != nil {
+		t.Error("Replicas should be nil when no spec")
+	}
 }

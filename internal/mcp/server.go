@@ -993,10 +993,10 @@ func registerScalingTools(s *server.MCPServer, sc *scaling.Manager) {
 			cluster, _ := req.RequireString("cluster")
 			replicasFloat, _ := req.GetArguments()["replicas"].(float64)
 			replicas := int(replicasFloat)
-			if err := sc.SetReplicas(ctx, cluster, replicas); err != nil {
+			if err := sc.SetReplicasAuto(ctx, cluster, replicas); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("setting replicas: %v", err)), nil
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("Cluster %s MachinePool replicas set to %d", cluster, replicas)), nil
+			return mcp.NewToolResultText(fmt.Sprintf("Cluster %s worker replicas set to %d", cluster, replicas)), nil
 		},
 	)
 
