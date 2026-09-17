@@ -452,3 +452,93 @@ func TestAddonIsHealthyNoStatus(t *testing.T) {
 		t.Error("Expected false for addon without status")
 	}
 }
+
+func TestEnableProxy(t *testing.T) {
+	mgr := newManager()
+	if err := mgr.EnableProxy(context.Background(), "spoke1"); err != nil {
+		t.Fatalf("EnableProxy failed: %v", err)
+	}
+	_, err := mgr.client.Get(context.Background(), client.GVRManagedClusterAddOn, "spoke1", "cluster-proxy")
+	if err != nil {
+		t.Fatalf("cluster-proxy addon not found: %v", err)
+	}
+}
+
+func TestEnableProxyIdempotent(t *testing.T) {
+	mgr := newManager()
+	if err := mgr.EnableProxy(context.Background(), "spoke1"); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if err := mgr.EnableProxy(context.Background(), "spoke1"); err != nil {
+		t.Fatalf("second should be idempotent: %v", err)
+	}
+}
+
+func TestDisableProxyExisting(t *testing.T) {
+	mgr := newManager(addonObj("cluster-proxy", "spoke1"))
+	removed, err := mgr.DisableProxy(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DisableProxy failed: %v", err)
+	}
+	if !removed {
+		t.Error("DisableProxy should return true for existing")
+	}
+}
+
+func TestDisableProxyNotFound(t *testing.T) {
+	mgr := newManager()
+	removed, err := mgr.DisableProxy(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DisableProxy failed: %v", err)
+	}
+	if removed {
+		t.Error("DisableProxy should return false for nonexistent")
+	}
+}
+
+func TestGetProxyStatusEnabled(t *testing.T) {
+	mgr := newManager(proxyAddonHealthy("spoke1"))
+	status, err := mgr.GetProxyStatus(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("GetProxyStatus failed: %v", err)
+	}
+	if !status.Enabled {
+		t.Error("Expected Enabled=true")
+	}
+	if !status.Healthy {
+		t.Error("Expected Healthy=true")
+	}
+	if status.Endpoint == "" {
+		t.Error("Expected non-empty endpoint")
+	}
+}
+
+func TestGetProxyStatusDisabled(t *testing.T) {
+	mgr := newManager()
+	status, err := mgr.GetProxyStatus(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("GetProxyStatus failed: %v", err)
+	}
+	if status.Enabled {
+		t.Error("Expected Enabled=false")
+	}
+}
+
+func TestParseProxyStatusHealthy(t *testing.T) {
+	obj := proxyAddonHealthy("spoke1").Object
+	ps := parseProxyStatus("spoke1", obj)
+	if !ps.Healthy {
+		t.Error("Expected Healthy=true")
+	}
+	if ps.Endpoint == "" {
+		t.Error("Expected generated endpoint")
+	}
+}
+
+func TestParseProxyStatusNotHealthy(t *testing.T) {
+	obj := addonObj("cluster-proxy", "spoke1").Object
+	ps := parseProxyStatus("spoke1", obj)
+	if ps.Healthy {
+		t.Error("Expected Healthy=false")
+	}
+}

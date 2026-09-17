@@ -15,7 +15,7 @@ func accessCmd() *cobra.Command {
 		Use:   "access",
 		Short: "Manage credential-free hub-to-spoke access via ManagedServiceAccount",
 	}
-	cmd.AddCommand(accessEnableCmd(), accessDisableCmd(), accessStatusCmd(), accessListCmd())
+	cmd.AddCommand(accessEnableCmd(), accessDisableCmd(), accessStatusCmd(), accessListCmd(), accessEnableProxyCmd(), accessDisableProxyCmd(), accessProxyStatusCmd())
 	return cmd
 }
 
@@ -145,6 +145,88 @@ func accessListCmd() *cobra.Command {
 			fmt.Printf("%-20s  %-7s  %-5s  %-15s\n", "CLUSTER", "ENABLED", "TOKEN", "ADDON STATUS")
 			for _, info := range infos {
 				fmt.Printf("%-20s  %-7v  %-5v  %-15s\n", info.Cluster, info.Enabled, info.TokenAvailable, info.AddonStatus)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func accessEnableProxyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "enable-proxy <cluster>",
+		Short: "Enable cluster proxy on a spoke cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := access.New(c, cfg, logger)
+			if err := mgr.EnableProxy(context.Background(), args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Cluster proxy enabled on %s\n", args[0])
+			return nil
+		},
+	}
+	return cmd
+}
+
+func accessDisableProxyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "disable-proxy <cluster>",
+		Short: "Disable cluster proxy on a spoke cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := access.New(c, cfg, logger)
+			removed, err := mgr.DisableProxy(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if removed {
+				fmt.Printf("Cluster proxy disabled on %s\n", args[0])
+			} else {
+				fmt.Printf("Cluster proxy not found on %s (nothing to remove)\n", args[0])
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+func accessProxyStatusCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "proxy-status <cluster>",
+		Short: "Show cluster proxy status",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := access.New(c, cfg, logger)
+			status, err := mgr.GetProxyStatus(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(status, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Cluster:   %s\n", status.Cluster)
+			fmt.Printf("Enabled:   %v\n", status.Enabled)
+			fmt.Printf("Healthy:   %v\n", status.Healthy)
+			if status.Endpoint != "" {
+				fmt.Printf("Endpoint:  %s\n", status.Endpoint)
 			}
 			return nil
 		},

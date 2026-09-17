@@ -596,3 +596,214 @@ func TestDeleteWithCustomNamespace(t *testing.T) {
 		t.Error("Delete should return true")
 	}
 }
+
+func agentAppSet(name, ns string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "argoproj.io/v1alpha1",
+			"kind":       "ApplicationSet",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": ns,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed":    "true",
+					"acmlab.redhat.com/gitops":     "true",
+					"acmlab.redhat.com/agent-mode": "true",
+					"acmlab.redhat.com/generator":  "agent",
+				},
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "{{name}}-" + name,
+						"annotations": map[string]interface{}{
+							"argocd.argoproj.io/sync-options": "PullMode=true",
+						},
+					},
+					"spec": map[string]interface{}{
+						"source": map[string]interface{}{
+							"repoURL": "https://github.com/example/repo.git",
+							"path":    "manifests/edge",
+						},
+					},
+				},
+			},
+			"status": map[string]interface{}{
+				"conditions": []interface{}{
+					map[string]interface{}{
+						"type":   "ResourcesUpToDate",
+						"status": "True",
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestEnableAgentMode(t *testing.T) {
+	mgr := newManager()
+	err := mgr.EnableAgentMode(context.Background(), AgentModeOpts{
+		Name:     "edge-apps",
+		RepoURL:  "https://github.com/example/repo.git",
+		Path:     "manifests/edge",
+		Clusters: []string{"edge-01", "edge-02"},
+	})
+	if err != nil {
+		t.Fatalf("EnableAgentMode failed: %v", err)
+	}
+
+	obj, err := mgr.client.Get(context.Background(), client.GVRApplicationSet, DefaultNamespace, "edge-apps")
+	if err != nil {
+		t.Fatalf("ApplicationSet not found: %v", err)
+	}
+	labels := obj.GetLabels()
+	if labels["acmlab.redhat.com/agent-mode"] != "true" {
+		t.Error("agent-mode label missing")
+	}
+}
+
+func TestEnableAgentModeIdempotent(t *testing.T) {
+	mgr := newManager()
+	opts := AgentModeOpts{
+		Name:     "edge-apps",
+		RepoURL:  "https://github.com/example/repo.git",
+		Path:     "manifests/edge",
+		Clusters: []string{"edge-01"},
+	}
+	if err := mgr.EnableAgentMode(context.Background(), opts); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if err := mgr.EnableAgentMode(context.Background(), opts); err != nil {
+		t.Fatalf("second should be idempotent: %v", err)
+	}
+}
+
+func TestEnableAgentModeError(t *testing.T) {
+	c := fakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("forbidden")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.EnableAgentMode(context.Background(), AgentModeOpts{
+		Name:     "edge-apps",
+		RepoURL:  "https://github.com/example/repo.git",
+		Path:     "manifests/edge",
+		Clusters: []string{"edge-01"},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "creating agent-mode ApplicationSet") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestDisableAgentMode(t *testing.T) {
+	appSet := agentAppSet("edge-apps", DefaultNamespace)
+	mgr := newManager(appSet)
+
+	removed, err := mgr.DisableAgentMode(context.Background(), "edge-apps", "")
+	if err != nil {
+		t.Fatalf("DisableAgentMode failed: %v", err)
+	}
+	if !removed {
+		t.Error("DisableAgentMode should return true")
+	}
+}
+
+func TestDisableAgentModeNotFound(t *testing.T) {
+	mgr := newManager()
+	removed, err := mgr.DisableAgentMode(context.Background(), "nonexistent", "")
+	if err != nil {
+		t.Fatalf("DisableAgentMode failed: %v", err)
+	}
+	if removed {
+		t.Error("DisableAgentMode should return false for nonexistent")
+	}
+}
+
+func TestDisableAgentModeNotAgentMode(t *testing.T) {
+	appSet := sampleAppSet("regular-app", DefaultNamespace)
+	mgr := newManager(appSet)
+
+	_, err := mgr.DisableAgentMode(context.Background(), "regular-app", "")
+	if err == nil {
+		t.Fatal("expected error for non-agent-mode ApplicationSet")
+	}
+	if !strings.Contains(err.Error(), "not an agent-mode") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestAgentModeStatus(t *testing.T) {
+	appSet := agentAppSet("edge-apps", DefaultNamespace)
+	mgr := newManager(appSet)
+
+	info, err := mgr.AgentModeStatus(context.Background(), "edge-apps", "")
+	if err != nil {
+		t.Fatalf("AgentModeStatus failed: %v", err)
+	}
+	if info.Name != "edge-apps" {
+		t.Errorf("Name = %q", info.Name)
+	}
+	if info.Mode != "pull" {
+		t.Errorf("Mode = %q, want pull", info.Mode)
+	}
+	if info.Status != "Synced" {
+		t.Errorf("Status = %q, want Synced", info.Status)
+	}
+}
+
+func TestAgentModeStatusNotFound(t *testing.T) {
+	mgr := newManager()
+	_, err := mgr.AgentModeStatus(context.Background(), "nonexistent", "")
+	if err == nil {
+		t.Fatal("expected error for nonexistent")
+	}
+}
+
+func TestParseAgentModeInfo(t *testing.T) {
+	appSet := agentAppSet("test-agent", DefaultNamespace)
+	info := parseAgentModeInfo(appSet.Object)
+	if info.Name != "test-agent" {
+		t.Errorf("Name = %q", info.Name)
+	}
+	if info.RepoURL != "https://github.com/example/repo.git" {
+		t.Errorf("RepoURL = %q", info.RepoURL)
+	}
+	if info.Path != "manifests/edge" {
+		t.Errorf("Path = %q", info.Path)
+	}
+	if info.Mode != "pull" {
+		t.Errorf("Mode = %q, want pull", info.Mode)
+	}
+	if info.Status != "Synced" {
+		t.Errorf("Status = %q, want Synced", info.Status)
+	}
+}
+
+func TestBuildAgentModeApplicationSet(t *testing.T) {
+	opts := AgentModeOpts{
+		Name:      "edge-deploy",
+		Namespace: DefaultNamespace,
+		RepoURL:   "https://github.com/example/edge.git",
+		Path:      "k8s",
+		Revision:  "main",
+		Clusters:  []string{"edge-01", "edge-02"},
+	}
+	appSet := buildAgentModeApplicationSet(opts)
+
+	if appSet.GetName() != "edge-deploy" {
+		t.Errorf("Name = %q", appSet.GetName())
+	}
+	labels := appSet.GetLabels()
+	if labels["acmlab.redhat.com/agent-mode"] != "true" {
+		t.Error("agent-mode label missing")
+	}
+
+	annotations, _, _ := unstructured.NestedString(appSet.Object, "spec", "template", "metadata", "annotations", "argocd.argoproj.io/sync-options")
+	if annotations != "PullMode=true" {
+		t.Errorf("PullMode annotation = %q, want PullMode=true", annotations)
+	}
+}
