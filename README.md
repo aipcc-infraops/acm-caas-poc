@@ -183,6 +183,12 @@ bin/acmlab security apply-rego --cluster spoke1 --rego-file no-hostpath.rego --n
 bin/acmlab security list-rego
 bin/acmlab security remove-rego deny_latest --cluster spoke1
 
+# Kyverno policies
+bin/acmlab security apply-kyverno --cluster spoke1 --policy-file disallow-latest.yaml
+bin/acmlab security apply-kyverno --cluster spoke1 --policy-file gpu-limits.yaml --name gpu-limits
+bin/acmlab security list-kyverno
+bin/acmlab security remove-kyverno disallow-latest --cluster spoke1
+
 # 17. Progressive rollout
 bin/acmlab rollout create my-rollout --manifest configmap.yaml --placement prod-clusters --strategy rolling --max-concurrency 25%
 bin/acmlab rollout get my-rollout

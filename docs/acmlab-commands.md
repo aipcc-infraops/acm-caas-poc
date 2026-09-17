@@ -1045,6 +1045,53 @@ $ acmlab security remove-rego deny_latest --cluster spoke1
 Custom Rego policy deny_latest removed from spoke1
 ```
 
+#### `acmlab security apply-kyverno`
+
+Applies a Kyverno ClusterPolicy to a spoke cluster via ManifestWork. Reads a YAML file containing the ClusterPolicy and wraps it for delivery.
+
+*Source: `cmd/acmlab/security.go`: `securityApplyKyvernoCmd()`*
+
+Options:
+- `--cluster`: target cluster name (required)
+- `--policy-file`: path to Kyverno ClusterPolicy YAML (required)
+- `--name`: policy name (defaults to metadata.name in YAML)
+
+```
+$ acmlab security apply-kyverno --cluster spoke1 --policy-file disallow-latest.yaml
+Applying Kyverno policy from disallow-latest.yaml to spoke1...
+Kyverno ClusterPolicy deployed via ManifestWork.
+```
+
+#### `acmlab security list-kyverno`
+
+Lists all Kyverno policies deployed across the fleet.
+
+*Source: `cmd/acmlab/security.go`: `securityListKyvernoCmd()`*
+
+Options:
+- `--json`: output as JSON
+
+```
+$ acmlab security list-kyverno
+CLUSTER                   POLICY               STATUS
+spoke1                    disallow-latest      Applied
+spoke2                    gpu-resource-limits  Pending
+```
+
+#### `acmlab security remove-kyverno <name>`
+
+Removes a Kyverno policy from a cluster.
+
+*Source: `cmd/acmlab/security.go`: `securityRemoveKyvernoCmd()`*
+
+Options:
+- `--cluster`: target cluster name (required)
+
+```
+$ acmlab security remove-kyverno disallow-latest --cluster spoke1
+Kyverno policy disallow-latest removed from spoke1
+```
+
 ### GitOps
 
 #### `acmlab gitops create <name>`
