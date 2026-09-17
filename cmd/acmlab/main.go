@@ -74,6 +74,8 @@ func main() {
 	root.AddCommand(backupCmd())
 	root.AddCommand(gitopsCmd())
 	root.AddCommand(mcpCmd())
+	root.AddCommand(costCmd())
+	root.AddCommand(reclamationCmd())
 
 	rejectUnknownSubcommands(root)
 
