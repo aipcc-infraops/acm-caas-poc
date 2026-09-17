@@ -37,6 +37,21 @@ func (m *Manager) RouteByVersion(ctx context.Context, version string) (string, e
 func (m *Manager) EnforceVersionPolicy(ctx context.Context, cluster, version string) error {
 	m.logger.Info("gpu.EnforceVersionPolicy", "cluster", cluster, "version", version)
 
+	versionLabel := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"labels": map[string]interface{}{
+				"ai-platform-version": version,
+			},
+		},
+	}
+	patch, err := json.Marshal(versionLabel)
+	if err != nil {
+		return fmt.Errorf("marshalling version label: %w", err)
+	}
+	if _, err := m.client.Patch(ctx, client.GVRManagedCluster, "", cluster, types.MergePatchType, patch); err != nil {
+		return fmt.Errorf("labelling cluster %s with version %s: %w", cluster, version, err)
+	}
+
 	configPolicy := buildVersionEnforcementPolicy(cluster, version)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRConfigurationPolicy, DefaultNamespace, configPolicy); err != nil {
 		return fmt.Errorf("creating version enforcement config policy: %w", err)

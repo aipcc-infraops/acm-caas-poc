@@ -104,6 +104,9 @@ func (m *Manager) Status(ctx context.Context, clusterSet string) (*SubmarinerSta
 	if err != nil {
 		return nil, err
 	}
+	if len(clusters) == 0 {
+		return nil, fmt.Errorf("no clusters found in ClusterSet %q", clusterSet)
+	}
 
 	status := &SubmarinerStatus{ClusterSet: clusterSet, Connected: true}
 	for _, name := range clusters {
