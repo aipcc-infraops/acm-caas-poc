@@ -61,6 +61,7 @@ func fakeClientWithClusters(clusters ...*unstructured.Unstructured) *client.Clie
 			client.GVRCAPIMachineDeployment:           "MachineDeploymentList",
 			client.GVRHostedCluster:                   "HostedClusterList",
 			client.GVRCAPICluster:                     "ClusterList",
+			client.GVRPlacementDecision:               "PlacementDecisionList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }

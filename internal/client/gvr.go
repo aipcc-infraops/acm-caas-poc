@@ -102,6 +102,9 @@ var (
 	GVRApplication = schema.GroupVersionResource{
 		Group: "argoproj.io", Version: "v1alpha1", Resource: "applications",
 	}
+	GVRPlacementDecision = schema.GroupVersionResource{
+		Group: "cluster.open-cluster-management.io", Version: "v1beta1", Resource: "placementdecisions",
+	}
 	GVRBackupSchedule = schema.GroupVersionResource{
 		Group: "cluster.open-cluster-management.io", Version: "v1beta1", Resource: "backupschedules",
 	}
