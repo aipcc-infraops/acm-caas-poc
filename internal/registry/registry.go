@@ -127,12 +127,21 @@ func (m *Manager) RemoveMirror(ctx context.Context, clusterName string) error {
 	m.logger.Info("registry.RemoveMirror", "cluster", clusterName)
 	ns := clusterName
 
+	regName := fmt.Sprintf("%s-image-registry", clusterName)
+	_, err := m.client.Get(ctx, client.GVRManagedClusterImageRegistry, ns, regName)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("no image registry mirror configured for cluster %s", clusterName)
+		}
+		return fmt.Errorf("checking image registry for %s: %w", clusterName, err)
+	}
+
 	steps := []struct {
 		label string
 		gvr   schema.GroupVersionResource
 		name  string
 	}{
-		{"ManagedClusterImageRegistry", client.GVRManagedClusterImageRegistry, fmt.Sprintf("%s-image-registry", clusterName)},
+		{"ManagedClusterImageRegistry", client.GVRManagedClusterImageRegistry, regName},
 		{"Placement", client.GVRPlacement, fmt.Sprintf("%s-registry-placement", clusterName)},
 		{"pull secret", client.GVRSecret, fmt.Sprintf("%s-registry-pull-secret", clusterName)},
 		{"ManagedClusterSetBinding", client.GVRManagedClusterSetBinding, "default"},
