@@ -19,16 +19,16 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-08 | Legacy cluster decommissioning | ✅ Implemented | `internal/decommission/` |
 | UC-09 | Cluster upgrades (Day-2 operations) | ✅ Implemented | `internal/upgrade/` |
 | UC-10 | Cluster scaling (add/remove workers) | ✅ Implemented | `internal/scaling/` |
-| UC-11 | Cost tracking and chargeback | 📋 Planned | `internal/cost/` |
+| UC-11 | Cost tracking and chargeback | ✅ Implemented | `internal/cost/` |
 | UC-12 | Identity Provider management (GitHub, Google, htpasswd, LDAP, OIDC) | ✅ Implemented | `internal/idp/` |
-| UC-14 | Automatic cluster reclamation (idle/expired) | 📋 Planned | `internal/reclamation/` |
+| UC-14 | Automatic cluster reclamation (idle/expired) | ✅ Implemented | `internal/reclamation/` |
 | UC-15 | Resource quota gates via governance policy | ✅ Implemented | `internal/policy/` |
 | UC-16 | Unique IdP per cluster (security hardening) | ✅ Implemented | `internal/idp/` |
-| UC-17 | Cost center attribution and budget alerting | 📋 Planned | `internal/cost/` |
-| UC-18 | GPU sharing stack deployment (Kueue + Kyverno) | 📋 Planned | `internal/gpusharing/` |
-| UC-19 | Multi-cluster GPU workload routing via Placement | 📋 Planned | `internal/gpurouting/` |
-| UC-20 | AI platform operator version fleet segregation | 📋 Planned | `internal/gpurouting/` |
-| UC-21 | Elastic GPU capacity (auto-provision on saturation) | 📋 Planned | `internal/gpuelastic/` |
+| UC-17 | Cost center attribution and budget alerting | ✅ Implemented | `internal/cost/` |
+| UC-18 | GPU sharing stack deployment (Kueue + Kyverno) | ✅ Implemented | `internal/gpu/` |
+| UC-19 | Multi-cluster GPU workload routing via Placement | ✅ Implemented | `internal/gpu/` |
+| UC-20 | AI platform operator version fleet segregation | ✅ Implemented | `internal/gpu/` |
+| UC-21 | Elastic GPU capacity (auto-provision on saturation) | ✅ Implemented | `internal/gpu/` |
 | UC-22 | ClusterSet management — team isolation | ✅ Implemented | `internal/clusterset/` |
 | UC-23 | Multi-architecture cluster matrix (QA) | 📋 Planned | `internal/matrix/` |
 | UC-24 | Per-team compliance reporting | ✅ Implemented | `internal/policy/` |
@@ -38,16 +38,16 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-28 | Certificate expiry detection fleet-wide | ✅ Implemented | `internal/policy/` |
 | UC-29 | Security baseline enforcement (Gatekeeper/OPA) | ✅ Implemented | `internal/security/` |
 | UC-30 | Policy automation — Ansible auto-remediation | ✅ Implemented | `internal/automation/` |
-| UC-31 | SCAP scanning via Compliance Operator | 📋 Planned | `internal/compliance/` |
+| UC-31 | SCAP scanning via Compliance Operator | ✅ Implemented | `internal/security/` |
 | UC-32 | GitOps fleet deployment via ApplicationSet | ✅ Implemented | `internal/gitops/` |
 | UC-33 | ManifestWorkReplicaSet progressive rollout | ✅ Implemented | `internal/rollout/` |
 | UC-35 | Credential-free spoke access (ManagedServiceAccount) | ✅ Implemented | `internal/access/` |
 | UC-36 | Hub backup and restore | ✅ Implemented | `internal/backup/` |
 | UC-37 | Worker node flavor change (rolling replacement) | ✅ Implemented | `internal/scaling/` |
-| UC-38 | HyperShift (HostedCluster) provisioning | 📋 Planned | `internal/provisioning/` |
-| UC-39 | Cloud-provider native scaling for imported clusters | 📋 Planned | `internal/scaling/` |
-| UC-40 | Cluster API (CAPI) provisioning for vanilla Kubernetes | 📋 Planned | `internal/provisioning/` |
-| UC-41 | Kubernetes cluster hibernate via CAPI scale-to-zero | 📋 Planned | `internal/lifecycle/` |
+| UC-38 | HyperShift (HostedCluster) provisioning | ✅ Implemented | `internal/provisioning/` |
+| UC-39 | Cloud-provider native scaling for imported clusters | ✅ Implemented | `internal/scaling/` |
+| UC-40 | Cluster API (CAPI) provisioning for vanilla Kubernetes | ✅ Implemented | `internal/provisioning/` |
+| UC-41 | Kubernetes cluster hibernate via CAPI scale-to-zero | ✅ Implemented | `internal/lifecycle/` |
 | UC-42 | Workload disaster recovery (Velero + GitOps) | 📋 Planned | `internal/recovery/` |
 | UC-43 | Cluster relocation (planned workload migration) | 📋 Planned | `internal/migration/` |
 
