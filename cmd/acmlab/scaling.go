@@ -24,12 +24,12 @@ func scalingErr(err error) error {
 func scalingCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scaling",
-		Short: "Manage cluster worker node scaling via Hive MachinePool",
-		Long: `Scale cluster worker nodes by patching Hive MachinePool resources.
+		Short: "Manage cluster worker node scaling",
+		Long: `Scale cluster worker nodes via MachinePool, NodePool, or CAPI MachineDeployment.
 
-Supports fixed replica counts and autoscaling (min/max bounds).
-Only works with Hive-provisioned clusters. For imported clusters, use
-your cloud provider's native scaling tools.`,
+The 'set' command auto-detects the scaling resource: Hive MachinePool for
+Hive-provisioned clusters, HyperShift NodePool for hosted clusters, or
+CAPI MachineDeployment for CAPI-provisioned clusters.`,
 	}
 	cmd.AddCommand(scalingGetCmd(), scalingSetCmd(), scalingAutoCmd(), scalingListCmd(), scalingInitCmd(), scalingSetFlavorCmd())
 	return cmd
@@ -85,23 +85,11 @@ func scalingSetCmd() *cobra.Command {
 			sc := scaling.New(c, cfg, logger)
 			ctx := context.Background()
 
-			if err := sc.SetReplicas(ctx, args[0], replicas); err != nil {
+			if err := sc.SetReplicasAuto(ctx, args[0], replicas); err != nil {
 				return scalingErr(err)
 			}
 
-			info, err := sc.GetMachinePool(ctx, args[0])
-			if err != nil {
-				return fmt.Errorf("reading updated MachinePool: %w", err)
-			}
-
-			if outputJSON {
-				data, _ := json.MarshalIndent(info, "", "  ")
-				fmt.Println(string(data))
-				return nil
-			}
-
-			fmt.Printf("Cluster %s MachinePool replicas set to %d\n", args[0], replicas)
-			printMachinePoolInfo(*info)
+			fmt.Printf("Cluster %s worker replicas set to %d\n", args[0], replicas)
 			return nil
 		},
 	}

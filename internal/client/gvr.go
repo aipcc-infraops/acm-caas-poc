@@ -93,4 +93,16 @@ var (
 	GVRManagedClusterAddOn = schema.GroupVersionResource{
 		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "managedclusteraddons",
 	}
+	GVRHostedCluster = schema.GroupVersionResource{
+		Group: "hypershift.openshift.io", Version: "v1beta1", Resource: "hostedclusters",
+	}
+	GVRNodePool = schema.GroupVersionResource{
+		Group: "hypershift.openshift.io", Version: "v1beta1", Resource: "nodepools",
+	}
+	GVRCAPICluster = schema.GroupVersionResource{
+		Group: "cluster.x-k8s.io", Version: "v1beta1", Resource: "clusters",
+	}
+	GVRCAPIMachineDeployment = schema.GroupVersionResource{
+		Group: "cluster.x-k8s.io", Version: "v1beta1", Resource: "machinedeployments",
+	}
 )
