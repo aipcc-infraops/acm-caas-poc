@@ -52,6 +52,68 @@ func buildApplicationSet(opts AppSetOpts) *unstructured.Unstructured {
 	}
 }
 
+func buildAgentModeApplicationSet(opts AgentModeOpts) *unstructured.Unstructured {
+	clusterValues := make([]interface{}, len(opts.Clusters))
+	for i, c := range opts.Clusters {
+		clusterValues[i] = map[string]interface{}{
+			"name":   c,
+			"server": "https://" + c + "-api.example.com:6443",
+		}
+	}
+
+	generator := map[string]interface{}{
+		"list": map[string]interface{}{
+			"elements": clusterValues,
+		},
+	}
+
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "argoproj.io/v1alpha1",
+			"kind":       "ApplicationSet",
+			"metadata": map[string]interface{}{
+				"name":      opts.Name,
+				"namespace": opts.Namespace,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed":    "true",
+					"acmlab.redhat.com/gitops":     "true",
+					"acmlab.redhat.com/agent-mode": "true",
+					"acmlab.redhat.com/generator":  "agent",
+				},
+			},
+			"spec": map[string]interface{}{
+				"generators": []interface{}{generator},
+				"template": map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "{{name}}-" + opts.Name,
+						"annotations": map[string]interface{}{
+							"argocd.argoproj.io/sync-options": "PullMode=true",
+						},
+					},
+					"spec": map[string]interface{}{
+						"project": "default",
+						"source": map[string]interface{}{
+							"repoURL":        opts.RepoURL,
+							"path":           opts.Path,
+							"targetRevision": opts.Revision,
+						},
+						"destination": map[string]interface{}{
+							"server":    "{{server}}",
+							"namespace": "default",
+						},
+						"syncPolicy": map[string]interface{}{
+							"automated": map[string]interface{}{
+								"selfHeal": true,
+								"prune":    true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func buildGenerator(opts AppSetOpts) map[string]interface{} {
 	matchLabels := map[string]interface{}{}
 	for k, v := range opts.LabelSelector {

@@ -133,6 +133,119 @@ func (m *Manager) Sync(ctx context.Context, name, namespace string) error {
 	return nil
 }
 
+type AgentModeOpts struct {
+	Name      string
+	Namespace string
+	RepoURL   string
+	Path      string
+	Revision  string
+	Clusters  []string
+}
+
+type AgentModeInfo struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	RepoURL   string `json:"repoURL"`
+	Path      string `json:"path"`
+	Mode      string `json:"mode"`
+	Status    string `json:"status"`
+}
+
+func (m *Manager) EnableAgentMode(ctx context.Context, opts AgentModeOpts) error {
+	m.logger.Info("gitops.EnableAgentMode", "name", opts.Name)
+	if opts.Namespace == "" {
+		opts.Namespace = DefaultNamespace
+	}
+	if opts.Revision == "" {
+		opts.Revision = "main"
+	}
+
+	appSet := buildAgentModeApplicationSet(opts)
+	if err := m.client.CreateIfNotExists(ctx, client.GVRApplicationSet, opts.Namespace, appSet); err != nil {
+		return fmt.Errorf("creating agent-mode ApplicationSet: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) DisableAgentMode(ctx context.Context, name, namespace string) (bool, error) {
+	m.logger.Info("gitops.DisableAgentMode", "name", name)
+	if namespace == "" {
+		namespace = DefaultNamespace
+	}
+
+	obj, err := m.client.Get(ctx, client.GVRApplicationSet, namespace, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("checking agent-mode ApplicationSet %s: %w", name, err)
+	}
+
+	labels := obj.GetLabels()
+	if labels["acmlab.redhat.com/agent-mode"] != "true" {
+		return false, fmt.Errorf("%s is not an agent-mode ApplicationSet", name)
+	}
+
+	if err := m.client.DeleteIfExists(ctx, client.GVRApplicationSet, namespace, name); err != nil {
+		return false, fmt.Errorf("deleting agent-mode ApplicationSet %s: %w", name, err)
+	}
+	return true, nil
+}
+
+func (m *Manager) AgentModeStatus(ctx context.Context, name, namespace string) (*AgentModeInfo, error) {
+	m.logger.Info("gitops.AgentModeStatus", "name", name)
+	if namespace == "" {
+		namespace = DefaultNamespace
+	}
+
+	obj, err := m.client.Get(ctx, client.GVRApplicationSet, namespace, name)
+	if err != nil {
+		return nil, fmt.Errorf("getting agent-mode ApplicationSet %s: %w", name, err)
+	}
+	return parseAgentModeInfo(obj.Object), nil
+}
+
+func parseAgentModeInfo(obj map[string]interface{}) *AgentModeInfo {
+	info := &AgentModeInfo{Status: "Pending", Mode: "pull"}
+
+	meta, _ := obj["metadata"].(map[string]interface{})
+	if meta != nil {
+		info.Name, _ = meta["name"].(string)
+		info.Namespace, _ = meta["namespace"].(string)
+	}
+
+	spec, _ := obj["spec"].(map[string]interface{})
+	if spec != nil {
+		tmpl, _ := spec["template"].(map[string]interface{})
+		if tmpl != nil {
+			tmplSpec, _ := tmpl["spec"].(map[string]interface{})
+			if tmplSpec != nil {
+				source, _ := tmplSpec["source"].(map[string]interface{})
+				if source != nil {
+					info.RepoURL, _ = source["repoURL"].(string)
+					info.Path, _ = source["path"].(string)
+				}
+			}
+		}
+	}
+
+	status, _ := obj["status"].(map[string]interface{})
+	if status != nil {
+		conditions, _ := status["conditions"].([]interface{})
+		for _, raw := range conditions {
+			cond, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if cond["type"] == "ResourcesUpToDate" && cond["status"] == "True" {
+				info.Status = "Synced"
+			}
+		}
+	}
+
+	return info
+}
+
 func applyDefaults(opts *AppSetOpts) {
 	if opts.Namespace == "" {
 		opts.Namespace = DefaultNamespace
