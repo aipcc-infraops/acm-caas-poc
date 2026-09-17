@@ -49,6 +49,13 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 func (m *Manager) Enable(ctx context.Context, cluster string) error {
 	m.logger.Info("rightsizing.Enable", "cluster", cluster)
 
+	if _, err := m.client.Get(ctx, client.GVRManagedCluster, "", cluster); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("cluster %s not found", cluster)
+		}
+		return fmt.Errorf("checking cluster %s: %w", cluster, err)
+	}
+
 	mw := buildRightsizingManifestWork(cluster)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRManifestWork, cluster, mw); err != nil {
 		return fmt.Errorf("creating right-sizing ManifestWork on %s: %w", cluster, err)
