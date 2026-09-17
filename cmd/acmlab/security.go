@@ -20,6 +20,9 @@ func securityCmd() *cobra.Command {
 		securityStatusCmd(),
 		securityListCmd(),
 		securityRemoveCmd(),
+		securityApplyRegoCmd(),
+		securityRemoveRegoCmd(),
+		securityListRegoCmd(),
 		securityDeployComplianceCmd(),
 		securityScanCmd(),
 		securityScanStatusCmd(),
@@ -156,6 +159,108 @@ func securityRemoveCmd() *cobra.Command {
 			return nil
 		},
 	}
+	return cmd
+}
+
+func securityApplyRegoCmd() *cobra.Command {
+	var cluster, regoFile, name string
+	var matchKinds []string
+
+	cmd := &cobra.Command{
+		Use:   "apply-rego",
+		Short: "Apply a custom Rego policy to a cluster via Gatekeeper",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cluster == "" {
+				return fmt.Errorf("--cluster is required")
+			}
+			if regoFile == "" {
+				return fmt.Errorf("--rego-file is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			opts := security.CustomPolicyOpts{
+				Name:     name,
+				Cluster:  cluster,
+				RegoFile: regoFile,
+				Match:    matchKinds,
+			}
+			fmt.Printf("Applying custom Rego policy from %s to %s...\n", regoFile, cluster)
+			if err := mgr.ApplyCustomPolicy(context.Background(), opts); err != nil {
+				return err
+			}
+			fmt.Println("Custom Rego policy deployed via ManifestWork.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster name (required)")
+	cmd.Flags().StringVar(&regoFile, "rego-file", "", "path to .rego file (required)")
+	cmd.Flags().StringVar(&name, "name", "", "policy name (defaults to package name)")
+	cmd.Flags().StringSliceVar(&matchKinds, "match", []string{"Pod"}, "Kubernetes kinds to match (e.g. Pod,Deployment)")
+	return cmd
+}
+
+func securityRemoveRegoCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remove-rego <name> --cluster <cluster>",
+		Short: "Remove a custom Rego policy from a cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cluster, _ := cmd.Flags().GetString("cluster")
+			if cluster == "" {
+				return fmt.Errorf("--cluster is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			if err := mgr.RemoveCustomPolicy(context.Background(), args[0], cluster); err != nil {
+				return err
+			}
+			fmt.Printf("Custom Rego policy %s removed from %s\n", args[0], cluster)
+			return nil
+		},
+	}
+	cmd.Flags().String("cluster", "", "target cluster name (required)")
+	return cmd
+}
+
+func securityListRegoCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "list-rego",
+		Short: "List all custom Rego policies across the fleet",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			policies, err := mgr.ListCustomPolicies(context.Background())
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(policies, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(policies) == 0 {
+				fmt.Println("No custom Rego policies found")
+				return nil
+			}
+			fmt.Printf("%-25s %-20s %s\n", "CLUSTER", "POLICY", "STATUS")
+			for _, p := range policies {
+				fmt.Printf("%-25s %-20s %s\n", p.Cluster, p.Level, p.Status)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 

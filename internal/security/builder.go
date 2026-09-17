@@ -1,6 +1,8 @@
 package security
 
 import (
+	"strings"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -231,6 +233,121 @@ func buildConstraints(allowedRepos []string) []map[string]interface{} {
 			},
 		},
 	}
+}
+
+func buildCustomRegoManifestWork(cluster, name, pkg, rego string, matchKinds []string) *unstructured.Unstructured {
+	kinds := make([]interface{}, len(matchKinds))
+	for i, k := range matchKinds {
+		kinds[i] = k
+	}
+
+	constraintKind := toCamelCase(pkg)
+	templateName := toKebab(pkg)
+	mwName := "custom-rego-" + name + "-" + cluster
+
+	template := map[string]interface{}{
+		"apiVersion": "templates.gatekeeper.sh/v1",
+		"kind":       "ConstraintTemplate",
+		"metadata": map[string]interface{}{
+			"name": templateName,
+		},
+		"spec": map[string]interface{}{
+			"crd": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"names": map[string]interface{}{
+						"kind": constraintKind,
+					},
+				},
+			},
+			"targets": []interface{}{
+				map[string]interface{}{
+					"target": "admission.k8s.gatekeeper.sh",
+					"rego":   rego,
+				},
+			},
+		},
+	}
+
+	constraint := map[string]interface{}{
+		"apiVersion": "constraints.gatekeeper.sh/v1beta1",
+		"kind":       constraintKind,
+		"metadata": map[string]interface{}{
+			"name": templateName + "-constraint",
+		},
+		"spec": map[string]interface{}{
+			"match": map[string]interface{}{
+				"kinds": []interface{}{
+					map[string]interface{}{
+						"apiGroups": []interface{}{""},
+						"kinds":     kinds,
+					},
+				},
+			},
+		},
+	}
+
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "work.open-cluster-management.io/v1",
+			"kind":       "ManifestWork",
+			"metadata": map[string]interface{}{
+				"name":      mwName,
+				"namespace": cluster,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed":     "true",
+					"acmlab.redhat.com/custom-rego": "true",
+					"acmlab.redhat.com/rego-policy": name,
+				},
+			},
+			"spec": map[string]interface{}{
+				"workload": map[string]interface{}{
+					"manifests": []interface{}{template, constraint},
+				},
+			},
+		},
+	}
+}
+
+func toCamelCase(pkg string) string {
+	parts := splitPkgName(pkg)
+	result := ""
+	for _, p := range parts {
+		if len(p) > 0 {
+			result += strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return result
+}
+
+func toKebab(pkg string) string {
+	parts := splitPkgName(pkg)
+	return strings.Join(parts, "-")
+}
+
+func splitPkgName(pkg string) []string {
+	var parts []string
+	current := ""
+	for i, r := range pkg {
+		if r == '_' || r == '.' {
+			if current != "" {
+				parts = append(parts, current)
+			}
+			current = ""
+			continue
+		}
+		if i > 0 && r >= 'A' && r <= 'Z' && pkg[i-1] >= 'a' && pkg[i-1] <= 'z' {
+			if current != "" {
+				parts = append(parts, current)
+			}
+			current = string(r)
+			continue
+		}
+		current += string(r)
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+	return parts
 }
 
 func buildGatekeeperHealthPolicy(cluster, clusterSet string) *unstructured.Unstructured {
