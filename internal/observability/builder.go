@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -213,4 +214,80 @@ func (m *Manager) ensureMCO(ctx context.Context) error {
 
 func (m *Manager) deleteMCO(ctx context.Context) error {
 	return m.client.DeleteIfExists(ctx, client.GVRMultiClusterObservability, "", MCOName)
+}
+
+func buildOBC(name, ns, storageClass, bucketName string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "objectbucket.io/v1alpha1",
+			"kind":       "ObjectBucketClaim",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": ns,
+			},
+			"spec": map[string]interface{}{
+				"generateBucketName": bucketName,
+				"storageClassName":   storageClass,
+			},
+		},
+	}
+}
+
+func buildCustomRulesConfigMap(ns, rules string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      CustomRulesCM,
+				"namespace": ns,
+			},
+			"data": map[string]interface{}{
+				"custom_rules.yaml": rules,
+			},
+		},
+	}
+}
+
+func buildDashboardConfigMap(ns, name, dashJSON string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": ns,
+				"labels": map[string]interface{}{
+					DashboardLabelKey: DashboardLabelValue,
+				},
+			},
+			"data": map[string]interface{}{
+				name + ".json": dashJSON,
+			},
+		},
+	}
+}
+
+func buildMetricsAllowlistConfigMap(ns string, metrics []string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      MetricsAllowlistCM,
+				"namespace": ns,
+			},
+			"data": map[string]interface{}{
+				"metrics_list.yaml": "names:\n" + metricsToYAML(metrics),
+			},
+		},
+	}
+}
+
+func metricsToYAML(metrics []string) string {
+	var sb strings.Builder
+	for _, m := range metrics {
+		sb.WriteString("  - " + m + "\n")
+	}
+	return sb.String()
 }

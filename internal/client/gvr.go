@@ -132,4 +132,10 @@ var (
 	GVRAddOnDeploymentConfig = schema.GroupVersionResource{
 		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "addondeploymentconfigs",
 	}
+	GVRObjectBucketClaim = schema.GroupVersionResource{
+		Group: "objectbucket.io", Version: "v1alpha1", Resource: "objectbucketclaims",
+	}
+	GVRVirtualMachine = schema.GroupVersionResource{
+		Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines",
+	}
 )

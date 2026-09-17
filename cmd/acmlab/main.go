@@ -83,6 +83,8 @@ func main() {
 	root.AddCommand(migrationCmd())
 	root.AddCommand(rightsizingCmd())
 	root.AddCommand(addonCmd())
+	root.AddCommand(vmCmd())
+	root.AddCommand(observabilityCmd())
 
 	rejectUnknownSubcommands(root)
 
