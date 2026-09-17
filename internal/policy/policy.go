@@ -71,12 +71,15 @@ func (m *Manager) Remove(ctx context.Context, name, namespace string) (bool, err
 		namespace = DefaultNamespace
 	}
 
-	_, err := m.client.Get(ctx, client.GVRPolicy, namespace, name)
+	obj, err := m.client.Get(ctx, client.GVRPolicy, namespace, name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("checking policy %s: %w", name, err)
+	}
+	if obj.GetDeletionTimestamp() != nil {
+		return false, nil
 	}
 
 	steps := []struct {

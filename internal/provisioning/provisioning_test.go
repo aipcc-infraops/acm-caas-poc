@@ -204,12 +204,38 @@ func TestDestroyDeletesClusterDeployment(t *testing.T) {
 	}
 }
 
-func TestDestroyIsIdempotent(t *testing.T) {
+func TestDestroyCleansManagedCluster(t *testing.T) {
+	cd := &unstructured.Unstructured{}
+	cd.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+	})
+	cd.SetName("spoke1")
+	cd.SetNamespace("spoke1")
+
+	mc := &unstructured.Unstructured{}
+	mc.SetGroupVersionKind(client.GVRManagedCluster.GroupVersion().WithKind("ManagedCluster"))
+	mc.SetName("spoke1")
+
+	c := fakeClient(cd, mc)
+	m := New(c, testConfig(), discardLogger)
+
+	if err := m.Destroy(context.Background(), "spoke1"); err != nil {
+		t.Fatalf("Destroy failed: %v", err)
+	}
+
+	_, err := c.Get(context.Background(), client.GVRManagedCluster, "", "spoke1")
+	if err == nil {
+		t.Fatal("ManagedCluster should be deleted")
+	}
+}
+
+func TestDestroyReturnsErrorForNonexistent(t *testing.T) {
 	c := fakeClient()
 	m := New(c, testConfig(), discardLogger)
 
-	if err := m.Destroy(context.Background(), "nonexistent"); err != nil {
-		t.Fatalf("Destroy of nonexistent should not error: %v", err)
+	err := m.Destroy(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("Destroy of nonexistent cluster should return an error")
 	}
 }
 

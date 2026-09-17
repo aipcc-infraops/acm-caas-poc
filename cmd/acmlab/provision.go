@@ -30,7 +30,7 @@ func provisionCmd() *cobra.Command {
 }
 
 func provisionCreateCmd() *cobra.Command {
-	var platform, region, imageSet, workerType, masterType, sshKeyFile, sshPrivateKeyFile, pullSecretFile, manifestsDir string
+	var platform, region, baseDomain, imageSet, workerType, masterType, sshKeyFile, sshPrivateKeyFile, pullSecretFile, manifestsDir string
 	var clusterType, kubernetesVersion, infraProvider, releaseImage string
 	var workers, masters int64
 	cmd := &cobra.Command{
@@ -49,7 +49,7 @@ func provisionCreateCmd() *cobra.Command {
 					Name:             args[0],
 					Platform:         platform,
 					Region:           region,
-					BaseDomain:       cfg.BaseDomain,
+					BaseDomain:       baseDomain,
 					ReleaseImage:     releaseImage,
 					NodePoolReplicas: workers,
 				}
@@ -95,6 +95,7 @@ func provisionCreateCmd() *cobra.Command {
 			opts := provisioning.ClusterOpts{
 				Name:           args[0],
 				Platform:       platform,
+				BaseDomain:     baseDomain,
 				Region:         region,
 				ImageSet:       imageSet,
 				WorkerType:     workerType,
@@ -142,6 +143,7 @@ func provisionCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&kubernetesVersion, "kubernetes-version", "", "Kubernetes version for CAPI clusters (default: v1.30.0)")
 	cmd.Flags().StringVar(&infraProvider, "infra-provider", "", "CAPI infrastructure provider: docker, aws, azure, gcp (default: docker)")
 	cmd.Flags().StringVar(&platform, "platform", "", "cloud platform: ibmcloud, aws, gcp, azure (default: from env)")
+	cmd.Flags().StringVar(&baseDomain, "base-domain", "", "base DNS domain for the cluster (default: from ACM_BASE_DOMAIN env)")
 	cmd.Flags().StringVar(&region, "region", "", "cloud region (default: from env)")
 	cmd.Flags().StringVar(&imageSet, "image-set", "", "ClusterImageSet name (default: from env)")
 	cmd.Flags().StringVar(&workerType, "worker-type", "", "worker instance type (default: bx2-4x16)")

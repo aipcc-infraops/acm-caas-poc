@@ -35,9 +35,9 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Inspector {
 	return &Inspector{client: c, cfg: cfg, logger: logger}
 }
 
-func (i *Inspector) ListClusters(ctx context.Context) ([]ClusterInfo, error) {
+func (i *Inspector) ListClusters(ctx context.Context, labelSelector string) ([]ClusterInfo, error) {
 	i.logger.Info("fleet.ListClusters")
-	list, err := i.client.List(ctx, client.GVRManagedCluster, "", "")
+	list, err := i.client.List(ctx, client.GVRManagedCluster, "", labelSelector)
 	if err != nil {
 		return nil, fmt.Errorf("listing managed clusters: %w", err)
 	}

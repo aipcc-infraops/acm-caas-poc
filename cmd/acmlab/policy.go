@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/pablofelix/acm-caas-poc/internal/automation"
 	"github.com/pablofelix/acm-caas-poc/internal/policy"
 )
 
@@ -27,12 +28,18 @@ func policyCmd() *cobra.Command {
 		policyReportCmd(),
 		policyApplyQuotaCmd(),
 		policyQuotaStatusCmd(),
+		policyAutomateCmd(),
+		policyAutomationStatusCmd(),
+		policyListAutomationsCmd(),
+		policyRemoveAutomationCmd(),
+		policySetAutomationModeCmd(),
 	)
 	return cmd
 }
 
 func policyListCmd() *cobra.Command {
 	var namespace string
+	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List policies and compliance status",
@@ -50,6 +57,11 @@ func policyListCmd() *cobra.Command {
 				fmt.Println("No policies found")
 				return nil
 			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(policies, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
 			fmt.Printf("%-35s %-12s %-10s %-15s\n", "NAME", "REMEDIATION", "DISABLED", "COMPLIANT")
 			for _, p := range policies {
 				compliant := p.Compliant
@@ -62,6 +74,7 @@ func policyListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -382,4 +395,196 @@ func parseLabels(s string) map[string]string {
 		}
 	}
 	return labels
+}
+
+func policyAutomateCmd() *cobra.Command {
+	var policyName, towerURL, towerSecret, jobTemplate, mode, namespace string
+	var extraVars []string
+
+	cmd := &cobra.Command{
+		Use:   "automate <name>",
+		Short: "Create a PolicyAutomation linking a policy to an Ansible job template (UC-30)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if policyName == "" {
+				return fmt.Errorf("--policy is required")
+			}
+			if towerSecret == "" {
+				return fmt.Errorf("--tower-secret is required")
+			}
+			if jobTemplate == "" {
+				return fmt.Errorf("--job-template is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := automation.New(c, cfg, logger)
+
+			vars := map[string]string{}
+			for _, ev := range extraVars {
+				parts := strings.SplitN(ev, "=", 2)
+				if len(parts) == 2 {
+					vars[parts[0]] = parts[1]
+				}
+			}
+
+			opts := automation.AutomationOpts{
+				Name:        args[0],
+				Namespace:   namespace,
+				PolicyName:  policyName,
+				Mode:        mode,
+				TowerURL:    towerURL,
+				TowerSecret: towerSecret,
+				JobTemplate: jobTemplate,
+				ExtraVars:   vars,
+			}
+
+			fmt.Printf("Creating PolicyAutomation %s for policy %s...\n", args[0], policyName)
+			if err := mgr.Create(context.Background(), opts); err != nil {
+				return err
+			}
+			fmt.Println("PolicyAutomation created. Ansible jobs will trigger on policy violations.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&policyName, "policy", "", "referenced policy name (required)")
+	cmd.Flags().StringVar(&towerURL, "tower-url", "", "Ansible Tower URL")
+	cmd.Flags().StringVar(&towerSecret, "tower-secret", "", "secret name with tower credentials (required)")
+	cmd.Flags().StringVar(&jobTemplate, "job-template", "", "Ansible job template name (required)")
+	cmd.Flags().StringVar(&mode, "mode", "scan", "automation mode: scan, once, disabled")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace (default: open-cluster-management-policies)")
+	cmd.Flags().StringArrayVar(&extraVars, "extra-var", nil, "extra variables (key=value)")
+	return cmd
+}
+
+func policyAutomationStatusCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "automation-status <name>",
+		Short: "Show PolicyAutomation status (UC-30)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := automation.New(c, cfg, logger)
+			info, err := mgr.Get(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(info, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Name:       %s\n", info.Name)
+			fmt.Printf("Namespace:  %s\n", info.Namespace)
+			fmt.Printf("Policy:     %s\n", info.PolicyName)
+			fmt.Printf("Mode:       %s\n", info.Mode)
+			fmt.Printf("Status:     %s\n", info.Status)
+			if info.LastRun != "" {
+				fmt.Printf("Last Run:   %s\n", info.LastRun)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace (default: open-cluster-management-policies)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func policyListAutomationsCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "list-automations",
+		Short: "List all PolicyAutomations (UC-30)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := automation.New(c, cfg, logger)
+			infos, err := mgr.List(context.Background(), namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(infos, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(infos) == 0 {
+				fmt.Println("No policy automations found")
+				return nil
+			}
+			fmt.Printf("%-25s %-25s %-10s %s\n", "NAME", "POLICY", "MODE", "STATUS")
+			for _, info := range infos {
+				fmt.Printf("%-25s %-25s %-10s %s\n", info.Name, info.PolicyName, info.Mode, info.Status)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace (default: open-cluster-management-policies)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func policyRemoveAutomationCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "remove-automation <name>",
+		Short: "Remove a PolicyAutomation (UC-30)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := automation.New(c, cfg, logger)
+			fmt.Printf("Removing PolicyAutomation %s...\n", args[0])
+			removed, err := mgr.Delete(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if removed {
+				fmt.Println("PolicyAutomation removed.")
+			} else {
+				fmt.Printf("PolicyAutomation %s not found (nothing to remove)\n", args[0])
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace (default: open-cluster-management-policies)")
+	return cmd
+}
+
+func policySetAutomationModeCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "set-automation-mode <name> <mode>",
+		Short: "Update the automation mode: scan, once, disabled (UC-30)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := automation.New(c, cfg, logger)
+			if err := mgr.UpdateMode(context.Background(), args[0], namespace, args[1]); err != nil {
+				return err
+			}
+			fmt.Printf("PolicyAutomation %s mode set to %s\n", args[0], args[1])
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace (default: open-cluster-management-policies)")
+	return cmd
 }

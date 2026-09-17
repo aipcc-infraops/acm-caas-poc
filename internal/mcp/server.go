@@ -26,6 +26,9 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
 	"github.com/pablofelix/acm-caas-poc/internal/access"
+	"github.com/pablofelix/acm-caas-poc/internal/automation"
+	"github.com/pablofelix/acm-caas-poc/internal/backup"
+	"github.com/pablofelix/acm-caas-poc/internal/gitops"
 	"github.com/pablofelix/acm-caas-poc/internal/pool"
 	"github.com/pablofelix/acm-caas-poc/internal/rollout"
 	"github.com/pablofelix/acm-caas-poc/internal/security"
@@ -91,6 +94,15 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 	accessMgr := access.New(c, cfg, log)
 	registerAccessTools(s, accessMgr)
 
+	backupMgr := backup.New(c, cfg, log)
+	registerBackupTools(s, backupMgr)
+
+	autoMgr := automation.New(c, cfg, log)
+	registerAutomationTools(s, autoMgr)
+
+	gitopsMgr := gitops.New(c, cfg, log)
+	registerGitOpsTools(s, gitopsMgr)
+
 	return s
 }
 
@@ -100,7 +112,7 @@ func registerFleetTools(s *server.MCPServer, fi *fleet.Inspector) {
 			mcp.WithDescription("Get complete fleet status — all managed clusters with health, labels, version, and conditions. Returns a summary with total/healthy/degraded counts."),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			clusters, err := fi.ListClusters(ctx)
+			clusters, err := fi.ListClusters(ctx, "")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -126,7 +138,7 @@ func registerFleetTools(s *server.MCPServer, fi *fleet.Inspector) {
 			mcp.WithDescription("List all ManagedCluster resources on the ACM hub with status, labels, and conditions."),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			clusters, err := fi.ListClusters(ctx)
+			clusters, err := fi.ListClusters(ctx, "")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
