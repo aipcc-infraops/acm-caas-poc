@@ -454,3 +454,165 @@ func TestNestedMapInvalid(t *testing.T) {
 		t.Error("expected ok=false for invalid path")
 	}
 }
+
+func TestApplyCustomPolicyFromInline(t *testing.T) {
+	mgr := newManager()
+	rego := "package deny_latest\nviolation[{\"msg\": msg}] {\n  c := input.review.object.spec.containers[_]\n  endswith(c.image, \":latest\")\n  msg := \"latest tag not allowed\"\n}"
+	opts := CustomPolicyOpts{
+		Cluster:    "spoke1",
+		RegoInline: rego,
+	}
+	err := mgr.ApplyCustomPolicy(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ApplyCustomPolicy failed: %v", err)
+	}
+
+	mw, err := mgr.client.Get(context.Background(), client.GVRManifestWork, "spoke1", "custom-rego-deny_latest-spoke1")
+	if err != nil {
+		t.Fatalf("ManifestWork not found: %v", err)
+	}
+	labels := mw.GetLabels()
+	if labels["acmlab.redhat.com/custom-rego"] != "true" {
+		t.Error("custom-rego label missing")
+	}
+}
+
+func TestApplyCustomPolicyWithName(t *testing.T) {
+	mgr := newManager()
+	rego := "package my_policy\nviolation[{\"msg\": \"denied\"}] { true }"
+	opts := CustomPolicyOpts{
+		Name:       "block-stuff",
+		Cluster:    "spoke1",
+		RegoInline: rego,
+	}
+	err := mgr.ApplyCustomPolicy(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ApplyCustomPolicy failed: %v", err)
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRManifestWork, "spoke1", "custom-rego-block-stuff-spoke1")
+	if err != nil {
+		t.Fatalf("ManifestWork not found: %v", err)
+	}
+}
+
+func TestApplyCustomPolicyNoRego(t *testing.T) {
+	mgr := newManager()
+	opts := CustomPolicyOpts{Cluster: "spoke1"}
+	err := mgr.ApplyCustomPolicy(context.Background(), opts)
+	if err == nil {
+		t.Fatal("expected error when no rego provided")
+	}
+}
+
+func TestApplyCustomPolicyNoPackage(t *testing.T) {
+	mgr := newManager()
+	opts := CustomPolicyOpts{
+		Cluster:    "spoke1",
+		RegoInline: "violation[{\"msg\": \"bad\"}] { true }",
+	}
+	err := mgr.ApplyCustomPolicy(context.Background(), opts)
+	if err == nil {
+		t.Fatal("expected error when no package declaration")
+	}
+}
+
+func TestRemoveCustomPolicy(t *testing.T) {
+	mgr := newManager()
+	rego := "package test_remove\nviolation[{\"msg\": \"x\"}] { true }"
+	opts := CustomPolicyOpts{Cluster: "spoke1", RegoInline: rego}
+	if err := mgr.ApplyCustomPolicy(context.Background(), opts); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	err := mgr.RemoveCustomPolicy(context.Background(), "test_remove", "spoke1")
+	if err != nil {
+		t.Fatalf("RemoveCustomPolicy failed: %v", err)
+	}
+}
+
+func TestRemoveCustomPolicyNotFound(t *testing.T) {
+	mgr := newManager()
+	err := mgr.RemoveCustomPolicy(context.Background(), "nonexistent", "spoke1")
+	if err == nil {
+		t.Fatal("expected error for nonexistent policy")
+	}
+}
+
+func TestListCustomPolicies(t *testing.T) {
+	mgr := newManager()
+	rego := "package list_test\nviolation[{\"msg\": \"x\"}] { true }"
+	opts := CustomPolicyOpts{Cluster: "spoke1", RegoInline: rego}
+	if err := mgr.ApplyCustomPolicy(context.Background(), opts); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	policies, err := mgr.ListCustomPolicies(context.Background())
+	if err != nil {
+		t.Fatalf("ListCustomPolicies failed: %v", err)
+	}
+	if len(policies) != 1 {
+		t.Errorf("got %d policies, want 1", len(policies))
+	}
+}
+
+func TestExtractPackageName(t *testing.T) {
+	tests := []struct {
+		rego string
+		want string
+	}{
+		{"package deny_latest\nviolation[{}] { true }", "deny_latest"},
+		{"# comment\npackage my.policy\nviolation[{}] { true }", "my.policy"},
+		{"violation[{}] { true }", ""},
+	}
+	for _, tt := range tests {
+		got := extractPackageName(tt.rego)
+		if got != tt.want {
+			t.Errorf("extractPackageName(%q) = %q, want %q", tt.rego[:20], got, tt.want)
+		}
+	}
+}
+
+func TestToCamelCase(t *testing.T) {
+	tests := []struct {
+		pkg  string
+		want string
+	}{
+		{"deny_latest", "DenyLatest"},
+		{"k8s.required.labels", "K8sRequiredLabels"},
+		{"simple", "Simple"},
+	}
+	for _, tt := range tests {
+		got := toCamelCase(tt.pkg)
+		if got != tt.want {
+			t.Errorf("toCamelCase(%q) = %q, want %q", tt.pkg, got, tt.want)
+		}
+	}
+}
+
+func TestToKebab(t *testing.T) {
+	tests := []struct {
+		pkg  string
+		want string
+	}{
+		{"deny_latest", "deny-latest"},
+		{"k8s.required.labels", "k8s-required-labels"},
+	}
+	for _, tt := range tests {
+		got := toKebab(tt.pkg)
+		if got != tt.want {
+			t.Errorf("toKebab(%q) = %q, want %q", tt.pkg, got, tt.want)
+		}
+	}
+}
+
+func TestApplyInvalidLevel(t *testing.T) {
+	mgr := newManager()
+	err := mgr.ApplyBaseline(context.Background(), "spoke1", "garbage", "")
+	if err == nil {
+		t.Fatal("expected error for invalid level")
+	}
+	if !strings.Contains(err.Error(), "invalid security level") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
