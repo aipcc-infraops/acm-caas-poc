@@ -111,6 +111,9 @@ var (
 	GVRRestore = schema.GroupVersionResource{
 		Group: "cluster.open-cluster-management.io", Version: "v1beta1", Resource: "restores",
 	}
+	GVRSubmarinerConfig = schema.GroupVersionResource{
+		Group: "submarineraddon.open-cluster-management.io", Version: "v1alpha1", Resource: "submarinerconfigs",
+	}
 	GVRHostedCluster = schema.GroupVersionResource{
 		Group: "hypershift.openshift.io", Version: "v1beta1", Resource: "hostedclusters",
 	}

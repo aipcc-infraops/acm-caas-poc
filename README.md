@@ -30,10 +30,10 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-20 | AI platform operator version fleet segregation | ✅ Implemented | `internal/gpu/` |
 | UC-21 | Elastic GPU capacity (auto-provision on saturation) | ✅ Implemented | `internal/gpu/` |
 | UC-22 | ClusterSet management — team isolation | ✅ Implemented | `internal/clusterset/` |
-| UC-23 | Multi-architecture cluster matrix (QA) | 📋 Planned | `internal/matrix/` |
+| UC-23 | Multi-architecture cluster matrix (QA) | ✅ Implemented | `internal/matrix/` |
 | UC-24 | Per-team compliance reporting | ✅ Implemented | `internal/policy/` |
 | UC-25 | ClusterPool + ClusterClaim (pre-warmed clusters) | ✅ Implemented | `internal/pool/` |
-| UC-26 | Multi-cluster networking (Submariner) | 📋 Planned | `internal/submariner/` |
+| UC-26 | Multi-cluster networking (Submariner) | ✅ Implemented | `internal/submariner/` |
 | UC-27 | Operator version pinning (OperatorPolicy) | ✅ Implemented | `internal/policy/` |
 | UC-28 | Certificate expiry detection fleet-wide | ✅ Implemented | `internal/policy/` |
 | UC-29 | Security baseline enforcement (Gatekeeper/OPA) | ✅ Implemented | `internal/security/` |

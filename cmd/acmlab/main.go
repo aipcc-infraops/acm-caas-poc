@@ -77,6 +77,8 @@ func main() {
 	root.AddCommand(costCmd())
 	root.AddCommand(reclamationCmd())
 	root.AddCommand(gpuCmd())
+	root.AddCommand(submarinerCmd())
+	root.AddCommand(matrixCmd())
 
 	rejectUnknownSubcommands(root)
 
