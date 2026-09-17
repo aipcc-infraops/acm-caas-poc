@@ -54,9 +54,9 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-45 | Fleet right-sizing recommendations (MCOA) | ✅ Implemented | `internal/rightsizing/` |
 | UC-46 | Cluster Proxy (spoke service exposure to hub) | ✅ Implemented | `internal/access/` |
 | UC-47 | Add-on lifecycle management (AddOnDeploymentConfig) | ✅ Implemented | `internal/addon/` |
-| UC-48 | Placement scoring (resource-based workload scheduling) | 📋 Planned | `internal/fleet/` |
-| UC-49 | PolicySet compliance profiles (golden config) | 📋 Planned | `internal/policy/` |
-| UC-50 | ClusterCurator day-2 automation hooks | 📋 Planned | `internal/lifecycle/` |
+| UC-48 | Placement scoring (resource-based workload scheduling) | ✅ Implemented | `internal/fleet/` |
+| UC-49 | PolicySet compliance profiles (golden config) | ✅ Implemented | `internal/policy/` |
+| UC-50 | ClusterCurator day-2 automation hooks | ✅ Implemented | `internal/lifecycle/` |
 
 ### PoC Priority Areas
 

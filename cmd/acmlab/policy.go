@@ -33,6 +33,12 @@ func policyCmd() *cobra.Command {
 		policyListAutomationsCmd(),
 		policyRemoveAutomationCmd(),
 		policySetAutomationModeCmd(),
+		policyApplySetCmd(),
+		policyGetSetCmd(),
+		policyListSetsCmd(),
+		policyRemoveSetCmd(),
+		policyViolationsCmd(),
+		policyTroubleshootCmd(),
 	)
 	return cmd
 }
@@ -586,5 +592,260 @@ func policySetAutomationModeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace (default: open-cluster-management-policies)")
+	return cmd
+}
+
+func policyApplySetCmd() *cobra.Command {
+	var namespace, description, clusterSet string
+	var policies []string
+
+	cmd := &cobra.Command{
+		Use:   "apply-set <name>",
+		Short: "Create a PolicySet compliance profile (UC-49)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(policies) == 0 {
+				return fmt.Errorf("--policies is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			opts := policy.PolicySetOpts{
+				Name:        args[0],
+				Namespace:   namespace,
+				Description: description,
+				Policies:    policies,
+				ClusterSet:  clusterSet,
+			}
+			fmt.Printf("Creating PolicySet %s...\n", args[0])
+			if err := mgr.ApplyPolicySet(context.Background(), opts); err != nil {
+				return err
+			}
+			fmt.Println("PolicySet created. Grouped policies will be evaluated as a compliance profile.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVar(&description, "description", "", "PolicySet description")
+	cmd.Flags().StringSliceVar(&policies, "policies", nil, "policy names to include (required)")
+	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "scope to a ClusterSet")
+	return cmd
+}
+
+func policyGetSetCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "get-set <name>",
+		Short: "Show PolicySet details (UC-49)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			info, err := mgr.GetPolicySet(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(info, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("PolicySet:   %s\n", info.Name)
+			fmt.Printf("Namespace:   %s\n", info.Namespace)
+			fmt.Printf("Description: %s\n", info.Description)
+			compliant := info.Compliant
+			if compliant == "" {
+				compliant = "Unknown"
+			}
+			fmt.Printf("Compliant:   %s\n", compliant)
+			fmt.Println("\nPolicies:")
+			for _, p := range info.Policies {
+				fmt.Printf("  - %s\n", p)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func policyListSetsCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "list-sets",
+		Short: "List all PolicySets (UC-49)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			sets, err := mgr.ListPolicySets(context.Background(), namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(sets, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(sets) == 0 {
+				fmt.Println("No PolicySets found")
+				return nil
+			}
+			fmt.Printf("%-25s %-15s %-10s %s\n", "NAME", "COMPLIANT", "POLICIES", "DESCRIPTION")
+			for _, s := range sets {
+				compliant := s.Compliant
+				if compliant == "" {
+					compliant = "-"
+				}
+				desc := s.Description
+				if len(desc) > 40 {
+					desc = desc[:37] + "..."
+				}
+				fmt.Printf("%-25s %-15s %-10d %s\n", s.Name, compliant, len(s.Policies), desc)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func policyRemoveSetCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "remove-set <name>",
+		Short: "Remove a PolicySet and its placement (UC-49)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			fmt.Printf("Removing PolicySet %s...\n", args[0])
+			removed, err := mgr.RemovePolicySet(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if removed {
+				fmt.Println("PolicySet removed. All resources cleaned up.")
+			} else {
+				fmt.Printf("PolicySet %s not found (nothing to remove)\n", args[0])
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	return cmd
+}
+
+func policyViolationsCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "violations <name>",
+		Short: "Show policy violations per cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			violations, err := mgr.GetViolations(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(violations, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Policy:    %s\n", violations.Name)
+			fmt.Printf("Compliant: %s\n", violations.Compliant)
+			if len(violations.Violations) == 0 {
+				fmt.Println("\nNo violations found")
+				return nil
+			}
+			fmt.Printf("\n%-25s %s\n", "CLUSTER", "MESSAGE")
+			for _, v := range violations.Violations {
+				msg := v.Message
+				if len(msg) > 60 {
+					msg = msg[:57] + "..."
+				}
+				fmt.Printf("%-25s %s\n", v.Cluster, msg)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func policyTroubleshootCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "troubleshoot <name>",
+		Short: "Troubleshoot a policy: violations + events + propagation",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := policy.New(c, cfg, logger)
+			report, err := mgr.Troubleshoot(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Policy:    %s\n", report.Policy)
+			fmt.Printf("Namespace: %s\n", report.Namespace)
+			fmt.Printf("Compliant: %s\n", report.Compliant)
+
+			if len(report.Violations) > 0 {
+				fmt.Printf("\nViolations (%d):\n", len(report.Violations))
+				for _, v := range report.Violations {
+					fmt.Printf("  - %s: %s\n", v.Cluster, v.Message)
+				}
+			} else {
+				fmt.Println("\nNo violations")
+			}
+
+			if len(report.Events) > 0 {
+				fmt.Printf("\nRecent Events (%d):\n", len(report.Events))
+				for _, e := range report.Events {
+					fmt.Printf("  [%s] %s: %s (%s)\n", e.Type, e.Reason, e.Message, e.Timestamp)
+				}
+			} else {
+				fmt.Println("\nNo recent events in policy namespace")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
