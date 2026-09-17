@@ -1284,6 +1284,361 @@ Addon Healthy:  true
 
 Lists all clusters with managed access enabled.
 
+### Agent-Mode GitOps (UC-44)
+
+#### `acmlab gitops enable-agent <name>`
+
+Enable agent-mode (pull-based) GitOps for disconnected or edge clusters. Creates an ApplicationSet with PullMode=true so spokes pull configurations instead of the hub pushing them.
+
+Options:
+- `--repo`: Git repository URL (required)
+- `--path`: path in repository (required)
+- `--revision`: Git revision (default: main)
+- `--namespace`: namespace (default: openshift-gitops)
+- `--cluster`: target cluster names (repeatable, required)
+
+```
+$ acmlab gitops enable-agent edge-apps --repo https://github.com/org/edge-configs --path manifests/edge --cluster edge-01 --cluster edge-02
+Enabling agent-mode GitOps edge-apps for 2 cluster(s)...
+Agent-mode ApplicationSet created with PullMode=true. Disconnected clusters will pull configurations.
+```
+
+#### `acmlab gitops agent-status <name>`
+
+Show agent-mode GitOps status: repo, path, mode, and sync status.
+
+Options:
+- `--namespace`: namespace (default: openshift-gitops)
+- `--json`: output as JSON
+
+#### `acmlab gitops disable-agent <name>`
+
+Disable agent-mode GitOps by removing the ApplicationSet.
+
+Options:
+- `--namespace`: namespace (default: openshift-gitops)
+
+### Right-Sizing (UC-45)
+
+#### `acmlab rightsizing enable <cluster>`
+
+Enable right-sizing monitoring on a cluster. Deploys MCOA PrometheusRules for resource usage metrics collection.
+
+```
+$ acmlab rightsizing enable spoke1
+Enabling right-sizing monitoring on spoke1...
+Right-sizing monitoring enabled on spoke1
+```
+
+#### `acmlab rightsizing advise <cluster>`
+
+Get right-sizing recommendations for workloads on a cluster. Read-only: no changes are applied.
+
+Options:
+- `--json`: output as JSON
+
+```
+$ acmlab rightsizing advise spoke1
+WORKLOAD             CONTAINER       CUR CPU      REC CPU      CUR MEM      REC MEM      SAVINGS
+nginx-deploy         nginx           500m         200m         512Mi        256Mi        ~50%
+```
+
+#### `acmlab rightsizing adjust <cluster>`
+
+Apply right-sizing adjustments to workloads on a cluster. Mutates resource requests/limits based on recommendations.
+
+Options:
+- `--dry-run`: show proposed changes without applying
+- `--json`: output as JSON
+
+```
+$ acmlab rightsizing adjust spoke1 --dry-run
+[DRY-RUN]
+WORKLOAD                  CONTAINER       ACTION     DETAIL
+nginx-deploy              nginx           resize     cpu: 500m→200m, mem: 512Mi→256Mi
+```
+
+#### `acmlab rightsizing list`
+
+List clusters with right-sizing monitoring enabled.
+
+Options:
+- `--json`: output as JSON
+
+#### `acmlab rightsizing disable <cluster>`
+
+Disable right-sizing monitoring on a cluster. Removes MCOA resources.
+
+### Cluster Proxy (UC-46)
+
+#### `acmlab access enable-proxy <cluster>`
+
+Enable cluster proxy on a spoke cluster. Creates a ManagedClusterAddOn for reverse proxy tunnels from spoke to hub.
+
+```
+$ acmlab access enable-proxy spoke1
+Cluster proxy enabled on spoke1
+```
+
+#### `acmlab access proxy-status <cluster>`
+
+Show cluster proxy status: enabled, healthy, and endpoint.
+
+Options:
+- `--json`: output as JSON
+
+```
+$ acmlab access proxy-status spoke1
+Cluster:   spoke1
+Enabled:   true
+Healthy:   true
+Endpoint:  https://cluster-proxy-addon.open-cluster-management.svc:443
+```
+
+#### `acmlab access disable-proxy <cluster>`
+
+Disable cluster proxy on a spoke cluster.
+
+### Add-on Lifecycle (UC-47)
+
+#### `acmlab addon list`
+
+List registered ClusterManagementAddOns with display name and status.
+
+Options:
+- `--json`: output as JSON
+
+```
+$ acmlab addon list
+NAME                           DISPLAY NAME                   STATUS
+work-manager                   Work Manager                   Available
+observability-controller       Observability Controller       Available
+```
+
+#### `acmlab addon get <name>`
+
+Show add-on details: description, install namespace, linked configurations.
+
+Options:
+- `--json`: output as JSON
+
+#### `acmlab addon configure <name>`
+
+Create or update an AddOnDeploymentConfig with key-value configuration.
+
+Options:
+- `--namespace`: namespace (default: open-cluster-management)
+- `--install-namespace`: agent install namespace on spoke clusters
+- `--set`: configuration values (key=value, repeatable)
+
+```
+$ acmlab addon configure observability-config --set replica-count=3 --set log-level=debug
+Configuring add-on observability-config...
+AddOnDeploymentConfig observability-config created
+```
+
+#### `acmlab addon list-configs`
+
+List AddOnDeploymentConfig resources.
+
+Options:
+- `--json`: output as JSON
+
+#### `acmlab addon remove-config <name>`
+
+Remove an AddOnDeploymentConfig.
+
+Options:
+- `--namespace`: namespace (default: open-cluster-management)
+
+### Placement Scoring (UC-48)
+
+#### `acmlab fleet scoring-configure <name>`
+
+Configure placement scoring for resource-based cluster selection. Creates a Placement with ResourceAllocatableCPU/Memory prioritizers and an AddOnPlacementScore.
+
+Options:
+- `--namespace`: placement namespace (default: open-cluster-management)
+- `--prioritizers`: scoring prioritizers (default: ResourceAllocatableCPU,ResourceAllocatableMemory)
+- `--cluster-set`: scope to a ClusterSet
+- `--labels`, `-l`: filter clusters by labels (key=value,key2=value2)
+
+```
+$ acmlab fleet scoring-configure gpu-scoring --cluster-set gpu-clusters --prioritizers ResourceAllocatableCPU,ResourceAllocatableMemory
+Configuring placement scoring gpu-scoring...
+Scoring placement configured. Clusters will be ranked by resource availability.
+```
+
+#### `acmlab fleet scoring-status <name>`
+
+Show placement scoring decisions: clusters ranked by score.
+
+Options:
+- `--namespace`: placement namespace
+- `--json`: output as JSON
+
+```
+$ acmlab fleet scoring-status gpu-scoring
+Scoring: gpu-scoring
+Namespace: open-cluster-management
+
+CLUSTER                        SCORE      REASON
+spoke1                         85         ResourceAllocatableCPU: 85
+spoke2                         62         ResourceAllocatableCPU: 62
+```
+
+#### `acmlab fleet scoring-remove <name>`
+
+Remove a scoring placement.
+
+Options:
+- `--namespace`: placement namespace
+
+#### `acmlab fleet scoring-list`
+
+List all scoring placements.
+
+Options:
+- `--namespace`: placement namespace
+- `--json`: output as JSON
+
+### PolicySet (UC-49)
+
+#### `acmlab policy apply-set <name>`
+
+Create a PolicySet compliance profile grouping multiple policies with a single PlacementBinding.
+
+Options:
+- `--namespace`, `-n`: policy namespace (default: global-set)
+- `--description`: PolicySet description
+- `--policies`: policy names to include (required)
+- `--cluster-set`: scope to a ClusterSet
+
+```
+$ acmlab policy apply-set cis-golden-config --policies cert-expiry,image-registry,operator-pin --description "CIS golden configuration"
+Creating PolicySet cis-golden-config...
+PolicySet created. Grouped policies will be evaluated as a compliance profile.
+```
+
+#### `acmlab policy get-set <name>`
+
+Show PolicySet details: description, compliance status, and member policies.
+
+Options:
+- `--namespace`, `-n`: policy namespace (default: global-set)
+- `--json`: output as JSON
+
+#### `acmlab policy list-sets`
+
+List all PolicySets with compliance status and policy count.
+
+Options:
+- `--namespace`, `-n`: policy namespace (default: global-set)
+- `--json`: output as JSON
+
+```
+$ acmlab policy list-sets
+NAME                      COMPLIANT       POLICIES   DESCRIPTION
+cis-golden-config         Compliant       3          CIS golden configuration
+```
+
+#### `acmlab policy remove-set <name>`
+
+Remove a PolicySet and its placement resources.
+
+Options:
+- `--namespace`, `-n`: policy namespace (default: global-set)
+
+### Policy Troubleshooting
+
+#### `acmlab policy violations <name>`
+
+Show policy violations per cluster. Reads from Policy.status.status[].clusterConditions on the hub.
+
+Options:
+- `--namespace`, `-n`: policy namespace (default: global-set)
+- `--json`: output as JSON
+
+```
+$ acmlab policy violations image-registry-policy
+Policy:    image-registry-policy
+Compliant: NonCompliant
+
+CLUSTER                   MESSAGE
+spoke1                    Container uses disallowed registry: docker.io
+```
+
+#### `acmlab policy troubleshoot <name>`
+
+Troubleshoot a policy by combining violations, recent events in the policy namespace, and propagation status into a single report.
+
+Options:
+- `--namespace`, `-n`: policy namespace (default: global-set)
+- `--json`: output as JSON
+
+```
+$ acmlab policy troubleshoot image-registry-policy
+Policy:    image-registry-policy
+Namespace: global-set
+Compliant: NonCompliant
+
+Violations (1):
+  - spoke1: Container uses disallowed registry: docker.io
+
+Recent Events (2):
+  [Warning] PolicyPropagation: Policy replicated to spoke1 (2026-09-17T10:00:00Z)
+  [Normal] PolicyStatusSync: Policy status updated (2026-09-17T10:00:05Z)
+```
+
+### ClusterCurator (UC-50)
+
+#### `acmlab lifecycle curator-apply <cluster>`
+
+Apply ClusterCurator day-2 automation hooks. Pre/post hooks run Kubernetes Jobs or Ansible Jobs during lifecycle operations (upgrade, hibernate, resume).
+
+Options:
+- `--namespace`, `-n`: cluster namespace (defaults to cluster name)
+- `--pre-hook`: pre-hook job name
+- `--pre-hook-type`: pre-hook type: Job or AnsibleJob (default: Job)
+- `--post-hook`: post-hook job name
+- `--post-hook-type`: post-hook type: Job or AnsibleJob (default: Job)
+
+```
+$ acmlab lifecycle curator-apply spoke1 --pre-hook validate-health --post-hook notify-team --post-hook-type AnsibleJob
+Applying ClusterCurator to spoke1...
+ClusterCurator applied. Day-2 hooks will run during lifecycle operations.
+```
+
+#### `acmlab lifecycle curator-status <cluster>`
+
+Show ClusterCurator status: pre/post hooks, execution status.
+
+Options:
+- `--namespace`, `-n`: cluster namespace
+- `--json`: output as JSON
+
+#### `acmlab lifecycle curator-remove <cluster>`
+
+Remove ClusterCurator from a cluster.
+
+Options:
+- `--namespace`, `-n`: cluster namespace
+
+#### `acmlab lifecycle curator-list`
+
+List all ClusterCurators with hook configuration and status.
+
+Options:
+- `--namespace`, `-n`: filter by namespace
+- `--json`: output as JSON
+
+```
+$ acmlab lifecycle curator-list
+CLUSTER                   PRE-HOOK        POST-HOOK       STATUS
+spoke1                    validate-health notify-team     active
+spoke2                    -               cleanup-job     active
+```
+
 ### Virtual Machines (UC-51)
 
 #### `acmlab vm deploy`
