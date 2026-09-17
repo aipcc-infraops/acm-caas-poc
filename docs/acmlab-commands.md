@@ -1004,6 +1004,47 @@ Lists all security baselines deployed across the fleet.
 
 Removes the security baseline ManifestWork from a cluster.
 
+#### `acmlab security apply-rego`
+
+Deploys a custom Rego policy to a cluster via Gatekeeper. Reads a `.rego` file, extracts the package name, builds a ConstraintTemplate + Constraint, and pushes via ManifestWork.
+
+*Source: `cmd/acmlab/security.go`: `securityApplyRegoCmd()`*
+
+Options:
+- `--cluster`: target cluster name (required)
+- `--rego-file`: path to `.rego` file (required)
+- `--name`: policy name (defaults to package name from Rego)
+- `--match`: Kubernetes kinds to match (default: Pod)
+
+```
+$ acmlab security apply-rego --cluster spoke1 --rego-file deny-latest.rego
+Applying custom Rego policy from deny-latest.rego to spoke1...
+Custom Rego policy deployed via ManifestWork.
+```
+
+#### `acmlab security list-rego`
+
+Lists all custom Rego policies deployed across the fleet.
+
+*Source: `cmd/acmlab/security.go`: `securityListRegoCmd()`*
+
+Options:
+- `--json`: output as JSON
+
+#### `acmlab security remove-rego <name>`
+
+Removes a custom Rego policy from a cluster.
+
+*Source: `cmd/acmlab/security.go`: `securityRemoveRegoCmd()`*
+
+Options:
+- `--cluster`: target cluster name (required)
+
+```
+$ acmlab security remove-rego deny_latest --cluster spoke1
+Custom Rego policy deny_latest removed from spoke1
+```
+
 ### GitOps
 
 #### `acmlab gitops create <name>`

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -120,6 +122,93 @@ func (m *Manager) RemoveBaseline(ctx context.Context, cluster string) (bool, err
 	_ = m.client.DeleteIfExists(ctx, client.GVRPolicy, DefaultNamespace, policyName)
 
 	return true, nil
+}
+
+type CustomPolicyOpts struct {
+	Name       string
+	Cluster    string
+	RegoFile   string
+	RegoInline string
+	Match      []string
+}
+
+func (m *Manager) ApplyCustomPolicy(ctx context.Context, opts CustomPolicyOpts) error {
+	m.logger.Info("security.ApplyCustomPolicy", "name", opts.Name, "cluster", opts.Cluster)
+
+	rego, err := resolveRego(opts)
+	if err != nil {
+		return err
+	}
+
+	pkg := extractPackageName(rego)
+	if pkg == "" {
+		return fmt.Errorf("could not extract package name from Rego source")
+	}
+
+	if opts.Name == "" {
+		opts.Name = pkg
+	}
+
+	matchKinds := opts.Match
+	if len(matchKinds) == 0 {
+		matchKinds = []string{"Pod"}
+	}
+
+	mw := buildCustomRegoManifestWork(opts.Cluster, opts.Name, pkg, rego, matchKinds)
+	if err := m.client.CreateIfNotExists(ctx, client.GVRManifestWork, opts.Cluster, mw); err != nil {
+		return fmt.Errorf("creating custom policy ManifestWork: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) RemoveCustomPolicy(ctx context.Context, name, cluster string) error {
+	m.logger.Info("security.RemoveCustomPolicy", "name", name, "cluster", cluster)
+	mwName := "custom-rego-" + name + "-" + cluster
+	_, err := m.client.Get(ctx, client.GVRManifestWork, cluster, mwName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("custom policy %s not found on cluster %s", name, cluster)
+		}
+		return fmt.Errorf("checking custom policy: %w", err)
+	}
+	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, mwName)
+}
+
+func (m *Manager) ListCustomPolicies(ctx context.Context) ([]BaselineInfo, error) {
+	m.logger.Info("security.ListCustomPolicies")
+	list, err := m.client.List(ctx, client.GVRManifestWork, "", "acmlab.redhat.com/custom-rego")
+	if err != nil {
+		return nil, fmt.Errorf("listing custom policies: %w", err)
+	}
+	infos := make([]BaselineInfo, 0, len(list.Items))
+	for _, item := range list.Items {
+		infos = append(infos, parseBaselineInfo(item.Object))
+	}
+	return infos, nil
+}
+
+func resolveRego(opts CustomPolicyOpts) (string, error) {
+	if opts.RegoFile != "" {
+		data, err := os.ReadFile(opts.RegoFile)
+		if err != nil {
+			return "", fmt.Errorf("reading rego file %s: %w", opts.RegoFile, err)
+		}
+		return string(data), nil
+	}
+	if opts.RegoInline != "" {
+		return opts.RegoInline, nil
+	}
+	return "", fmt.Errorf("either RegoFile or RegoInline must be provided")
+}
+
+func extractPackageName(rego string) string {
+	for _, line := range strings.Split(rego, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "package ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "package "))
+		}
+	}
+	return ""
 }
 
 func manifestWorkName(cluster string) string {
