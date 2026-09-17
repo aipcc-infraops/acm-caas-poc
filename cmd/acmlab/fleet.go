@@ -23,6 +23,7 @@ func fleetCmd() *cobra.Command {
 
 func fleetListCmd() *cobra.Command {
 	var outputJSON bool
+	var labelSelector string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all managed clusters",
@@ -32,7 +33,7 @@ func fleetListCmd() *cobra.Command {
 				return err
 			}
 			insp := fleet.New(c, cfg, logger)
-			clusters, err := insp.ListClusters(context.Background())
+			clusters, err := insp.ListClusters(context.Background(), labelSelector)
 			if err != nil {
 				return err
 			}
@@ -54,6 +55,7 @@ func fleetListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	cmd.Flags().StringVarP(&labelSelector, "label-selector", "l", "", "filter clusters by label (e.g. vendor=OpenShift)")
 	return cmd
 }
 

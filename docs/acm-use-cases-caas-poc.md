@@ -2101,6 +2101,242 @@ Extends `internal/provisioning/` with HyperShift provisioning path
 
 ---
 
+## UC-39: Cloud-provider native scaling for imported clusters
+
+**Feature**: Scaling imported clusters using cloud-provider native APIs via ManifestWork or direct API calls
+
+As a platform operator
+I want to scale imported clusters that have no Hive MachinePool
+So that the CaaS platform can adjust capacity for clusters not provisioned by ACM
+
+### Scenario: Scale an imported cluster via cloud-provider API
+
+**Given** a ManagedCluster was imported (not provisioned by Hive)
+**And** the cluster's cloud provider API credentials are available
+**When** I trigger a scaling operation targeting the cloud-provider native API
+**Then** worker nodes are added or removed via the provider's scaling mechanism
+**And** ManagedClusterInfo reflects the updated node count
+
+### Scenario: Detect scaling is unavailable for imported clusters without provider config
+
+**Given** an imported cluster has no cloud-provider API credentials configured
+**When** I attempt to scale via native API
+**Then** the operation reports that cloud-provider credentials are required
+**And** suggests configuring the provider or using the cluster's native scaling tools
+
+### Relationship to UC-10
+
+UC-10 scales Hive-provisioned clusters via MachinePool patches. UC-39 covers the complementary path for imported clusters where no MachinePool exists.
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` (imported, no ClusterDeployment)
+`internal.open-cluster-management.io/v1beta1.ManagedClusterInfo` (node verification)
+`work.open-cluster-management.io/v1.ManifestWork` (deploy scaling manifests if applicable)
+
+### Package
+
+Extends `internal/scaling/` (UC-10)
+
+---
+
+## UC-40: Cluster API (CAPI) provisioning for vanilla Kubernetes
+
+**Feature**: Provision non-OpenShift Kubernetes clusters using Cluster API as an alternative to Hive
+
+As a platform operator
+I want to provision vanilla Kubernetes clusters via CAPI
+So that the CaaS platform supports workloads that do not require OpenShift
+
+### Scenario: Provision a CAPI cluster
+
+**Given** CAPI controllers are installed on the hub cluster
+**And** an infrastructure provider (e.g., AWS, vSphere) is configured
+**When** I create a CAPI Cluster, KubeadmControlPlane, and MachineDeployment
+**Then** a vanilla Kubernetes cluster is provisioned
+**And** the cluster is registered as a ManagedCluster in ACM
+**And** I can manage it alongside OpenShift clusters in the fleet
+
+### Scenario: Destroy a CAPI cluster
+
+**Given** a CAPI-provisioned cluster exists
+**When** I delete the CAPI Cluster resource
+**Then** the infrastructure is deprovisioned
+**And** the ManagedCluster is removed from ACM
+
+### Relationship to UC-01
+
+UC-01 provisions OpenShift clusters via Hive ClusterDeployment. UC-40 covers the alternative path for vanilla Kubernetes via Cluster API.
+
+### ACM types
+
+`cluster.x-k8s.io/v1beta1.Cluster`
+`controlplane.cluster.x-k8s.io/v1beta1.KubeadmControlPlane`
+`cluster.x-k8s.io/v1beta1.MachineDeployment`
+`cluster.open-cluster-management.io/v1.ManagedCluster`
+
+### Package
+
+Extends `internal/provisioning/` with CAPI provisioning path
+
+---
+
+## UC-41: Kubernetes cluster hibernate via CAPI scale-to-zero
+
+**Feature**: Hibernate vanilla Kubernetes clusters provisioned via CAPI by scaling worker nodes to zero
+
+As a platform operator
+I want to hibernate CAPI-provisioned clusters by scaling workers to zero
+So that I can reduce cost for idle vanilla Kubernetes clusters
+
+### Scenario: Hibernate a CAPI cluster by scaling to zero
+
+**Given** a CAPI-provisioned cluster has a MachineDeployment with replicas > 0
+**When** I patch the MachineDeployment to set replicas to 0
+**Then** all worker nodes are drained and removed
+**And** the control plane remains running (or is also scaled down depending on provider)
+**And** the ManagedCluster condition `Available` transitions to `Unknown`
+
+### Scenario: Resume a CAPI cluster by scaling up
+
+**Given** a CAPI cluster has MachineDeployment replicas set to 0
+**When** I patch the MachineDeployment to restore the original replica count
+**Then** worker nodes are provisioned
+**And** the cluster becomes Available again
+
+### Relationship to UC-05
+
+UC-05 hibernates Hive-provisioned OpenShift clusters via `ClusterDeployment.spec.powerState`. UC-41 covers the equivalent for CAPI-provisioned vanilla Kubernetes clusters using MachineDeployment scale-to-zero.
+
+### ACM types
+
+`cluster.x-k8s.io/v1beta1.MachineDeployment` (replica count)
+`cluster.open-cluster-management.io/v1.ManagedCluster` (availability tracking)
+
+### Package
+
+Extends `internal/lifecycle/` with CAPI hibernate path
+
+---
+
+## UC-42: Workload disaster recovery via Velero and GitOps
+
+**Feature**: Recover workloads on a replacement cluster after catastrophic failure
+
+As a platform operator
+I want to restore workloads to a new cluster when the original is lost
+So that the CaaS platform can guarantee business continuity
+
+### Scenario: Detect a failed cluster and trigger recovery
+
+**Given** a ManagedCluster "prod-eu-1" has condition `Available = False` for longer than the SLA threshold
+**And** a Velero BackupStorageLocation exists with recent backups for "prod-eu-1"
+**When** I initiate disaster recovery for "prod-eu-1"
+**Then** a replacement cluster "prod-eu-1-dr" is provisioned via UC-01
+
+### Scenario: Restore workloads from Velero backup
+
+**Given** a replacement cluster "prod-eu-1-dr" is provisioned and Available
+**And** Velero is deployed on the replacement cluster via ManifestWork
+**When** I create a Velero Restore targeting the latest backup
+**Then** namespaces, workloads, and PersistentVolumeClaims are restored
+**And** the restore status is reported back to the hub
+
+### Scenario: GitOps re-deploys configuration to the replacement cluster
+
+**Given** the replacement cluster "prod-eu-1-dr" inherits the same labels and ClusterSet as the original
+**When** ArgoCD ApplicationSet evaluates the Placement
+**Then** all applications that targeted "prod-eu-1" now deploy to "prod-eu-1-dr"
+**And** the configuration drift is zero
+
+### Scenario: Verify recovery completeness
+
+**Given** workloads are restored and GitOps has converged
+**When** I run a recovery report for "prod-eu-1-dr"
+**Then** the report shows restored namespaces, running pods, and bound PVCs
+**And** any gaps between the original and restored state are flagged
+
+### Relationship to other UCs
+
+UC-36 handles hub-level backup/restore (OADP). UC-42 covers workload-level disaster recovery on spoke clusters: provisioning a replacement (UC-01), restoring data (Velero), and re-deploying config (UC-32 GitOps). UC-08 handles decommissioning the failed original.
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` (health detection, label inheritance)
+`api/work/v1.ManifestWork` (Velero operator deployment)
+`apps.open-cluster-management.io/v1beta1.Placement` (GitOps cluster selection)
+`velero.io/v1.Restore`, `velero.io/v1.BackupStorageLocation` (backup/restore)
+
+### Package
+
+New `internal/recovery/` package: DetectFailure, ProvisionReplacement, DeployVelero, RestoreWorkloads, VerifyRecovery
+
+---
+
+## UC-43: Cluster relocation (planned workload migration)
+
+**Feature**: Migrate workloads from one cluster to another in a planned, controlled manner
+
+As a platform operator
+I want to relocate workloads between clusters without downtime
+So that I can move tenants across regions for cost, compliance, or capacity reasons
+
+### Scenario: Initiate a planned relocation
+
+**Given** a source cluster "prod-us-1" with running workloads
+**And** a target cluster "prod-eu-2" is provisioned and Available
+**When** I initiate a relocation from "prod-us-1" to "prod-eu-2" for namespace "tenant-alpha"
+**Then** a relocation plan is created listing workloads, volumes, and network endpoints
+
+### Scenario: Replicate workloads to the target cluster
+
+**Given** a relocation plan exists for "tenant-alpha"
+**When** I execute the replication phase
+**Then** Velero backs up namespace "tenant-alpha" from "prod-us-1"
+**And** Velero restores namespace "tenant-alpha" on "prod-eu-2"
+**And** GitOps ApplicationSet detects the new cluster and deploys configuration
+
+### Scenario: Validate target before cutover
+
+**Given** workloads are replicated to "prod-eu-2"
+**When** I run a pre-cutover validation
+**Then** pod readiness, PVC bindings, and endpoint health are verified on the target
+**And** the report confirms the target is ready for traffic
+
+### Scenario: Cutover and decommission source namespace
+
+**Given** pre-cutover validation passes
+**When** I execute the cutover
+**Then** the source namespace is cordoned (new workloads blocked)
+**And** Placement labels are updated so policies and applications target "prod-eu-2"
+**And** the source namespace on "prod-us-1" is drained and deleted
+**And** a final report confirms zero workloads remain on the source
+
+### Scenario: Cross-cluster networking during migration (Submariner)
+
+**Given** both clusters are connected via Submariner (UC-26)
+**When** the migration is in the replication phase
+**Then** workloads on the source can communicate with workloads on the target
+**And** the migration can proceed without a hard cutover for stateless services
+
+### Relationship to other UCs
+
+UC-43 composes UC-01 (provision target), UC-26 (Submariner connectivity), UC-32 (GitOps redeploy), UC-42 (Velero backup/restore mechanics), and UC-08 (decommission source namespace). The difference from UC-42: this is a planned, zero-downtime migration, not a reactive recovery.
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` (label updates for Placement)
+`api/work/v1.ManifestWork` (Velero deployment, cordon/drain)
+`submariner.io/v1alpha1.SubmarinerConfig` (cross-cluster networking)
+`apps.open-cluster-management.io/v1beta1.Placement` (traffic cutover)
+`velero.io/v1.Backup`, `velero.io/v1.Restore` (data replication)
+
+### Package
+
+New `internal/migration/` package: CreatePlan, Replicate, ValidateTarget, Cutover, DecommissionSource
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -2142,6 +2378,11 @@ Extends `internal/provisioning/` with HyperShift provisioning path
 | UC-36  |  Hub backup and restore  |  `BackupSchedule` + `Restore` + OADP  |  spec.backup |
 | UC-37  |  Worker node flavor change (rolling replacement)  |  `hive/v1.MachinePool` platform patch  |  spec.workers.type |
 | UC-38  |  HyperShift (HostedCluster) provisioning  |  `hypershift.io/v1beta1.HostedCluster` + `NodePool`  |  spec.type=hypershift |
+| UC-39  |  Cloud-provider native scaling for imported clusters  |  `ManagedCluster` + `ManagedClusterInfo` + cloud API  |  spec.scaling.cloudProvider |
+| UC-40  |  CAPI provisioning for vanilla Kubernetes  |  `cluster.x-k8s.io/v1beta1.Cluster` + `MachineDeployment`  |  spec.type=capi |
+| UC-41  |  CAPI hibernate via scale-to-zero  |  `cluster.x-k8s.io/v1beta1.MachineDeployment`  |  spec.lifecycle.capiHibernate |
+| UC-42  |  Workload disaster recovery (Velero + GitOps)  |  `ManifestWork` + `Placement` + `velero.io/v1`  |  spec.recovery |
+| UC-43  |  Cluster relocation (planned migration)  |  `ManifestWork` + `Placement` + `SubmarinerConfig` + `velero.io/v1`  |  spec.migration |
 
 ## Go Dependencies (for the lab repo)
 

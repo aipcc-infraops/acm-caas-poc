@@ -34,8 +34,9 @@ func main() {
 	slog.SetDefault(logger)
 
 	root := &cobra.Command{
-		Use:   "acmlab",
-		Short: "ACM CaaS PoC Lab CLI",
+		Use:          "acmlab",
+		Short:        "ACM CaaS PoC Lab CLI",
+		SilenceUsage: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if verbose {
 				logLevel.Set(slog.LevelDebug)
@@ -70,7 +71,11 @@ func main() {
 	root.AddCommand(securityCmd())
 	root.AddCommand(rolloutCmd())
 	root.AddCommand(accessCmd())
+	root.AddCommand(backupCmd())
+	root.AddCommand(gitopsCmd())
 	root.AddCommand(mcpCmd())
+
+	rejectUnknownSubcommands(root)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -84,6 +89,21 @@ func versionCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("acmlab v0.1.0 (acm-caas-poc)")
 		},
+	}
+}
+
+func rejectUnknownSubcommands(cmd *cobra.Command) {
+	if !cmd.HasSubCommands() || cmd.RunE != nil || cmd.Run != nil {
+		return
+	}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+		}
+		return cmd.Help()
+	}
+	for _, sub := range cmd.Commands() {
+		rejectUnknownSubcommands(sub)
 	}
 }
 

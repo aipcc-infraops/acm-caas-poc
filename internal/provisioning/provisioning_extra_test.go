@@ -3,10 +3,16 @@ package provisioning
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
@@ -95,6 +101,38 @@ func TestCreateIBMCloudMissingAPIKey(t *testing.T) {
 	}
 }
 
+func TestCreateNamespaceError(t *testing.T) {
+	c := fakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("injected ns error")
+	})
+	m := New(c, testConfig(), discardLogger)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "spoke1",
+		PullSecret: `{"auths":{}}`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "creating namespace") {
+		t.Fatalf("expected namespace error, got: %v", err)
+	}
+}
+
+func TestCreateCredentialsSecretError(t *testing.T) {
+	c := fakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("injected secret error")
+	})
+	m := New(c, testConfig(), discardLogger)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:       "spoke1",
+		PullSecret: `{"auths":{}}`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "credentials secret") {
+		t.Fatalf("expected credentials secret error, got: %v", err)
+	}
+}
+
 func TestCreateWithBadManifestsDir(t *testing.T) {
 	c := fakeClient()
 	m := New(c, testConfig(), discardLogger)
@@ -126,11 +164,14 @@ func TestDestroyWithIBMCloudCleanup(t *testing.T) {
 	}
 	defer func() { newIAMClient = origNew }()
 
-	c := fakeClient()
+	cd := &unstructured.Unstructured{}
+	cd.SetGroupVersionKind(client.GVRClusterDeployment.GroupVersion().WithKind("ClusterDeployment"))
+	cd.SetNamespace("spoke1")
+	cd.SetName("spoke1")
+	c := fakeClient(cd)
 	cfg := testConfig()
 	m := New(c, cfg, discardLogger)
 
-	// Destroy of nonexistent is idempotent but should still run IBM cleanup
 	if err := m.Destroy(context.Background(), "spoke1"); err != nil {
 		t.Fatalf("Destroy failed: %v", err)
 	}

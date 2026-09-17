@@ -19,7 +19,7 @@ func registerFleetSteps(sc *godog.ScenarioContext, s *suiteContext) {
 }
 
 func (s *suiteContext) iListManagedClusterResources(ctx context.Context) error {
-	clusters, err := s.fleet.ListClusters(ctx)
+	clusters, err := s.fleet.ListClusters(ctx, "")
 	if err != nil {
 		return err
 	}
