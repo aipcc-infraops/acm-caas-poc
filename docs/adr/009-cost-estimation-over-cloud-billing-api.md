@@ -28,6 +28,13 @@ The pricing table maps instance types to hourly rates across IBM Cloud, AWS, GCP
 - **Con:** Does not capture spot/reserved pricing, sustained-use discounts, or credits
 - **Con:** Placeholder rates diverge from actual rates over time
 
-## Migration Path
+## PoC to Production
 
-The ComputeRequest controller can add a cloud billing reconciliation layer that fetches actual spend and compares against the estimate. The attribution model (cost-center labels, team grouping, budget alerting) is cloud-agnostic and carries over unchanged.
+| PoC | Production |
+|-----|------------|
+| Pricing table with placeholder rates | Cloud billing API integration (AWS Cost Explorer, GCP Billing, Azure Cost Management, IBM Cloud Billing) per provider |
+| Node-count-based cost estimation | Actual spend from billing pipeline, reconciled against estimates |
+| Single pricing map in Go source | External configuration (ConfigMap or CRD) with real instance-type rates, refreshed periodically |
+| Compute cost only | Storage, networking, data transfer, and licensing costs included |
+
+The attribution model (cost-center labels, team grouping, budget alerting) is cloud-agnostic and carries over unchanged.
