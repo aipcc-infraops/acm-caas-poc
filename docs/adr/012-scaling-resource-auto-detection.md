@@ -25,6 +25,15 @@ The fallback order reflects provisioning prevalence: most clusters in the PoC ar
 - **Con:** If a cluster has both a MachinePool and a NodePool (unlikely but possible during migration), MachinePool always wins
 - **Con:** Error messages from the final fallback may not clearly indicate which resource types were tried
 
+## PoC to Production
+
+| PoC | Production |
+|-----|------------|
+| Runtime fallback chain (MachinePool → NodePool → MachineDeployment) | ComputeRequest controller knows cluster type from `spec.type`, scales the correct resource directly |
+| Up to 3 API calls on miss | Single API call: controller stores scaling resource reference in status |
+| `ErrNoMachinePool` on final fallback | Controller rejects scaling for imported clusters at admission time |
+| Fixed fallback order | No fallback needed: cluster type is explicit metadata |
+
 ## Performance Note
 
 The fallback cost is negligible: each "miss" is a single List call that returns zero items. The happy path (MachinePool found on first try) has no overhead. For fleets where most clusters are HyperShift, the order could be reconfigured, but this is not worth the complexity for the PoC.

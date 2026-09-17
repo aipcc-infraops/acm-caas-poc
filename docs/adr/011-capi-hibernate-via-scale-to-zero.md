@@ -30,3 +30,12 @@ The `Hibernate` and `Resume` methods in `internal/lifecycle/` try the Hive path 
 - **Annotation lost:** Resume creates 2 workers. The operator should verify the expected count after resume.
 - **MachineDeployment recreated externally:** The new MachineDeployment has no annotation. Hibernate works (scales to 0 and sets annotation), but prior state is lost.
 - **Control plane cost:** Some CAPI providers keep control plane nodes running even with zero workers. This is provider-specific and outside ACM's control.
+
+## PoC to Production
+
+| PoC | Production |
+|-----|------------|
+| Scale-to-zero via MachineDeployment patch | Provider-native hibernate if CAPI providers add VM-stop support, or a dedicated `HibernationRequest` CRD |
+| Annotation stores pre-hibernate replicas | CRD status field or etcd-backed state, resilient to resource recreation |
+| Default 2 replicas on missing annotation | Controller validates and rejects resume without stored state |
+| Sequential fallback (Hive then CAPI) | ComputeRequest controller knows cluster type from creation, no fallback needed |

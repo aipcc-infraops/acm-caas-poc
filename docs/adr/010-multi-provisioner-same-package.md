@@ -27,3 +27,12 @@ Keep all three backends in `internal/provisioning/` with distinct methods: `Crea
 A `Provisioner` interface with `Create(opts)` would require a unified options struct that either uses empty fields (HyperShift has no InstallConfig, CAPI has no PullSecret requirement) or wraps backend-specific options in an `interface{}`. Both leak complexity. The backends share a Manager and config but not behaviour: Hive creates a ClusterDeployment, HyperShift creates a HostedCluster + NodePool, CAPI creates a Cluster + MachineDeployment. Forcing them into one signature hides more than it reveals.
 
 When the code graduates to the ComputeRequest controller, a `Provisioner` interface may make sense because the controller reconciles a single CRD and dispatches based on `spec.type`. At the PoC stage, explicit methods are clearer.
+
+## PoC to Production
+
+| PoC | Production |
+|-----|------------|
+| Explicit methods per backend (`Create`, `CreateHyperShift`, `CreateCAPI`) | `Provisioner` interface with `Create(ctx, ComputeRequest)` dispatching by `spec.type` |
+| CLI `--type` flag selects backend | ComputeRequest CRD `spec.type` selects backend automatically |
+| Shared Manager struct | Per-backend controller or strategy, injected via factory |
+| Builder functions return `map[string]interface{}` | Typed structs or generated client for each backend CRD |
