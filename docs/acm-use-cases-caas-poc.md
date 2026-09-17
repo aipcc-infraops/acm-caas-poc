@@ -1005,7 +1005,7 @@ So that zombie clusters and idle GPUs stop consuming budget
 **Then** the policy allows a configurable extension period
 **And** the exception is logged in the cluster annotations for audit
 
-### Default TTLs (from InfraOps Strategy Day)
+### Default TTLs (from platform architecture review)
 
 | Cluster type | Default TTL |
 |---|---|
@@ -1063,7 +1063,7 @@ So that no team can silently consume GPU or node resources beyond their quota
 
 ### Enforcement model
 
-Educate, don't regulate (from InfraOps Strategy Day): monitor and notify first, auto-remove only after 2h without response. Exception path: owner submits justification via annotation, whitelist entry created.
+Educate, don't regulate (from platform architecture review): monitor and notify first, auto-remove only after 2h without response. Exception path: owner submits justification via annotation, whitelist entry created.
 
 ### ACM types
 
@@ -1319,7 +1319,7 @@ So that teams testing different operator versions can get dedicated capacity wit
 **And** labels the cluster `ai-platform-version=2.19`
 **And** adds it to the GPU routing pool (UC-19)
 
-### Context (from InfraOps Strategy Day)
+### Context (from platform architecture review)
 
 The AI platform operator is a cluster-wide operator — only one version can be installed per cluster. Different testing teams (nightly builds, weekly builds, stable versions) require different versions simultaneously. Segregation by cluster is the only viable approach without operator conflict.
 
@@ -1373,7 +1373,7 @@ So that teams are not rejected when shared GPU clusters are full
 **Then** it is labelled `gpu-cost-tier=spot`
 **And** only queued workloads that explicitly accept spot are routed to it
 
-### GPU capacity tiers (from InfraOps Strategy Day)
+### GPU capacity tiers (from platform architecture review)
 
 | Tier | GPU type | Strategy |
 |---|---|---|
