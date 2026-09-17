@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,12 +21,9 @@ func securityCmd() *cobra.Command {
 		securityStatusCmd(),
 		securityListCmd(),
 		securityRemoveCmd(),
-		securityApplyRegoCmd(),
-		securityRemoveRegoCmd(),
-		securityListRegoCmd(),
-		securityApplyKyvernoCmd(),
-		securityRemoveKyvernoCmd(),
-		securityListKyvernoCmd(),
+		securityApplyPolicyCmd(),
+		securityListPoliciesCmd(),
+		securityRemovePolicyCmd(),
 		securityDeployComplianceCmd(),
 		securityScanCmd(),
 		securityScanStatusCmd(),
@@ -165,114 +163,13 @@ func securityRemoveCmd() *cobra.Command {
 	return cmd
 }
 
-func securityApplyRegoCmd() *cobra.Command {
-	var cluster, regoFile, name string
+func securityApplyPolicyCmd() *cobra.Command {
+	var cluster, policyFile, name, engine string
 	var matchKinds []string
 
 	cmd := &cobra.Command{
-		Use:   "apply-rego",
-		Short: "Apply a custom Rego policy to a cluster via Gatekeeper",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if cluster == "" {
-				return fmt.Errorf("--cluster is required")
-			}
-			if regoFile == "" {
-				return fmt.Errorf("--rego-file is required")
-			}
-			c, err := buildClient()
-			if err != nil {
-				return err
-			}
-			mgr := security.New(c, cfg, logger)
-			opts := security.CustomPolicyOpts{
-				Name:     name,
-				Cluster:  cluster,
-				RegoFile: regoFile,
-				Match:    matchKinds,
-			}
-			fmt.Printf("Applying custom Rego policy from %s to %s...\n", regoFile, cluster)
-			if err := mgr.ApplyCustomPolicy(context.Background(), opts); err != nil {
-				return err
-			}
-			fmt.Println("Custom Rego policy deployed via ManifestWork.")
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster name (required)")
-	cmd.Flags().StringVar(&regoFile, "rego-file", "", "path to .rego file (required)")
-	cmd.Flags().StringVar(&name, "name", "", "policy name (defaults to package name)")
-	cmd.Flags().StringSliceVar(&matchKinds, "match", []string{"Pod"}, "Kubernetes kinds to match (e.g. Pod,Deployment)")
-	return cmd
-}
-
-func securityRemoveRegoCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "remove-rego <name> --cluster <cluster>",
-		Short: "Remove a custom Rego policy from a cluster",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cluster, _ := cmd.Flags().GetString("cluster")
-			if cluster == "" {
-				return fmt.Errorf("--cluster is required")
-			}
-			c, err := buildClient()
-			if err != nil {
-				return err
-			}
-			mgr := security.New(c, cfg, logger)
-			if err := mgr.RemoveCustomPolicy(context.Background(), args[0], cluster); err != nil {
-				return err
-			}
-			fmt.Printf("Custom Rego policy %s removed from %s\n", args[0], cluster)
-			return nil
-		},
-	}
-	cmd.Flags().String("cluster", "", "target cluster name (required)")
-	return cmd
-}
-
-func securityListRegoCmd() *cobra.Command {
-	var outputJSON bool
-
-	cmd := &cobra.Command{
-		Use:   "list-rego",
-		Short: "List all custom Rego policies across the fleet",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := buildClient()
-			if err != nil {
-				return err
-			}
-			mgr := security.New(c, cfg, logger)
-			policies, err := mgr.ListCustomPolicies(context.Background())
-			if err != nil {
-				return err
-			}
-			if outputJSON {
-				data, _ := json.MarshalIndent(policies, "", "  ")
-				fmt.Println(string(data))
-				return nil
-			}
-			if len(policies) == 0 {
-				fmt.Println("No custom Rego policies found")
-				return nil
-			}
-			fmt.Printf("%-25s %-20s %s\n", "CLUSTER", "POLICY", "STATUS")
-			for _, p := range policies {
-				fmt.Printf("%-25s %-20s %s\n", p.Cluster, p.Level, p.Status)
-			}
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
-	return cmd
-}
-
-func securityApplyKyvernoCmd() *cobra.Command {
-	var cluster, policyFile, name string
-
-	cmd := &cobra.Command{
-		Use:   "apply-kyverno",
-		Short: "Apply a Kyverno ClusterPolicy to a cluster",
+		Use:   "apply-policy",
+		Short: "Apply a custom policy (Gatekeeper Rego or Kyverno YAML) to a cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cluster == "" {
 				return fmt.Errorf("--cluster is required")
@@ -280,90 +177,157 @@ func securityApplyKyvernoCmd() *cobra.Command {
 			if policyFile == "" {
 				return fmt.Errorf("--policy-file is required")
 			}
+			if engine == "" {
+				if strings.HasSuffix(policyFile, ".rego") {
+					engine = "gatekeeper"
+				} else {
+					engine = "kyverno"
+				}
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := security.New(c, cfg, logger)
-			opts := security.KyvernoPolicyOpts{
-				Name:       name,
-				Cluster:    cluster,
-				PolicyFile: policyFile,
+
+			switch engine {
+			case "gatekeeper":
+				opts := security.CustomPolicyOpts{
+					Name:     name,
+					Cluster:  cluster,
+					RegoFile: policyFile,
+					Match:    matchKinds,
+				}
+				fmt.Printf("Applying Gatekeeper policy from %s to %s...\n", policyFile, cluster)
+				if err := mgr.ApplyCustomPolicy(context.Background(), opts); err != nil {
+					return err
+				}
+				fmt.Println("Gatekeeper policy deployed via ManifestWork.")
+			case "kyverno":
+				opts := security.KyvernoPolicyOpts{
+					Name:       name,
+					Cluster:    cluster,
+					PolicyFile: policyFile,
+				}
+				fmt.Printf("Applying Kyverno policy from %s to %s...\n", policyFile, cluster)
+				if err := mgr.ApplyKyvernoPolicy(context.Background(), opts); err != nil {
+					return err
+				}
+				fmt.Println("Kyverno ClusterPolicy deployed via ManifestWork.")
+			default:
+				return fmt.Errorf("unknown engine %q (valid: gatekeeper, kyverno)", engine)
 			}
-			fmt.Printf("Applying Kyverno policy from %s to %s...\n", policyFile, cluster)
-			if err := mgr.ApplyKyvernoPolicy(context.Background(), opts); err != nil {
-				return err
-			}
-			fmt.Println("Kyverno ClusterPolicy deployed via ManifestWork.")
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster name (required)")
-	cmd.Flags().StringVar(&policyFile, "policy-file", "", "path to Kyverno ClusterPolicy YAML (required)")
-	cmd.Flags().StringVar(&name, "name", "", "policy name (defaults to metadata.name in YAML)")
+	cmd.Flags().StringVar(&policyFile, "policy-file", "", "path to policy file (.rego or .yaml)")
+	cmd.Flags().StringVar(&name, "name", "", "policy name (auto-detected from file if omitted)")
+	cmd.Flags().StringVar(&engine, "engine", "", "policy engine: gatekeeper, kyverno (auto-detected from extension)")
+	cmd.Flags().StringSliceVar(&matchKinds, "match", []string{"Pod"}, "Kubernetes kinds to match (Gatekeeper only)")
 	return cmd
 }
 
-func securityRemoveKyvernoCmd() *cobra.Command {
+func securityRemovePolicyCmd() *cobra.Command {
+	var engine string
+
 	cmd := &cobra.Command{
-		Use:   "remove-kyverno <name> --cluster <cluster>",
-		Short: "Remove a Kyverno policy from a cluster",
+		Use:   "remove-policy <name> --cluster <cluster>",
+		Short: "Remove a custom policy (Gatekeeper or Kyverno) from a cluster",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cluster, _ := cmd.Flags().GetString("cluster")
 			if cluster == "" {
 				return fmt.Errorf("--cluster is required")
 			}
+			if engine == "" {
+				return fmt.Errorf("--engine is required (gatekeeper or kyverno)")
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := security.New(c, cfg, logger)
-			if err := mgr.RemoveKyvernoPolicy(context.Background(), args[0], cluster); err != nil {
-				return err
+
+			switch engine {
+			case "gatekeeper":
+				if err := mgr.RemoveCustomPolicy(context.Background(), args[0], cluster); err != nil {
+					return err
+				}
+			case "kyverno":
+				if err := mgr.RemoveKyvernoPolicy(context.Background(), args[0], cluster); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unknown engine %q (valid: gatekeeper, kyverno)", engine)
 			}
-			fmt.Printf("Kyverno policy %s removed from %s\n", args[0], cluster)
+			fmt.Printf("Policy %s removed from %s\n", args[0], cluster)
 			return nil
 		},
 	}
 	cmd.Flags().String("cluster", "", "target cluster name (required)")
+	cmd.Flags().StringVar(&engine, "engine", "", "policy engine: gatekeeper, kyverno (required)")
 	return cmd
 }
 
-func securityListKyvernoCmd() *cobra.Command {
+func securityListPoliciesCmd() *cobra.Command {
+	var engine string
 	var outputJSON bool
 
 	cmd := &cobra.Command{
-		Use:   "list-kyverno",
-		Short: "List all Kyverno policies across the fleet",
+		Use:   "list-policies",
+		Short: "List custom policies across the fleet (Gatekeeper and/or Kyverno)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := security.New(c, cfg, logger)
-			policies, err := mgr.ListKyvernoPolicies(context.Background())
-			if err != nil {
-				return err
+
+			var all []policyEntry
+			if engine == "" || engine == "gatekeeper" {
+				policies, err := mgr.ListCustomPolicies(context.Background())
+				if err != nil {
+					return err
+				}
+				for _, p := range policies {
+					all = append(all, policyEntry{Engine: "gatekeeper", Info: p})
+				}
 			}
+			if engine == "" || engine == "kyverno" {
+				policies, err := mgr.ListKyvernoPolicies(context.Background())
+				if err != nil {
+					return err
+				}
+				for _, p := range policies {
+					all = append(all, policyEntry{Engine: "kyverno", Info: p})
+				}
+			}
+
 			if outputJSON {
-				data, _ := json.MarshalIndent(policies, "", "  ")
+				data, _ := json.MarshalIndent(all, "", "  ")
 				fmt.Println(string(data))
 				return nil
 			}
-			if len(policies) == 0 {
-				fmt.Println("No Kyverno policies found")
+			if len(all) == 0 {
+				fmt.Println("No custom policies found")
 				return nil
 			}
-			fmt.Printf("%-25s %-20s %s\n", "CLUSTER", "POLICY", "STATUS")
-			for _, p := range policies {
-				fmt.Printf("%-25s %-20s %s\n", p.Cluster, p.Level, p.Status)
+			fmt.Printf("%-12s %-25s %-20s %s\n", "ENGINE", "CLUSTER", "POLICY", "STATUS")
+			for _, p := range all {
+				fmt.Printf("%-12s %-25s %-20s %s\n", p.Engine, p.Info.Cluster, p.Info.Level, p.Info.Status)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&engine, "engine", "", "filter by engine: gatekeeper, kyverno (default: all)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
+}
+
+type policyEntry struct {
+	Engine string             `json:"engine"`
+	Info   security.BaselineInfo `json:"info"`
 }
 
 func securityDeployComplianceCmd() *cobra.Command {
