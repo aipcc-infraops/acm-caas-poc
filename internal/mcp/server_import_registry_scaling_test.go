@@ -781,7 +781,7 @@ func TestScalingSetViaMCP(t *testing.T) {
 		"replicas": float64(5),
 	})
 	text := extractToolText(t, resp)
-	if text != "Cluster my-cluster MachinePool replicas set to 5" {
+	if text != "Cluster my-cluster worker replicas set to 5" {
 		t.Errorf("unexpected response: %s", text)
 	}
 }

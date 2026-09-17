@@ -15,7 +15,7 @@ import (
 func provisionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "provision",
-		Short: "Provision and manage spoke clusters via Hive ClusterDeployment",
+		Short: "Provision and manage spoke clusters (Hive, HyperShift, CAPI)",
 	}
 	cmd.AddCommand(
 		provisionCreateCmd(),
@@ -23,16 +23,19 @@ func provisionCmd() *cobra.Command {
 		provisionStatusCmd(),
 		provisionListCmd(),
 		provisionImageSetsCmd(),
+		provisionListCAPICmd(),
+		provisionListHostedCmd(),
 	)
 	return cmd
 }
 
 func provisionCreateCmd() *cobra.Command {
 	var platform, region, baseDomain, imageSet, workerType, masterType, sshKeyFile, sshPrivateKeyFile, pullSecretFile, manifestsDir string
+	var clusterType, kubernetesVersion, infraProvider, releaseImage string
 	var workers, masters int64
 	cmd := &cobra.Command{
 		Use:   "create <cluster-name>",
-		Short: "Create a spoke cluster via Hive (supports ibmcloud, aws, gcp, azure)",
+		Short: "Create a spoke cluster (Hive, HyperShift, CAPI)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := buildClient()
@@ -40,6 +43,54 @@ func provisionCreateCmd() *cobra.Command {
 				return err
 			}
 			mgr := provisioning.New(c, cfg, logger)
+
+			if clusterType == "hypershift" {
+				opts := provisioning.HyperShiftOpts{
+					Name:             args[0],
+					Platform:         platform,
+					Region:           region,
+					BaseDomain:       baseDomain,
+					ReleaseImage:     releaseImage,
+					NodePoolReplicas: workers,
+				}
+				if pullSecretFile != "" {
+					data, err := os.ReadFile(pullSecretFile)
+					if err != nil {
+						return fmt.Errorf("reading pull secret: %w", err)
+					}
+					opts.PullSecret = string(data)
+				}
+				fmt.Printf("Creating HyperShift hosted cluster %s...\n", args[0])
+				if err := mgr.CreateHyperShift(context.Background(), opts); err != nil {
+					return err
+				}
+				fmt.Println("HostedCluster and NodePool created. Control plane runs as pods on the hub.")
+				fmt.Println("Use 'acmlab provision status' to monitor progress.")
+				return nil
+			}
+
+			if clusterType == "capi" {
+				opts := provisioning.CAPIClusterOpts{
+					Name:              args[0],
+					InfraProvider:     infraProvider,
+					KubernetesVersion: kubernetesVersion,
+					WorkerReplicas:    workers,
+				}
+				if pullSecretFile != "" {
+					data, err := os.ReadFile(pullSecretFile)
+					if err != nil {
+						return fmt.Errorf("reading pull secret: %w", err)
+					}
+					opts.PullSecret = string(data)
+				}
+				fmt.Printf("Creating CAPI cluster %s (provider: %s)...\n", args[0], opts.InfraProvider)
+				if err := mgr.CreateCAPI(context.Background(), opts); err != nil {
+					return err
+				}
+				fmt.Println("CAPI Cluster and MachineDeployment created.")
+				fmt.Println("Use 'acmlab provision status' to monitor progress.")
+				return nil
+			}
 
 			opts := provisioning.ClusterOpts{
 				Name:           args[0],
@@ -87,6 +138,10 @@ func provisionCreateCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&clusterType, "type", "", "provisioning type: hive (default), hypershift, capi")
+	cmd.Flags().StringVar(&releaseImage, "release-image", "", "OCP release image for HyperShift clusters")
+	cmd.Flags().StringVar(&kubernetesVersion, "kubernetes-version", "", "Kubernetes version for CAPI clusters (default: v1.30.0)")
+	cmd.Flags().StringVar(&infraProvider, "infra-provider", "", "CAPI infrastructure provider: docker, aws, azure, gcp (default: docker)")
 	cmd.Flags().StringVar(&platform, "platform", "", "cloud platform: ibmcloud, aws, gcp, azure (default: from env)")
 	cmd.Flags().StringVar(&baseDomain, "base-domain", "", "base DNS domain for the cluster (default: from ACM_BASE_DOMAIN env)")
 	cmd.Flags().StringVar(&region, "region", "", "cloud region (default: from env)")
@@ -98,7 +153,7 @@ func provisionCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&pullSecretFile, "pull-secret", "", "path to pull secret file (required)")
 	cmd.Flags().StringVar(&sshKeyFile, "ssh-key", "", "path to SSH public key file")
 	cmd.Flags().StringVar(&sshPrivateKeyFile, "ssh-private-key", "", "path to SSH private key file")
-	cmd.Flags().StringVar(&manifestsDir, "manifests-dir", "", "path to ccoctl-generated manifests directory (optional — auto-generated via IBM Cloud IAM API if omitted)")
+	cmd.Flags().StringVar(&manifestsDir, "manifests-dir", "", "path to ccoctl-generated manifests directory (optional)")
 	return cmd
 }
 
@@ -280,6 +335,76 @@ func provisionListCmd() *cobra.Command {
 			fmt.Printf("%-20s %-25s %-12s %-10s %s\n", "NAME", "DOMAIN", "REGION", "INSTALLED", "IMAGE SET")
 			for _, c := range clusters {
 				fmt.Printf("%-20s %-25s %-12s %-10v %s\n", c.Name, c.BaseDomain, c.Region, c.Installed, c.ImageSet)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func provisionListCAPICmd() *cobra.Command {
+	var outputJSON bool
+	cmd := &cobra.Command{
+		Use:   "list-capi",
+		Short: "List CAPI-provisioned vanilla Kubernetes clusters",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			clusters, err := mgr.ListCAPI(context.Background())
+			if err != nil {
+				return err
+			}
+			if len(clusters) == 0 {
+				fmt.Println("No CAPI clusters provisioned via acmlab")
+				return nil
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("%-20s %-20s %-15s %-8s %s\n", "NAME", "NAMESPACE", "PHASE", "READY", "K8S VERSION")
+			for _, c := range clusters {
+				fmt.Printf("%-20s %-20s %-15s %-8v %s\n", c.Name, c.Namespace, c.Phase, c.Ready, c.KubernetesVersion)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func provisionListHostedCmd() *cobra.Command {
+	var outputJSON bool
+	cmd := &cobra.Command{
+		Use:   "list-hosted",
+		Short: "List HyperShift hosted clusters",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			clusters, err := mgr.ListHyperShift(context.Background())
+			if err != nil {
+				return err
+			}
+			if len(clusters) == 0 {
+				fmt.Println("No HyperShift hosted clusters provisioned via acmlab")
+				return nil
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("%-20s %-15s %-10s %s\n", "NAME", "NAMESPACE", "AVAILABLE", "VERSION")
+			for _, c := range clusters {
+				fmt.Printf("%-20s %-15s %-10v %s\n", c.Name, c.Namespace, c.Available, c.Version)
 			}
 			return nil
 		},
