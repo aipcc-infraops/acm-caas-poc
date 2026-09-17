@@ -76,6 +76,7 @@ func main() {
 	root.AddCommand(mcpCmd())
 	root.AddCommand(costCmd())
 	root.AddCommand(reclamationCmd())
+	root.AddCommand(gpuCmd())
 
 	rejectUnknownSubcommands(root)
 
