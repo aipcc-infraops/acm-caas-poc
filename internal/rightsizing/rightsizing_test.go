@@ -21,7 +21,20 @@ import (
 var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 var gvrKinds = map[schema.GroupVersionResource]string{
-	client.GVRManifestWork: "ManifestWorkList",
+	client.GVRManifestWork:     "ManifestWorkList",
+	client.GVRManagedCluster:   "ManagedClusterList",
+}
+
+func managedClusterObj(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": name,
+			},
+		},
+	}
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -68,7 +81,7 @@ func TestNewReturnsManager(t *testing.T) {
 }
 
 func TestEnableCreatesManifestWork(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("spoke1"))
 	err := mgr.Enable(context.Background(), "spoke1")
 	if err != nil {
 		t.Fatalf("Enable failed: %v", err)
@@ -81,7 +94,7 @@ func TestEnableCreatesManifestWork(t *testing.T) {
 }
 
 func TestEnableIdempotent(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("spoke1"))
 	if err := mgr.Enable(context.Background(), "spoke1"); err != nil {
 		t.Fatalf("first enable: %v", err)
 	}
@@ -91,7 +104,7 @@ func TestEnableIdempotent(t *testing.T) {
 }
 
 func TestEnableError(t *testing.T) {
-	c := fakeClient()
+	c := fakeClient(managedClusterObj("spoke1"))
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("forbidden")
 	})
@@ -107,7 +120,7 @@ func TestEnableError(t *testing.T) {
 }
 
 func TestDisableExisting(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("spoke1"))
 	if err := mgr.Enable(context.Background(), "spoke1"); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
@@ -133,7 +146,7 @@ func TestDisableNotFound(t *testing.T) {
 }
 
 func TestDisableDeleteError(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("spoke1"))
 	if err := mgr.Enable(context.Background(), "spoke1"); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}

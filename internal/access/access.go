@@ -156,6 +156,13 @@ func (m *Manager) DisableProxy(ctx context.Context, cluster string) (bool, error
 func (m *Manager) GetProxyStatus(ctx context.Context, cluster string) (*ProxyStatus, error) {
 	m.logger.Info("access.GetProxyStatus", "cluster", cluster)
 
+	if _, err := m.client.Get(ctx, client.GVRManagedCluster, "", cluster); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("cluster %s not found", cluster)
+		}
+		return nil, fmt.Errorf("checking cluster %s: %w", cluster, err)
+	}
+
 	obj, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, cluster, "cluster-proxy")
 	if err != nil {
 		if apierrors.IsNotFound(err) {
