@@ -7,7 +7,7 @@ acm-caas-poc/
 │   ├── main.go                    # Cobra root command, .env loading, global flags
 │   ├── fleet.go                   # fleet list, fleet status <name>
 │   ├── provision.go               # provision create/destroy/status/list/image-sets
-│   ├── policy.go                  # policy list/apply/status/remove/apply-quota/quota-status
+│   ├── policy.go                  # policy list/apply/status/remove/apply-quota/quota-status/automate/automation-status/list-automations/remove-automation/set-automation-mode
 │   ├── tenant.go                  # tenant deploy/status/list/remove
 │   ├── monitor.go                 # monitor list/status/setup/teardown/obs-status
 │   ├── lifecycle.go               # lifecycle hibernate/resume/status/diagnose/list
@@ -18,11 +18,12 @@ acm-caas-poc/
 │   ├── upgrade.go                 # upgrade status/list/set-channel/start/history
 │   ├── clusterset.go              # clusterset create/list/assign/remove
 │   ├── idp.go                     # idp configure/list/rotate/remove/configure-unique/enforce-sso
-│   ├── pool.go                    # pool create/list/get/delete
-│   ├── claim.go                   # claim create/list/release (UC-25 ClusterClaim)
+│   ├── pool.go                    # pool create/list/get/delete, claim create/list/release (UC-25)
 │   ├── security.go                # security apply/status/list/remove (UC-29 Gatekeeper)
 │   ├── rollout.go                 # rollout create/get/list/delete/update-strategy (UC-33)
 │   ├── access.go                  # access enable/disable/status/list (UC-35)
+│   ├── backup.go                  # backup enable/disable/status/list/restore (UC-36)
+│   ├── gitops.go                  # gitops create/get/list/delete/sync (UC-32)
 │   └── mcp.go                     # mcp serve (MCP server on stdio)
 │
 ├── internal/
@@ -128,6 +129,21 @@ acm-caas-poc/
 │   │   ├── builder.go             # Builds ManagedServiceAccount + ManagedClusterAddOn
 │   │   └── access_test.go
 │   │
+│   ├── automation/                # UC-30: PolicyAutomation (Ansible auto-remediation)
+│   │   ├── automation.go          # Manager — Create, Get, List, Delete, UpdateMode
+│   │   ├── builder.go             # Builds PolicyAutomation CR
+│   │   └── automation_test.go
+│   │
+│   ├── gitops/                    # UC-32: GitOps ApplicationSet integration
+│   │   ├── gitops.go              # Manager — Create, Get, List, Delete, Sync
+│   │   ├── builder.go             # Builds ApplicationSet with clusterDecisionResource generator
+│   │   └── gitops_test.go
+│   │
+│   ├── backup/                    # UC-36: Hub backup and restore
+│   │   ├── backup.go              # Manager — Enable, Disable, Status, List, Restore
+│   │   ├── builder.go             # Builds BackupSchedule + Restore CRs
+│   │   └── backup_test.go
+│   │
 │   ├── batch/                     # Batch/parallel operations (shared CLI utility)
 │   │   ├── batch.go               # Execute(), PrintSummary(), ToJSON()
 │   │   ├── loader.go              # LoadFile(), NamesFromArgs(), ClusterItem
@@ -137,12 +153,17 @@ acm-caas-poc/
 │   └── mcp/
 │       ├── server.go              # NewServer() — registers all MCP tools
 │       ├── access.go              # UC-35 access MCP tools
+│       ├── automation.go          # UC-30 policy automation MCP tools
+│       ├── backup.go              # UC-36 hub backup MCP tools
+│       ├── clusterset.go          # UC-22/24 ClusterSet MCP tools
+│       ├── gitops.go              # UC-32 GitOps MCP tools
 │       ├── idp.go                 # UC-12/16 IdP MCP tools
 │       ├── pool.go                # UC-25 pool/claim MCP tools
 │       ├── rollout.go             # UC-33 rollout MCP tools
 │       ├── security.go            # UC-29 security MCP tools
 │       ├── upgrade.go             # UC-09 upgrade MCP tools
 │       ├── server_test.go
+│       ├── server_automation_gitops_backup_test.go
 │       ├── server_import_registry_scaling_test.go
 │       └── server_security_rollout_access_test.go
 │
@@ -154,6 +175,7 @@ acm-caas-poc/
 │   ├── lifecycle.feature          # UC-05 scenarios
 │   ├── monitoring.feature         # UC-06 scenarios
 │   ├── importing.feature          # UC-07 scenarios
+│   ├── decommission.feature       # UC-08 scenarios
 │   ├── upgrade.feature            # UC-09 scenarios
 │   ├── scaling.feature            # UC-10 scenarios
 │   ├── registry.feature           # UC-13 scenarios
@@ -166,8 +188,11 @@ acm-caas-poc/
 │   ├── operator-policy.feature    # UC-27 scenarios
 │   ├── certificate-policy.feature # UC-28 scenarios
 │   ├── security-baseline.feature  # UC-29 scenarios
+│   ├── policy-automation.feature  # UC-30 scenarios
+│   ├── gitops-appset.feature      # UC-32 scenarios
 │   ├── progressive-rollout.feature # UC-33 scenarios
 │   ├── managed-access.feature     # UC-35 scenarios
+│   ├── hub-backup.feature         # UC-36 scenarios
 │   └── worker-flavor.feature      # UC-37 scenarios
 │
 ├── integration/                   # Godog step definitions (//go:build integration)
@@ -207,12 +232,14 @@ acm-caas-poc/
 │   │   ├── demo-uc27-operator-pin.sh
 │   │   ├── demo-uc28-cert-expiry.sh
 │   │   ├── demo-uc29-security-baseline.sh
+│   │   ├── demo-uc30-policy-automation.sh
+│   │   ├── demo-uc32-gitops-appset.sh
 │   │   ├── demo-uc33-progressive-rollout.sh
 │   │   ├── demo-uc35-managed-access.sh
+│   │   ├── demo-uc36-hub-backup.sh
 │   │   └── demo-uc37-flavor-change.sh
 │   ├── manual/                     # Raw oc/kubectl reference scripts per UC
-│   │   ├── uc-01-provision.sh      ... uc-13-registry-mirror.sh
-│   │   └── (+ uc-12 through uc-37 for all implemented UCs)
+│   │   └── uc-{01..37}-*.sh        # 26 scripts for all implemented UCs
 │   ├── project-structure.md        # This file
 │   └── acmlab-commands.md          # CLI + MCP command reference
 │

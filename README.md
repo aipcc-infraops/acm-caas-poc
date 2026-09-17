@@ -37,12 +37,12 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-27 | Operator version pinning (OperatorPolicy) | ✅ Implemented | `internal/policy/` |
 | UC-28 | Certificate expiry detection fleet-wide | ✅ Implemented | `internal/policy/` |
 | UC-29 | Security baseline enforcement (Gatekeeper/OPA) | ✅ Implemented | `internal/security/` |
-| UC-30 | Policy automation — Ansible auto-remediation | 📋 Planned | `internal/policyautomation/` |
+| UC-30 | Policy automation — Ansible auto-remediation | ✅ Implemented | `internal/automation/` |
 | UC-31 | SCAP scanning via Compliance Operator | 📋 Planned | `internal/compliance/` |
-| UC-32 | GitOps fleet deployment via ApplicationSet | 📋 Planned | `internal/gitops/` |
+| UC-32 | GitOps fleet deployment via ApplicationSet | ✅ Implemented | `internal/gitops/` |
 | UC-33 | ManifestWorkReplicaSet progressive rollout | ✅ Implemented | `internal/rollout/` |
 | UC-35 | Credential-free spoke access (ManagedServiceAccount) | ✅ Implemented | `internal/access/` |
-| UC-36 | Hub backup and restore | 📋 Planned | `internal/backup/` |
+| UC-36 | Hub backup and restore | ✅ Implemented | `internal/backup/` |
 | UC-37 | Worker node flavor change (rolling replacement) | ✅ Implemented | `internal/scaling/` |
 | UC-38 | HyperShift (HostedCluster) provisioning | 📋 Planned | `internal/provisioning/` |
 | UC-39 | Cloud-provider native scaling for imported clusters | 📋 Planned | `internal/scaling/` |
@@ -161,6 +161,52 @@ bin/acmlab claim create amd64-419 --name my-claim --ttl 48h
 bin/acmlab claim list
 bin/acmlab claim release my-claim
 bin/acmlab pool delete amd64-419
+
+# 16. Security baseline (Gatekeeper/OPA)
+bin/acmlab security deploy-baseline --cluster spoke1 --baseline cis-k8s
+bin/acmlab security status spoke1
+bin/acmlab security list-baselines
+bin/acmlab security remove-baseline --cluster spoke1
+
+# 17. Progressive rollout
+bin/acmlab rollout create my-rollout --manifest configmap.yaml --placement prod-clusters --strategy rolling --max-concurrency 25%
+bin/acmlab rollout get my-rollout
+bin/acmlab rollout list
+bin/acmlab rollout update-strategy my-rollout --strategy all --max-concurrency 100%
+bin/acmlab rollout delete my-rollout
+
+# 18. Managed cluster access
+bin/acmlab access enable spoke1
+bin/acmlab access status spoke1
+bin/acmlab access list
+bin/acmlab access disable spoke1
+
+# 19. ClusterSet grouping
+bin/acmlab clusterset create prod-set --namespace prod-team
+bin/acmlab clusterset list
+bin/acmlab clusterset assign spoke1 --set prod-set
+bin/acmlab clusterset remove prod-set
+
+# 20. Policy automation (Ansible)
+bin/acmlab policy automate image-registry-policy --secret ansible-creds --job-template remediate-registry --mode scan
+bin/acmlab policy automation-status image-registry-policy
+bin/acmlab policy list-automations
+bin/acmlab policy set-automation-mode image-registry-policy --mode once
+bin/acmlab policy remove-automation image-registry-policy
+
+# 21. GitOps (ApplicationSet)
+bin/acmlab gitops create training-stack --repo https://github.com/org/configs --path teams/training
+bin/acmlab gitops get training-stack
+bin/acmlab gitops list
+bin/acmlab gitops sync training-stack
+bin/acmlab gitops delete training-stack
+
+# 22. Hub backup and restore
+bin/acmlab backup enable --schedule "0 */6 * * *" --ttl 720h
+bin/acmlab backup status
+bin/acmlab backup list
+bin/acmlab backup restore --backup-name acm-backup-2026-09-17-06-00-00
+bin/acmlab backup disable
 ```
 
 ## MCP Server
@@ -185,7 +231,7 @@ Register in Claude Code's MCP config:
 }
 ```
 
-Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_deploy_tenant`, `acm_remove_tenant`, `acm_list_tenants`, `acm_tenant_status`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_apply_quota_policy`, `acm_quota_status`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`, `acm_hibernate_cluster`, `acm_resume_cluster`, `acm_lifecycle_status`, `acm_lifecycle_diagnose`, `acm_lifecycle_recover_certs`, `acm_list_lifecycle_clusters`, `acm_import_cluster`, `acm_detach_cluster`, `acm_import_status`, `acm_list_imported_clusters`, `acm_registry_list_images`, `acm_registry_configure_mirror`, `acm_registry_mirror_status`, `acm_registry_generate_mirror_script`, `acm_configure_idp`, `acm_remove_idp`, `acm_list_idps`, `acm_rotate_idp`, `acm_configure_unique_idp`, `acm_enforce_sso`, `acm_scaling_set_flavor`, `acm_create_pool`, `acm_list_pools`, `acm_get_pool`, `acm_delete_pool`, `acm_create_claim`, `acm_release_claim`, `acm_list_claims`.
+Available tools: `acm_fleet_status`, `acm_list_managed_clusters`, `acm_get_managed_cluster`, `acm_hub_health`, `acm_list_cluster_resources`, `acm_cluster_resources`, `acm_deploy_tenant`, `acm_remove_tenant`, `acm_list_tenants`, `acm_tenant_status`, `acm_list_policies`, `acm_get_policy`, `acm_apply_policy`, `acm_remove_policy`, `acm_set_policy_remediation`, `acm_apply_quota_policy`, `acm_quota_status`, `acm_provision_create`, `acm_provision_destroy`, `acm_provision_status`, `acm_provision_list`, `acm_list_image_sets`, `acm_hibernate_cluster`, `acm_resume_cluster`, `acm_lifecycle_status`, `acm_lifecycle_diagnose`, `acm_lifecycle_recover_certs`, `acm_list_lifecycle_clusters`, `acm_import_cluster`, `acm_detach_cluster`, `acm_import_status`, `acm_list_imported_clusters`, `acm_registry_list_images`, `acm_registry_configure_mirror`, `acm_registry_mirror_status`, `acm_registry_generate_mirror_script`, `acm_configure_idp`, `acm_remove_idp`, `acm_list_idps`, `acm_rotate_idp`, `acm_configure_unique_idp`, `acm_enforce_sso`, `acm_scaling_set_flavor`, `acm_create_pool`, `acm_list_pools`, `acm_get_pool`, `acm_delete_pool`, `acm_create_claim`, `acm_release_claim`, `acm_list_claims`, `acm_list_clustersets`, `acm_create_clusterset`, `acm_remove_clusterset`, `acm_assign_cluster_to_set`, `acm_create_automation`, `acm_get_automation`, `acm_list_automations`, `acm_delete_automation`, `acm_set_automation_mode`, `acm_create_appset`, `acm_get_appset`, `acm_list_appsets`, `acm_delete_appset`, `acm_sync_appset`, `acm_enable_backup`, `acm_disable_backup`, `acm_backup_status`, `acm_list_backups`, `acm_restore_backup`, `acm_apply_security_baseline`, `acm_security_status`, `acm_list_security_baselines`, `acm_remove_security_baseline`, `acm_create_rollout`, `acm_get_rollout`, `acm_list_rollouts`, `acm_delete_rollout`, `acm_update_rollout_strategy`, `acm_enable_access`, `acm_disable_access`, `acm_access_status`, `acm_list_access`, `acm_scaling_get`, `acm_scaling_set`, `acm_scaling_auto`, `acm_scaling_list`, `acm_upgrade_status`, `acm_upgrade_list`, `acm_upgrade_set_channel`, `acm_upgrade_start`, `acm_upgrade_history`, `acm_decommission_start`, `acm_decommission_advance`, `acm_decommission_status`, `acm_decommission_list`, `acm_decommission_cancel`, `acm_decommission_audit`.
 
 See [docs/acmlab-commands.md](docs/acmlab-commands.md) for the full command and tool reference.
 

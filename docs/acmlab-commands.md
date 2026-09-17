@@ -6,7 +6,11 @@
 
 #### `acmlab fleet list`
 
-Lists all ManagedCluster resources on the hub.
+Lists all ManagedCluster resources on the hub. Supports label filtering.
+
+Options:
+- `--label-selector`, `-l`: filter clusters by label (e.g. `vendor=OpenShift`)
+- `--json`: output as JSON
 
 ```
 $ acmlab fleet list
@@ -14,6 +18,10 @@ NAME              AVAILABLE  JOINED  ACCEPTED  VERSION
 spoke1            True       True    True      4.22.9
 spoke2            True       True    True      4.22.9
 local-cluster     True       True    True      4.21.29
+
+$ acmlab fleet list -l vendor=OpenShift
+NAME              AVAILABLE  JOINED  ACCEPTED  VERSION
+spoke1            True       True    True      4.22.9
 ```
 
 #### `acmlab fleet status <name>`
@@ -21,9 +29,9 @@ local-cluster     True       True    True      4.21.29
 Shows detailed status for a specific cluster: labels, conditions, version. Accepts multiple names or `--from-file` for batch.
 
 Options:
-- `--from-file` — YAML file with cluster list (see Batch Operations section)
-- `--concurrency int` — max parallel operations (default 5, max 20)
-- `--json` — output as JSON array of results
+- `--from-file`: YAML file with cluster list (see Batch Operations section)
+- `--concurrency int`: max parallel operations (default 5, max 20)
+- `--json`: output as JSON array of results
 
 ```
 $ acmlab fleet status spoke1
@@ -44,20 +52,20 @@ Conditions:
 
 #### `acmlab provision create <name>`
 
-Provisions a spoke cluster via Hive ClusterDeployment and auto-imports it as a ManagedCluster in ACM. For IBM Cloud, IAM credentials (Service IDs + API keys) are auto-generated via the IBM Cloud IAM API — no external `ccoctl` tooling needed. Idempotent.
+Provisions a spoke cluster via Hive ClusterDeployment and auto-imports it as a ManagedCluster in ACM. For IBM Cloud, IAM credentials (Service IDs + API keys) are auto-generated via the IBM Cloud IAM API: no external `ccoctl` tooling needed. Idempotent.
 
 Options:
-- `--platform` — cloud platform: ibmcloud, aws, gcp, azure (default: from `ACM_PLATFORM` env)
-- `--region` — cloud region (default: from `IBMCLOUD_REGION` env)
-- `--image-set` — ClusterImageSet name (default: from `ACM_CLUSTER_IMAGE_SET` env)
-- `--worker-type` — worker instance type (default: bx2-4x16)
-- `--master-type` — master instance type (default: bx2-8x32)
-- `--workers` — number of worker nodes (default: 2)
-- `--masters` — number of master nodes (default: 3)
-- `--pull-secret` — path to pull secret file (required)
-- `--ssh-key` — path to SSH public key file
-- `--ssh-private-key` — path to SSH private key file
-- `--manifests-dir` — path to ccoctl-generated manifests (optional for IBM Cloud — auto-generated if omitted)
+- `--platform`: cloud platform: ibmcloud, aws, gcp, azure (default: from `ACM_PLATFORM` env)
+- `--region`: cloud region (default: from `IBMCLOUD_REGION` env)
+- `--image-set`: ClusterImageSet name (default: from `ACM_CLUSTER_IMAGE_SET` env)
+- `--worker-type`: worker instance type (default: bx2-4x16)
+- `--master-type`: master instance type (default: bx2-8x32)
+- `--workers`: number of worker nodes (default: 2)
+- `--masters`: number of master nodes (default: 3)
+- `--pull-secret`: path to pull secret file (required)
+- `--ssh-key`: path to SSH public key file
+- `--ssh-private-key`: path to SSH private key file
+- `--manifests-dir`: path to ccoctl-generated manifests (optional for IBM Cloud: auto-generated if omitted)
 
 ```
 $ acmlab provision create spoke1 --pull-secret ~/pull-secret.json --region us-south
@@ -66,14 +74,19 @@ ClusterDeployment created. Hive will now provision the cluster.
 Use 'acmlab provision status' to monitor progress.
 ```
 
+#### `acmlab provision create <name>` (continued)
+
+Options (continued):
+- `--base-domain`: base DNS domain for the cluster (default: from `ACM_BASE_DOMAIN` env)
+
 #### `acmlab provision destroy <name>`
 
-Deletes a spoke cluster by removing its ClusterDeployment. Hive deprovisions infrastructure. For IBM Cloud, auto-cleans IAM Service IDs. Idempotent. Accepts multiple names or `--from-file`.
+Deletes a spoke cluster by removing its ClusterDeployment and ManagedCluster. Hive deprovisions infrastructure. For IBM Cloud, auto-cleans IAM Service IDs. Returns an error if the cluster does not exist. Accepts multiple names or `--from-file`.
 
 Options:
-- `--from-file` — YAML file with cluster list (see Batch Operations section)
-- `--concurrency int` — max parallel operations (default 5, max 20)
-- `--json` — output results as JSON array
+- `--from-file`: YAML file with cluster list (see Batch Operations section)
+- `--concurrency int`: max parallel operations (default 5, max 20)
+- `--json`: output results as JSON array
 
 #### `acmlab provision status <name>`
 
@@ -119,15 +132,15 @@ Creates a governance policy with Placement and PlacementBinding. Supports three 
 - **CertificatePolicy** (UC-28): detect expiring certificates
 
 Options:
-- `--registries` — comma-separated list of allowed registries
-- `--remediation` — inform or enforce (default: inform)
-- `--labels` — cluster label selector (key=value,key2=value2)
-- `--operator` — operator name for OperatorPolicy
-- `--operator-version` — pin operator to this version
-- `--operator-channel` — pin operator to this channel
-- `--cert-expiry` — certificate expiry threshold in days for CertificatePolicy
-- `--cert-namespaces` — namespaces to monitor (default: openshift-config,openshift-ingress)
-- `--cluster-set` — scope policy to a ClusterSet (UC-24)
+- `--registries`: comma-separated list of allowed registries
+- `--remediation`: inform or enforce (default: inform)
+- `--labels`: cluster label selector (key=value,key2=value2)
+- `--operator`: operator name for OperatorPolicy
+- `--operator-version`: pin operator to this version
+- `--operator-channel`: pin operator to this channel
+- `--cert-expiry`: certificate expiry threshold in days for CertificatePolicy
+- `--cert-namespaces`: namespaces to monitor (default: openshift-config,openshift-ingress)
+- `--cluster-set`: scope policy to a ClusterSet (UC-24)
 
 #### `acmlab policy status <name>`
 
@@ -138,11 +151,82 @@ Shows policy compliance status across targeted clusters.
 Shows per-ClusterSet compliance report across all policies.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 #### `acmlab policy remove <name>`
 
-Removes a policy and its associated Placement and PlacementBinding.
+Removes a policy and its associated Placement and PlacementBinding. Guards against concurrent deletion.
+
+#### `acmlab policy automate <name>`
+
+Creates a PolicyAutomation linking a governance policy to an Ansible job template. When the policy becomes NonCompliant, the automation triggers the Ansible playbook.
+
+*Source: `cmd/acmlab/policy.go`: `policyAutomateCmd()`*
+
+Options:
+- `--policy`: referenced policy name (required)
+- `--tower-url`: Ansible Tower URL
+- `--tower-secret`: secret name with Tower credentials (required)
+- `--job-template`: Ansible job template name (required)
+- `--mode`: automation mode: scan, once, disabled (default: scan)
+- `--namespace`: namespace (default: open-cluster-management-policies)
+- `--extra-var`: extra variables (key=value, repeatable)
+
+```
+$ acmlab policy automate cert-remediation --policy cert-expiry-policy \
+    --tower-secret aap-credentials --job-template renew-cert --mode scan
+Creating PolicyAutomation cert-remediation for policy cert-expiry-policy...
+PolicyAutomation created. Ansible jobs will trigger on policy violations.
+```
+
+#### `acmlab policy automation-status <name>`
+
+Shows PolicyAutomation details: referenced policy, mode, status, last run.
+
+*Source: `cmd/acmlab/policy.go`: `policyAutomationStatusCmd()`*
+
+Options:
+- `--namespace`: namespace (default: open-cluster-management-policies)
+- `--json`: output as JSON
+
+#### `acmlab policy list-automations`
+
+Lists all PolicyAutomations with their policy reference, mode, and status.
+
+*Source: `cmd/acmlab/policy.go`: `policyListAutomationsCmd()`*
+
+Options:
+- `--namespace`: namespace (default: open-cluster-management-policies)
+- `--json`: output as JSON
+
+```
+$ acmlab policy list-automations
+NAME                      POLICY                    MODE       STATUS
+cert-remediation          cert-expiry-policy        scan       active
+```
+
+#### `acmlab policy remove-automation <name>`
+
+Removes a PolicyAutomation.
+
+*Source: `cmd/acmlab/policy.go`: `policyRemoveAutomationCmd()`*
+
+Options:
+- `--namespace`: namespace (default: open-cluster-management-policies)
+
+#### `acmlab policy set-automation-mode <name> <mode>`
+
+Updates the automation mode: scan, once, disabled.
+
+*Source: `cmd/acmlab/policy.go`: `policySetAutomationModeCmd()`*
+
+Options:
+- `--namespace`: namespace (default: open-cluster-management-policies)
+
+```
+$ acmlab policy set-automation-mode cert-remediation disabled
+PolicyAutomation cert-remediation mode set to disabled
+```
 
 ### ClusterSets
 
@@ -151,28 +235,28 @@ Removes a policy and its associated Placement and PlacementBinding.
 Creates a ManagedClusterSet with a ManagedClusterSetBinding in the specified namespace.
 
 Options:
-- `--namespace` — team namespace for the binding (required)
+- `--namespace`: team namespace for the binding (required)
 
 #### `acmlab clusterset list`
 
 Lists all ManagedClusterSets with member cluster counts.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 #### `acmlab clusterset assign <cluster>`
 
 Assigns a managed cluster to a ClusterSet by updating its label.
 
 Options:
-- `--to` — target ClusterSet name (required)
+- `--to`: target ClusterSet name (required)
 
 #### `acmlab clusterset remove <name>`
 
 Removes a ManagedClusterSet and its binding.
 
 Options:
-- `--namespace` — namespace of the binding (required)
+- `--namespace`: namespace of the binding (required)
 
 ### Identity Providers
 
@@ -181,17 +265,17 @@ Options:
 Configures an Identity Provider on a cluster via ManifestWork. Creates an OAuth CR and Secret in openshift-config. Supports five IdP types: GitHub, Google, htpasswd, LDAP, OIDC (Keycloak).
 
 Options:
-- `--cluster` — target cluster (required)
-- `--type` — IdP type: github, google, htpasswd, ldap, oidc (required)
-- `--client-id` — OAuth client ID (github, google, oidc)
-- `--client-secret` — OAuth client secret (github, google, oidc)
-- `--organizations` — GitHub organizations (comma-separated)
-- `--issuer-url` — OIDC issuer URL (oidc)
-- `--users` — htpasswd users (user1:pass1,user2:pass2)
-- `--ldap-url` — LDAP server URL
-- `--bind-dn` — LDAP bind DN
-- `--bind-password` — LDAP bind password
-- `--insecure` — LDAP insecure connection
+- `--cluster`: target cluster (required)
+- `--type`: IdP type: github, google, htpasswd, ldap, oidc (required)
+- `--client-id`: OAuth client ID (github, google, oidc)
+- `--client-secret`: OAuth client secret (github, google, oidc)
+- `--organizations`: GitHub organizations (comma-separated)
+- `--issuer-url`: OIDC issuer URL (oidc)
+- `--users`: htpasswd users (user1:pass1,user2:pass2)
+- `--ldap-url`: LDAP server URL
+- `--bind-dn`: LDAP bind DN
+- `--bind-password`: LDAP bind password
+- `--insecure`: LDAP insecure connection
 
 ```
 $ acmlab idp configure corp-github --cluster spoke1 --type github \
@@ -205,8 +289,8 @@ IdP corp-github (github) configured on cluster spoke1
 Lists Identity Providers configured on a cluster.
 
 Options:
-- `--cluster` — target cluster (required)
-- `--json` — output as JSON
+- `--cluster`: target cluster (required)
+- `--json`: output as JSON
 
 ```
 $ acmlab idp list --cluster spoke1
@@ -221,33 +305,33 @@ keycloak             oidc       Pending
 Rotates credentials for an Identity Provider by updating the ManifestWork Secret.
 
 Options:
-- `--cluster` — target cluster (required)
-- `--client-id` — new OAuth client ID
-- `--client-secret` — new OAuth client secret
-- `--users` — new htpasswd users
-- `--bind-password` — new LDAP bind password
+- `--cluster`: target cluster (required)
+- `--client-id`: new OAuth client ID
+- `--client-secret`: new OAuth client secret
+- `--users`: new htpasswd users
+- `--bind-password`: new LDAP bind password
 
 #### `acmlab idp remove <name>`
 
 Removes an Identity Provider from a cluster.
 
 Options:
-- `--cluster` — target cluster (required)
+- `--cluster`: target cluster (required)
 
 #### `acmlab idp configure-unique`
 
 Deploys unique emergency htpasswd credentials to a cluster. Generates a cryptographically random password, creates an htpasswd IdP named `emergency-<cluster>`, and stores a rotation timestamp.
 
 Options:
-- `--cluster` — target cluster (required)
-- `--admin-user` — admin username (default: cluster-admin)
+- `--cluster`: target cluster (required)
+- `--admin-user`: admin username (default: cluster-admin)
 
 ```
 $ acmlab idp configure-unique --cluster spoke1 --admin-user cluster-admin
 Unique IdP configured on spoke1
 Admin user: cluster-admin
 Password: <generated-password>
-Save this password — it will not be shown again.
+Save this password: it will not be shown again.
 ```
 
 #### `acmlab idp enforce-sso`
@@ -255,7 +339,7 @@ Save this password — it will not be shown again.
 Creates a fleet-wide compliance policy that marks clusters without an OpenID (SSO) IdP as NonCompliant.
 
 Options:
-- `--namespace` — policy namespace (default: global-set)
+- `--namespace`: policy namespace (default: global-set)
 
 ```
 $ acmlab idp enforce-sso
@@ -269,9 +353,9 @@ SSO enforcement policy created
 Stamps quota labels on a ManagedCluster and creates a ConfigurationPolicy to monitor compliance.
 
 Options:
-- `--cluster` — target cluster (required)
-- `--max-workers` — maximum worker nodes allowed
-- `--max-gpus` — maximum GPU nodes allowed
+- `--cluster`: target cluster (required)
+- `--max-workers`: maximum worker nodes allowed
+- `--max-gpus`: maximum GPU nodes allowed
 
 ```
 $ acmlab policy apply-quota --cluster spoke1 --max-workers 5 --max-gpus 1
@@ -297,12 +381,12 @@ Compliant:   true
 Creates a Hive ClusterPool for pre-warmed cluster access. Clusters are provisioned and hibernated, ready for instant claiming.
 
 Options:
-- `--size` — number of ready clusters (default: 3)
-- `--platform` — cloud platform: ibmcloud, aws, gcp, azure
-- `--region` — cloud region
-- `--image-set` — ClusterImageSet name
-- `--base-domain` — base domain for clusters
-- `--namespace` — pool namespace (default: pool name)
+- `--size`: number of ready clusters (default: 3)
+- `--platform`: cloud platform: ibmcloud, aws, gcp, azure
+- `--region`: cloud region
+- `--image-set`: ClusterImageSet name
+- `--base-domain`: base domain for clusters
+- `--namespace`: pool namespace (default: pool name)
 
 ```
 $ acmlab pool create amd64-419 --size 3 --image-set img4.19-multi --platform ibmcloud --region us-south --base-domain example.com
@@ -324,15 +408,15 @@ amd64-419        3     2      1        0
 Shows detailed ClusterPool info.
 
 Options:
-- `--namespace` — pool namespace (default: pool name)
-- `--json` — output as JSON
+- `--namespace`: pool namespace (default: pool name)
+- `--json`: output as JSON
 
 #### `acmlab pool delete <name>`
 
 Deletes a ClusterPool and all its clusters.
 
 Options:
-- `--namespace` — pool namespace (default: pool name)
+- `--namespace`: pool namespace (default: pool name)
 
 ### ClusterClaim
 
@@ -341,9 +425,9 @@ Options:
 Claims a pre-warmed cluster from a pool for instant access.
 
 Options:
-- `--name` — claim name (auto-generated if not provided)
-- `--namespace` — pool namespace (default: pool name)
-- `--ttl` — time-to-live for the claim (e.g., 48h)
+- `--name`: claim name (auto-generated if not provided)
+- `--namespace`: pool namespace (default: pool name)
+- `--ttl`: time-to-live for the claim (e.g., 48h)
 
 ```
 $ acmlab claim create amd64-419 --name my-test --ttl 48h
@@ -355,15 +439,15 @@ ClusterClaim my-test created from pool amd64-419
 Lists all ClusterClaims with their status and bound cluster.
 
 Options:
-- `--namespace` — filter by namespace
-- `--json` — output as JSON
+- `--namespace`: filter by namespace
+- `--json`: output as JSON
 
 #### `acmlab claim release <name>`
 
 Releases a claimed cluster back to the pool.
 
 Options:
-- `--namespace` — claim namespace (default: claim name)
+- `--namespace`: claim namespace (default: claim name)
 
 ### Scaling
 
@@ -372,31 +456,31 @@ Options:
 Shows MachinePool info: replicas, autoscaling bounds, platform.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 #### `acmlab scaling set <cluster>`
 
 Sets a fixed worker replica count.
 
 Options:
-- `--replicas` — number of worker nodes (default: 2)
-- `--json` — output as JSON
+- `--replicas`: number of worker nodes (default: 2)
+- `--json`: output as JSON
 
 #### `acmlab scaling auto <cluster>`
 
 Enables autoscaling with min/max bounds.
 
 Options:
-- `--min` — minimum worker nodes (default: 1)
-- `--max` — maximum worker nodes (default: 5)
-- `--json` — output as JSON
+- `--min`: minimum worker nodes (default: 1)
+- `--max`: maximum worker nodes (default: 5)
+- `--json`: output as JSON
 
 #### `acmlab scaling set-flavor <cluster>`
 
-Changes worker node instance type via MachinePool platform update. Hive performs a rolling replacement — new workers are created with the new type, old workers are drained and removed.
+Changes worker node instance type via MachinePool platform update. Hive performs a rolling replacement: new workers are created with the new type, old workers are drained and removed.
 
 Options:
-- `--worker-type` — new worker instance type (required)
+- `--worker-type`: new worker instance type (required)
 
 ```
 $ acmlab scaling set-flavor spoke1 --worker-type cx2-8x16
@@ -408,16 +492,16 @@ Cluster spoke1 worker flavor changed to cx2-8x16
 Lists all MachinePools across the fleet.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 #### `acmlab scaling init <cluster>`
 
 Creates a MachinePool for a Hive cluster that does not have one. Auto-detects current workers.
 
 Options:
-- `--worker-type` — worker instance type (auto-detected if omitted)
-- `--replicas` — worker count (auto-detected if omitted)
-- `--json` — output as JSON
+- `--worker-type`: worker instance type (auto-detected if omitted)
+- `--replicas`: worker count (auto-detected if omitted)
+- `--json`: output as JSON
 
 ### Tenants
 
@@ -426,10 +510,10 @@ Options:
 Deploys tenant isolation resources (Namespace, RoleBinding, NetworkPolicy, ResourceQuota) via ManifestWork to a target cluster.
 
 Options:
-- `--cluster` — target cluster name
-- `--team` — team/group name for RBAC
-- `--cpu` — ResourceQuota CPU limit
-- `--memory` — ResourceQuota memory limit
+- `--cluster`: target cluster name
+- `--team`: team/group name for RBAC
+- `--cpu`: ResourceQuota CPU limit
+- `--memory`: ResourceQuota memory limit
 
 #### `acmlab tenant status <name>`
 
@@ -440,7 +524,7 @@ Shows ManifestWork applied status on the target cluster.
 Lists tenant deployments.
 
 Options:
-- `--cluster` — filter by cluster
+- `--cluster`: filter by cluster
 
 #### `acmlab tenant remove <name>`
 
@@ -472,15 +556,15 @@ Shows the MultiClusterObservability CR status and spoke collection state.
 
 #### `acmlab lifecycle hibernate <cluster-name>`
 
-Hibernates a Hive-provisioned cluster by setting `spec.powerState` to `Hibernating`. Idempotent — if already hibernating, does nothing.
+Hibernates a Hive-provisioned cluster by setting `spec.powerState` to `Hibernating`. Idempotent: if already hibernating, does nothing.
 
 Options:
-- `--namespace`, `-n` — cluster namespace (defaults to cluster name)
-- `--wait` — wait for hibernation to complete
-- `--timeout` — timeout for wait operation (default: 10m)
-- `--from-file` — YAML file with cluster list (see Batch Operations section)
-- `--concurrency int` — max parallel operations (default 5, max 20)
-- `--json` — output results as JSON array
+- `--namespace`, `-n`: cluster namespace (defaults to cluster name)
+- `--wait`: wait for hibernation to complete
+- `--timeout`: timeout for wait operation (default: 10m)
+- `--from-file`: YAML file with cluster list (see Batch Operations section)
+- `--concurrency int`: max parallel operations (default 5, max 20)
+- `--json`: output results as JSON array
 
 ```
 $ acmlab lifecycle hibernate spoke2
@@ -491,15 +575,15 @@ Cluster spoke2/spoke2 is hibernating
 
 Resumes a hibernated cluster by setting `spec.powerState` to `Running`. Idempotent.
 
-When used with `--wait`, after the cluster reaches Running state, automatically connects to the spoke cluster and approves any expired kubelet certificates. OpenShift kubelet client certs rotate every ~24h — if the cluster was hibernated during a rotation window, the certs expire and nodes cannot start pods until the CSRs are approved. This recovery step handles that automatically.
+When used with `--wait`, after the cluster reaches Running state, automatically connects to the spoke cluster and approves any expired kubelet certificates. OpenShift kubelet client certs rotate every ~24h: if the cluster was hibernated during a rotation window, the certs expire and nodes cannot start pods until the CSRs are approved. This recovery step handles that automatically.
 
 Options:
-- `--namespace`, `-n` — cluster namespace (defaults to cluster name)
-- `--wait` — wait for resume to complete, then recover expired certificates
-- `--timeout` — timeout for wait operation (default: 15m)
-- `--from-file` — YAML file with cluster list (see Batch Operations section)
-- `--concurrency int` — max parallel operations (default 5, max 20)
-- `--json` — output results as JSON array
+- `--namespace`, `-n`: cluster namespace (defaults to cluster name)
+- `--wait`: wait for resume to complete, then recover expired certificates
+- `--timeout`: timeout for wait operation (default: 15m)
+- `--from-file`: YAML file with cluster list (see Batch Operations section)
+- `--concurrency int`: max parallel operations (default 5, max 20)
+- `--json`: output results as JSON array
 
 ```
 $ acmlab lifecycle resume spoke2 --wait
@@ -515,7 +599,7 @@ Approved 20 expired kubelet certificate(s)
 
 #### `acmlab lifecycle status <cluster-name>`
 
-Shows cluster power state — both desired (spec) and actual (status). Indicates when a transition is in progress.
+Shows cluster power state: both desired (spec) and actual (status). Indicates when a transition is in progress.
 
 ```
 $ acmlab lifecycle status spoke2
@@ -531,8 +615,8 @@ Note: Power state transition in progress
 Runs diagnostic checks that cross-reference Hive ClusterDeployment state with ACM ManagedCluster conditions. Detects inconsistencies like a cluster that Hive reports as Running but ACM shows as unavailable (klusterlet issue). Outputs actionable suggestions when problems are found.
 
 Options:
-- `--namespace`, `-n` — cluster namespace (defaults to cluster name)
-- `--json` — output report as JSON
+- `--namespace`, `-n`: cluster namespace (defaults to cluster name)
+- `--json`: output report as JSON
 
 ```
 $ acmlab lifecycle diagnose spoke2
@@ -545,7 +629,7 @@ ACM Joined:    True
 
   [OK]      Power state consistent: Running
   [ERROR]   Hive power=Running but ACM Available=Unknown
-            Registration agent stopped updating its lease — klusterlet may need restart
+            Registration agent stopped updating its lease: klusterlet may need restart
 
 Suggestions:
   - Restart klusterlet agent pods: kubectl delete pods -n open-cluster-management-agent -l app=klusterlet-agent --context <spoke>
@@ -572,15 +656,15 @@ Clusters with lifecycle support (2):
 Imports an external cluster into ACM by creating a ManagedCluster, namespace, and KlusterletAddonConfig. If `--kubeconfig-path` is provided, creates an auto-import secret so ACM installs the klusterlet automatically.
 
 Options:
-- `--kubeconfig-path` — path to spoke cluster kubeconfig for auto-import
-- `--kubeconfig-context` — context name in default kubeconfig to use for auto-import (embeds file-based certs automatically)
-- `--label`, `-l` — labels for the ManagedCluster (key=value, repeatable)
-- `--cluster-set` — ManagedClusterSet to assign (default: "default")
-- `--wait` — wait for import to complete (only with auto-import)
-- `--timeout` — timeout for wait operation (default: 10m)
-- `--from-file` — YAML file with cluster list (see Batch Operations section)
-- `--concurrency int` — max parallel operations (default 5, max 20)
-- `--json` — output results as JSON array
+- `--kubeconfig-path`: path to spoke cluster kubeconfig for auto-import
+- `--kubeconfig-context`: context name in default kubeconfig to use for auto-import (embeds file-based certs automatically)
+- `--label`, `-l`: labels for the ManagedCluster (key=value, repeatable)
+- `--cluster-set`: ManagedClusterSet to assign (default: "default")
+- `--wait`: wait for import to complete (only with auto-import)
+- `--timeout`: timeout for wait operation (default: 10m)
+- `--from-file`: YAML file with cluster list (see Batch Operations section)
+- `--concurrency int`: max parallel operations (default 5, max 20)
+- `--json`: output results as JSON array
 
 ```
 $ acmlab import cluster import-test --kubeconfig-path /tmp/import-test.kubeconfig --label cloud=IBM --label vendor=OpenShift --wait
@@ -591,12 +675,12 @@ Cluster successfully imported and available
 
 #### `acmlab import detach <name>`
 
-Detaches a cluster from ACM management. Does NOT destroy the underlying cluster — only removes the ACM registration. ACM cleanup controllers remove the klusterlet from the spoke. Accepts multiple names or `--from-file`.
+Detaches a cluster from ACM management. Does NOT destroy the underlying cluster: only removes the ACM registration. ACM cleanup controllers remove the klusterlet from the spoke. Accepts multiple names or `--from-file`.
 
 Options:
-- `--from-file` — YAML file with cluster list (see Batch Operations section)
-- `--concurrency int` — max parallel operations (default 5, max 20)
-- `--json` — output results as JSON array
+- `--from-file`: YAML file with cluster list (see Batch Operations section)
+- `--concurrency int`: max parallel operations (default 5, max 20)
+- `--json`: output results as JSON array
 
 ```
 $ acmlab import detach import-test
@@ -608,7 +692,7 @@ Cluster import-test detached from ACM
 Shows import status: availability, join state, creation method, and auto-import status.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 ```
 $ acmlab import status import-test
@@ -658,7 +742,7 @@ Images required by ACM on import-test (6):
 Generates a bash script with `skopeo copy` commands to mirror all required images from `registry.redhat.io` to a target registry.
 
 Options:
-- `--target` — target mirror registry (required, e.g., `your-registry.example.com/acm-mirror`)
+- `--target`: target mirror registry (required, e.g., `your-registry.example.com/acm-mirror`)
 
 ```
 $ acmlab registry mirror-script import-test --target your-registry.example.com/acm-mirror > mirror.sh
@@ -670,12 +754,12 @@ $ acmlab registry mirror-script import-test --target your-registry.example.com/a
 Configures a `ManagedClusterImageRegistry` on the hub so ACM rewrites klusterlet image references before applying them to the spoke. Also creates the required `ManagedClusterSetBinding` and `Placement` (with tolerations for unavailable clusters).
 
 Options:
-- `--mirror` — mirror registry base path (e.g., `your-registry.example.com/acm-mirror`)
-- `--pull-secret` — path to pull secret JSON for the mirror registry
-- `--registry` — explicit source=mirror mapping (repeatable, overrides `--mirror`)
-- `--from-file` — YAML file with cluster list (per-item `mirror` and `pullSecretPath` override global flags)
-- `--concurrency int` — max parallel operations (default 5, max 20)
-- `--json` — output results as JSON array
+- `--mirror`: mirror registry base path (e.g., `your-registry.example.com/acm-mirror`)
+- `--pull-secret`: path to pull secret JSON for the mirror registry
+- `--registry`: explicit source=mirror mapping (repeatable, overrides `--mirror`)
+- `--from-file`: YAML file with cluster list (per-item `mirror` and `pullSecretPath` override global flags)
+- `--concurrency int`: max parallel operations (default 5, max 20)
+- `--json`: output results as JSON array
 
 ```
 $ acmlab registry configure import-test \
@@ -690,7 +774,7 @@ Mirror registry: your-registry.example.com/acm-mirror
 Shows whether a `ManagedClusterImageRegistry` is configured and lists the source→mirror mappings.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 ```
 $ acmlab registry status import-test
@@ -717,7 +801,7 @@ Image registry mirror removed for cluster import-test
 Shows upgrade status for a cluster: current version, desired version, channel, available updates, upgrade method, and whether an upgrade is in progress.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 ```
 $ acmlab upgrade status spoke2
@@ -735,7 +819,7 @@ Available:       4.22.10, 4.22.11, 4.22.12
 Lists clusters with available OCP upgrades. Excludes vanilla Kubernetes clusters (report-only) and clusters already at the latest version.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 ```
 $ acmlab upgrade list
@@ -746,7 +830,7 @@ spoke2               4.22.9       stable-4.22      hive         4.22.10, 4.22.11
 
 #### `acmlab upgrade set-channel <cluster> <channel>`
 
-Sets the OCP update channel for a cluster by creating a ManifestWork that patches the spoke ClusterVersion via ServerSideApply. Idempotent — updates existing ManifestWork if present.
+Sets the OCP update channel for a cluster by creating a ManifestWork that patches the spoke ClusterVersion via ServerSideApply. Idempotent: updates existing ManifestWork if present.
 
 ```
 $ acmlab upgrade set-channel spoke2 fast-4.22
@@ -755,7 +839,7 @@ Channel set to fast-4.22 for cluster spoke2
 
 #### `acmlab upgrade start <cluster> <version>`
 
-Triggers a cluster upgrade by creating a ManifestWork that patches the spoke ClusterVersion desiredUpdate. Idempotent — updates existing ManifestWork if present.
+Triggers a cluster upgrade by creating a ManifestWork that patches the spoke ClusterVersion desiredUpdate. Idempotent: updates existing ManifestWork if present.
 
 ```
 $ acmlab upgrade start spoke2 4.22.10
@@ -764,10 +848,10 @@ Upgrade to 4.22.10 started for cluster spoke2
 
 #### `acmlab upgrade history <cluster>`
 
-Shows version upgrade history for a cluster — past versions with state, start time, and completion time.
+Shows version upgrade history for a cluster: past versions with state, start time, and completion time.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 ```
 $ acmlab upgrade history spoke2
@@ -780,12 +864,12 @@ VERSION      STATE        STARTED                  COMPLETED
 
 #### `acmlab decommission start <cluster>`
 
-Starts a decommission workflow: creates a tracking ConfigMap in the cluster namespace and runs an automatic audit. The audit collects node count, CPU/memory capacity, owner, and platform from ManagedCluster and ManagedClusterInfo. Idempotent — if a workflow already exists, returns the existing state.
+Starts a decommission workflow: creates a tracking ConfigMap in the cluster namespace and runs an automatic audit. The audit collects node count, CPU/memory capacity, owner, and platform from ManagedCluster and ManagedClusterInfo. Idempotent: if a workflow already exists, returns the existing state.
 
 Options:
-- `--owner` — cluster owner email (overrides label detection)
-- `--deadline` — reclaim deadline ISO 8601 (default: 14 days from now)
-- `--kubeconfig-path` — spoke kubeconfig for imported clusters
+- `--owner`: cluster owner email (overrides label detection)
+- `--deadline`: reclaim deadline ISO 8601 (default: 14 days from now)
+- `--kubeconfig-path`: spoke kubeconfig for imported clusters
 
 ```
 $ acmlab decommission start spoke2 --owner "admin@example.com"
@@ -842,8 +926,8 @@ Memory:   131527516Ki
 Platform: IBM
 
 History:
-  [2026-09-14T15:10:17Z] imported — Decommission workflow started
-  [2026-09-14T15:10:18Z] audited — 5 nodes, 32 CPU, 131527516Ki memory
+  [2026-09-14T15:10:17Z] imported: Decommission workflow started
+  [2026-09-14T15:10:18Z] audited: 5 nodes, 32 CPU, 131527516Ki memory
 ```
 
 #### `acmlab decommission list`
@@ -851,7 +935,7 @@ History:
 Lists all active decommission workflows across the fleet.
 
 Options:
-- `--json` — output as JSON
+- `--json`: output as JSON
 
 ```
 $ acmlab decommission list
@@ -870,7 +954,7 @@ Decommission cancelled for spoke2
 
 #### `acmlab decommission audit <cluster>`
 
-Runs a standalone audit without starting a decommission workflow. Read-only — no state change.
+Runs a standalone audit without starting a decommission workflow. Read-only: no state change.
 
 ```
 $ acmlab decommission audit spoke2
@@ -891,8 +975,8 @@ $ acmlab decommission audit spoke2
 Deploys Gatekeeper/OPA security constraints to a cluster via ManifestWork. Creates ConfigurationPolicy to verify Gatekeeper health.
 
 Options:
-- `--cluster` — target cluster name
-- `--cluster-set` — apply to all clusters in a ClusterSet
+- `--cluster`: target cluster name
+- `--cluster-set`: apply to all clusters in a ClusterSet
 
 ```
 $ acmlab security apply cis-level1 --cluster spoke2
@@ -920,6 +1004,155 @@ Lists all security baselines deployed across the fleet.
 
 Removes the security baseline ManifestWork from a cluster.
 
+### GitOps
+
+#### `acmlab gitops create <name>`
+
+Creates an ApplicationSet for fleet-wide GitOps deployment via Argo CD. Uses clusterDecisionResource generator with ACM Placement for cluster selection.
+
+*Source: `cmd/acmlab/gitops.go`: `gitopsCreateCmd()`*
+
+Options:
+- `--repo`: Git repository URL (required)
+- `--path`: path in repository to deploy (required)
+- `--revision`: Git revision (default: main)
+- `--generator`: generator type: placement, cluster (default: placement)
+- `--namespace`: namespace (default: openshift-gitops)
+- `--label`: label selector (key=value, repeatable)
+
+```
+$ acmlab gitops create training-stack --repo https://github.com/org/cluster-configs --path teams/training
+Creating ApplicationSet training-stack...
+ApplicationSet created. Argo CD will generate Application resources per matching cluster.
+```
+
+#### `acmlab gitops get <name>`
+
+Shows ApplicationSet details: repo, path, generator type, status, generated app count.
+
+*Source: `cmd/acmlab/gitops.go`: `gitopsGetCmd()`*
+
+Options:
+- `--namespace`: namespace (default: openshift-gitops)
+- `--json`: output as JSON
+
+#### `acmlab gitops list`
+
+Lists all ApplicationSets with generator type, app count, and status.
+
+*Source: `cmd/acmlab/gitops.go`: `gitopsListCmd()`*
+
+Options:
+- `--namespace`: namespace (default: openshift-gitops)
+- `--json`: output as JSON
+
+```
+$ acmlab gitops list
+NAME                      GENERATOR    APPS     STATUS
+training-stack            placement    3        Healthy
+```
+
+#### `acmlab gitops delete <name>`
+
+Deletes an ApplicationSet and its generated Applications.
+
+*Source: `cmd/acmlab/gitops.go`: `gitopsDeleteCmd()`*
+
+Options:
+- `--namespace`: namespace (default: openshift-gitops)
+
+#### `acmlab gitops sync <name>`
+
+Triggers a sync refresh on an ApplicationSet by annotating it with a timestamp.
+
+*Source: `cmd/acmlab/gitops.go`: `gitopsSyncCmd()`*
+
+Options:
+- `--namespace`: namespace (default: openshift-gitops)
+
+### Hub Backup
+
+#### `acmlab backup enable`
+
+Enables scheduled hub backup via BackupSchedule CR. Deploys OADP/Velero integration for ACM hub state.
+
+*Source: `cmd/acmlab/backup.go`: `backupEnableCmd()`*
+
+Options:
+- `--schedule`: cron schedule (default: every 6 hours)
+- `--ttl`: backup TTL (default: 720h)
+- `--storage-location`: Velero BSL name (default: default)
+- `--namespace`: backup namespace
+
+```
+$ acmlab backup enable --schedule "0 */6 * * *" --ttl 720h
+Enabling hub backup schedule...
+Hub backup schedule enabled.
+```
+
+#### `acmlab backup disable`
+
+Disables hub backup schedule by removing the BackupSchedule CR.
+
+*Source: `cmd/acmlab/backup.go`: `backupDisableCmd()`*
+
+Options:
+- `--namespace`: backup namespace
+
+#### `acmlab backup status`
+
+Shows hub backup schedule status: enabled, schedule, phase, last backup.
+
+*Source: `cmd/acmlab/backup.go`: `backupStatusCmd()`*
+
+Options:
+- `--namespace`: backup namespace
+- `--json`: output as JSON
+
+```
+$ acmlab backup status
+Enabled:          true
+Schedule:         0 */6 * * *
+Phase:            Enabled
+Storage Location: default
+Last Backup:      2026-09-17T06:00:00Z
+Last Status:      Completed
+```
+
+#### `acmlab backup list`
+
+Lists completed backup and restore operations with phase and start time.
+
+*Source: `cmd/acmlab/backup.go`: `backupListCmd()`*
+
+Options:
+- `--namespace`: backup namespace
+- `--json`: output as JSON
+
+```
+$ acmlab backup list
+NAME                                PHASE           START TIME
+acm-backup-2026-09-17-06-00-00     Completed       2026-09-17T06:00:00Z
+acm-backup-2026-09-17-00-00-00     Completed       2026-09-17T00:00:00Z
+```
+
+#### `acmlab backup restore`
+
+Triggers hub restore from a backup. Reconnects Hive-provisioned clusters automatically; imported clusters are flagged for re-import.
+
+*Source: `cmd/acmlab/backup.go`: `backupRestoreCmd()`*
+
+Options:
+- `--namespace`: backup namespace
+- `--backup-name`: specific backup to restore from
+- `--sync-mode`: sync mode: latest, skip (default: latest)
+
+```
+$ acmlab backup restore --backup-name acm-backup-2026-09-17-06-00-00
+Initiating hub restore...
+Hub restore initiated. Monitor with 'acmlab backup list'.
+```
+
 ### Progressive Rollout
 
 #### `acmlab rollout create <name>`
@@ -927,11 +1160,11 @@ Removes the security baseline ManifestWork from a cluster.
 Creates a ManifestWorkReplicaSet for fleet-wide updates with rollout strategy control.
 
 Options:
-- `--placement` — Placement name for cluster selection
-- `--strategy` — rollout strategy: All, Progressive, ProgressivePerGroup (default: All)
-- `--max-concurrency` — clusters updated simultaneously (default: 1)
-- `--max-failures` — failure threshold, e.g. "10%" or "2" (default: 0)
-- `--namespace` — namespace (default: open-cluster-management)
+- `--placement`: Placement name for cluster selection
+- `--strategy`: rollout strategy: All, Progressive, ProgressivePerGroup (default: All)
+- `--max-concurrency`: clusters updated simultaneously (default: 1)
+- `--max-failures`: failure threshold, e.g. "10%" or "2" (default: 0)
+- `--namespace`: namespace (default: open-cluster-management)
 
 ```
 $ acmlab rollout create kueue-v12 --placement gpu-clusters --strategy progressive --max-concurrency 2 --max-failures 10%
@@ -955,10 +1188,10 @@ Deletes a ManifestWorkReplicaSet.
 Changes the rollout strategy on an existing ManifestWorkReplicaSet.
 
 Options:
-- `--strategy` — new strategy: All, Progressive, ProgressivePerGroup
-- `--max-concurrency` — updated concurrency
-- `--max-failures` — updated failure threshold
-- `--namespace` — namespace
+- `--strategy`: new strategy: All, Progressive, ProgressivePerGroup
+- `--max-concurrency`: updated concurrency
+- `--max-failures`: updated failure threshold
+- `--namespace`: namespace
 
 ### Managed Access
 
@@ -967,8 +1200,8 @@ Options:
 Creates ManagedServiceAccount and enables cluster-proxy addon for credential-free hub-to-spoke access with auto-rotated tokens.
 
 Options:
-- `--ttl` — token rotation interval (default: 720h)
-- `--roles` — RBAC roles for the service account (default: cluster-admin)
+- `--ttl`: token rotation interval (default: 720h)
+- `--roles`: RBAC roles for the service account (default: cluster-admin)
 
 ```
 $ acmlab access enable spoke2 --ttl 720h
@@ -1000,9 +1233,9 @@ Lists all clusters with managed access enabled.
 All commands that take a single cluster name also accept multiple names and a `--from-file` flag.
 
 **Flags available on all commands:**
-- `--from-file <file.yaml>` — YAML file with cluster list
-- `--concurrency <n>` — max parallel operations (default 5, max 20)
-- `--json` — output results as JSON array
+- `--from-file <file.yaml>`: YAML file with cluster list
+- `--concurrency <n>`: max parallel operations (default 5, max 20)
+- `--json`: output results as JSON array
 
 **YAML file format:**
 ```yaml
@@ -1104,3 +1337,22 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_disable_access` | UC-35 | Disable managed access and remove addons |
 | `acm_access_status` | UC-35 | Check access status, token health, addon state |
 | `acm_list_access` | UC-35 | List clusters with managed access enabled |
+| `acm_list_clustersets` | UC-22 | List all ManagedClusterSets with member clusters and counts |
+| `acm_create_clusterset` | UC-22 | Create a ManagedClusterSet with binding in a team namespace |
+| `acm_remove_clusterset` | UC-22 | Remove a ManagedClusterSet and its binding |
+| `acm_assign_cluster_to_set` | UC-22 | Assign a managed cluster to a ClusterSet by label |
+| `acm_create_automation` | UC-30 | Create PolicyAutomation linking policy to Ansible job template |
+| `acm_get_automation` | UC-30 | Get PolicyAutomation status: mode, linked policy, last run |
+| `acm_list_automations` | UC-30 | List all PolicyAutomations with policies, modes, status |
+| `acm_delete_automation` | UC-30 | Delete a PolicyAutomation |
+| `acm_set_automation_mode` | UC-30 | Set PolicyAutomation mode: scan, once, or disabled |
+| `acm_create_appset` | UC-32 | Create ApplicationSet for fleet-wide GitOps deployment |
+| `acm_get_appset` | UC-32 | Get ApplicationSet details: repo, path, generator, apps |
+| `acm_list_appsets` | UC-32 | List all ApplicationSets with generator type and status |
+| `acm_delete_appset` | UC-32 | Delete an ApplicationSet and its generated Applications |
+| `acm_sync_appset` | UC-32 | Trigger sync refresh on an ApplicationSet |
+| `acm_enable_backup` | UC-36 | Enable scheduled hub backup via OADP/Velero |
+| `acm_disable_backup` | UC-36 | Disable hub backup schedule |
+| `acm_backup_status` | UC-36 | Get hub backup schedule status and last backup |
+| `acm_list_backups` | UC-36 | List completed backup/restore operations |
+| `acm_restore_backup` | UC-36 | Trigger hub restore from a backup |
