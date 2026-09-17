@@ -46,7 +46,7 @@ func lifecycleCmd() *cobra.Command {
 Only works with Hive-provisioned clusters. Imported clusters do not support
 lifecycle operations.`,
 	}
-	cmd.AddCommand(hibernateCmd(), resumeCmd(), lifecycleStatusCmd(), lifecycleDiagnoseCmd(), lifecycleListCmd())
+	cmd.AddCommand(hibernateCmd(), resumeCmd(), lifecycleStatusCmd(), lifecycleDiagnoseCmd(), lifecycleListCmd(), lifecycleCuratorApplyCmd(), lifecycleCuratorStatusCmd(), lifecycleCuratorRemoveCmd(), lifecycleCuratorListCmd())
 	return cmd
 }
 
@@ -643,6 +643,169 @@ func lifecycleListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func lifecycleCuratorApplyCmd() *cobra.Command {
+	var namespace, preHookName, preHookType, postHookName, postHookType string
+
+	cmd := &cobra.Command{
+		Use:   "curator-apply <cluster>",
+		Short: "Apply ClusterCurator day-2 hooks (UC-50)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			m := lifecycle.New(c, cfg, logger)
+
+			opts := lifecycle.CuratorOpts{
+				Cluster:   args[0],
+				Namespace: namespace,
+			}
+			if preHookName != "" {
+				opts.PreHook = &lifecycle.CuratorHook{
+					Name: preHookName,
+					Type: preHookType,
+				}
+			}
+			if postHookName != "" {
+				opts.PostHook = &lifecycle.CuratorHook{
+					Name: postHookName,
+					Type: postHookType,
+				}
+			}
+
+			fmt.Printf("Applying ClusterCurator to %s...\n", args[0])
+			if err := m.ApplyCurator(context.Background(), opts); err != nil {
+				return err
+			}
+			fmt.Println("ClusterCurator applied. Day-2 hooks will run during lifecycle operations.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "cluster namespace (defaults to cluster name)")
+	cmd.Flags().StringVar(&preHookName, "pre-hook", "", "pre-hook job name")
+	cmd.Flags().StringVar(&preHookType, "pre-hook-type", "Job", "pre-hook type (Job or AnsibleJob)")
+	cmd.Flags().StringVar(&postHookName, "post-hook", "", "post-hook job name")
+	cmd.Flags().StringVar(&postHookType, "post-hook-type", "Job", "post-hook type (Job or AnsibleJob)")
+	return cmd
+}
+
+func lifecycleCuratorStatusCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "curator-status <cluster>",
+		Short: "Show ClusterCurator status (UC-50)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			m := lifecycle.New(c, cfg, logger)
+			info, err := m.GetCurator(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(info, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Cluster:   %s\n", info.Name)
+			fmt.Printf("Namespace: %s\n", info.Namespace)
+			fmt.Printf("Status:    %s\n", info.Status)
+			if info.PreHook != nil {
+				fmt.Printf("Pre-Hook:  %s (type=%s)\n", info.PreHook.Name, info.PreHook.Type)
+			}
+			if info.PostHook != nil {
+				fmt.Printf("Post-Hook: %s (type=%s)\n", info.PostHook.Name, info.PostHook.Type)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "cluster namespace")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func lifecycleCuratorRemoveCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "curator-remove <cluster>",
+		Short: "Remove ClusterCurator (UC-50)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			m := lifecycle.New(c, cfg, logger)
+			fmt.Printf("Removing ClusterCurator from %s...\n", args[0])
+			removed, err := m.RemoveCurator(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if removed {
+				fmt.Println("ClusterCurator removed.")
+			} else {
+				fmt.Printf("No ClusterCurator found for %s\n", args[0])
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "cluster namespace")
+	return cmd
+}
+
+func lifecycleCuratorListCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "curator-list",
+		Short: "List all ClusterCurators (UC-50)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			m := lifecycle.New(c, cfg, logger)
+			curators, err := m.ListCurators(context.Background(), namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(curators, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(curators) == 0 {
+				fmt.Println("No ClusterCurators found")
+				return nil
+			}
+			fmt.Printf("%-25s %-15s %-15s %s\n", "CLUSTER", "PRE-HOOK", "POST-HOOK", "STATUS")
+			for _, c := range curators {
+				pre := "-"
+				post := "-"
+				if c.PreHook != nil {
+					pre = c.PreHook.Name
+				}
+				if c.PostHook != nil {
+					post = c.PostHook.Name
+				}
+				fmt.Printf("%-25s %-15s %-15s %s\n", c.Name, pre, post, c.Status)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "filter by namespace")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
