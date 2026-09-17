@@ -169,9 +169,15 @@ func TestGetStatusReturnsInfo(t *testing.T) {
 
 func TestGetStatusNotFound(t *testing.T) {
 	mgr := newManager()
-	_, err := mgr.GetStatus(context.Background(), "missing")
-	if err == nil {
-		t.Fatal("expected error for missing baseline")
+	status, err := mgr.GetStatus(context.Background(), "missing")
+	if err != nil {
+		t.Fatalf("GetStatus should return status with level=none for missing baseline, got error: %v", err)
+	}
+	if status.Level != "none" {
+		t.Errorf("expected level=none, got %q", status.Level)
+	}
+	if status.Applied {
+		t.Error("expected Applied=false")
 	}
 }
 

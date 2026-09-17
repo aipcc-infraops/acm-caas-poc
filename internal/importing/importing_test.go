@@ -391,13 +391,13 @@ func TestDetachSuccess(t *testing.T) {
 	}
 }
 
-func TestDetachNotFoundIsNoop(t *testing.T) {
+func TestDetachNotFoundReturnsError(t *testing.T) {
 	m := newManager()
 	ctx := context.Background()
 
 	err := m.Detach(ctx, "nonexistent")
-	if err != nil {
-		t.Fatalf("Detach should not error on not-found, got: %v", err)
+	if err == nil {
+		t.Fatal("Detach of nonexistent cluster should return an error")
 	}
 }
 

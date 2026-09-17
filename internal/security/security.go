@@ -36,10 +36,18 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
+var validLevels = map[string]bool{
+	"privileged": true, "baseline": true, "restricted": true,
+	"cis-level1": true, "cis-level2": true, "cis-level3": true,
+}
+
 func (m *Manager) ApplyBaseline(ctx context.Context, cluster, level, clusterSet string) error {
 	m.logger.Info("security.ApplyBaseline", "cluster", cluster, "level", level)
 	if level == "" {
 		level = "cis-level1"
+	}
+	if !validLevels[level] {
+		return fmt.Errorf("invalid security level %q (valid: privileged, baseline, restricted, cis-level1, cis-level2, cis-level3)", level)
 	}
 
 	mw := buildGatekeeperManifestWork(cluster, level)
@@ -70,7 +78,10 @@ func (m *Manager) GetStatus(ctx context.Context, cluster string) (*BaselineStatu
 	name := manifestWorkName(cluster)
 	obj, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
 	if err != nil {
-		return nil, fmt.Errorf("getting security baseline %s: %w", name, err)
+		if apierrors.IsNotFound(err) {
+			return &BaselineStatus{Cluster: cluster, Level: "none", Applied: false}, nil
+		}
+		return nil, fmt.Errorf("getting security baseline for %s: %w", cluster, err)
 	}
 	return parseBaselineStatus(cluster, obj.Object), nil
 }

@@ -54,6 +54,19 @@ func fakeManager(objs ...runtime.Object) *Manager {
 	return New(fakeClient(objs...), config.Config{}, discardLogger)
 }
 
+func imageRegistryObj(clusterName string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "imageregistry.open-cluster-management.io/v1alpha1",
+			"kind":       "ManagedClusterImageRegistry",
+			"metadata": map[string]interface{}{
+				"name":      clusterName + "-image-registry",
+				"namespace": clusterName,
+			},
+		},
+	}
+}
+
 // manifestWork creates a ManifestWork with embedded container images.
 func manifestWork(namespace, name string, images ...string) *unstructured.Unstructured {
 	containers := make([]interface{}, len(images))
@@ -413,17 +426,16 @@ func TestRemoveMirrorSuccess(t *testing.T) {
 	}
 }
 
-func TestRemoveMirrorToleratesNotFound(t *testing.T) {
-	// Nothing exists -- all deletes should return NotFound, which is tolerated.
+func TestRemoveMirrorNotFoundReturnsError(t *testing.T) {
 	mgr := fakeManager()
 	err := mgr.RemoveMirror(context.Background(), "nonexistent")
-	if err != nil {
-		t.Fatalf("unexpected error (should tolerate NotFound): %v", err)
+	if err == nil {
+		t.Fatal("RemoveMirror of nonexistent should return an error")
 	}
 }
 
 func TestRemoveMirrorImageRegistryError(t *testing.T) {
-	c := fakeClient()
+	c := fakeClient(imageRegistryObj("spoke-1"))
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "managedclusterimageregistries", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})
@@ -439,7 +451,7 @@ func TestRemoveMirrorImageRegistryError(t *testing.T) {
 }
 
 func TestRemoveMirrorPlacementError(t *testing.T) {
-	c := fakeClient()
+	c := fakeClient(imageRegistryObj("spoke-1"))
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "placements", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})
@@ -455,7 +467,7 @@ func TestRemoveMirrorPlacementError(t *testing.T) {
 }
 
 func TestRemoveMirrorSecretError(t *testing.T) {
-	c := fakeClient()
+	c := fakeClient(imageRegistryObj("spoke-1"))
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})
@@ -471,7 +483,7 @@ func TestRemoveMirrorSecretError(t *testing.T) {
 }
 
 func TestRemoveMirrorBindingError(t *testing.T) {
-	c := fakeClient()
+	c := fakeClient(imageRegistryObj("spoke-1"))
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("delete", "managedclustersetbindings", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, &fakeError{msg: "server error"}
 	})

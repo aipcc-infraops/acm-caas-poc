@@ -2383,6 +2383,13 @@ New `internal/migration/` package: CreatePlan, Replicate, ValidateTarget, Cutove
 | UC-41  |  CAPI hibernate via scale-to-zero  |  `cluster.x-k8s.io/v1beta1.MachineDeployment`  |  spec.lifecycle.capiHibernate |
 | UC-42  |  Workload disaster recovery (Velero + GitOps)  |  `ManifestWork` + `Placement` + `velero.io/v1`  |  spec.recovery |
 | UC-43  |  Cluster relocation (planned migration)  |  `ManifestWork` + `Placement` + `SubmarinerConfig` + `velero.io/v1`  |  spec.migration |
+| UC-44  |  Disconnected cluster GitOps (Argo CD Agent)  |  `argocd.argoproj.io` + `ApplicationSet` agent mode  |  spec.gitops.pullBased |
+| UC-45  |  Fleet right-sizing recommendations  |  `MultiClusterObservability` + MCOA PrometheusRules  |  spec.observability.rightSizing |
+| UC-46  |  Cluster Proxy (spoke service exposure)  |  `ManagedClusterAddOn` cluster-proxy + `ProxyConfig`  |  spec.access.proxy |
+| UC-47  |  Add-on lifecycle management  |  `AddOnDeploymentConfig` + `ClusterManagementAddOn`  |  spec.addons |
+| UC-48  |  Placement scoring (resource-based scheduling)  |  `Placement` + `AddOnPlacementScore` prioritisers  |  spec.placement.scoring |
+| UC-49  |  PolicySet compliance profiles  |  `PolicySet` + `PlacementBinding` + grouped policies  |  spec.compliance.profile |
+| UC-50  |  ClusterCurator day-2 automation hooks  |  `ClusterCurator` pre/post hooks  |  spec.lifecycle.curator |
 
 ## Go Dependencies (for the lab repo)
 

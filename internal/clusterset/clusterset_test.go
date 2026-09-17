@@ -116,12 +116,13 @@ func TestRemoveClusterSet(t *testing.T) {
 	}
 }
 
-func TestRemoveIsIdempotent(t *testing.T) {
+func TestRemoveNonexistentReturnsError(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	if err := mgr.Remove(context.Background(), "nonexistent", "ns"); err != nil {
-		t.Fatalf("Remove on empty cluster failed (not idempotent): %v", err)
+	err := mgr.Remove(context.Background(), "nonexistent", "ns")
+	if err == nil {
+		t.Fatal("Remove of nonexistent ClusterSet should return an error")
 	}
 }
 
