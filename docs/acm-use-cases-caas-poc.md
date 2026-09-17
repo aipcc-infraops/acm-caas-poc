@@ -2219,6 +2219,124 @@ Extends `internal/lifecycle/` with CAPI hibernate path
 
 ---
 
+## UC-42: Workload disaster recovery via Velero and GitOps
+
+**Feature**: Recover workloads on a replacement cluster after catastrophic failure
+
+As a platform operator
+I want to restore workloads to a new cluster when the original is lost
+So that the CaaS platform can guarantee business continuity
+
+### Scenario: Detect a failed cluster and trigger recovery
+
+**Given** a ManagedCluster "prod-eu-1" has condition `Available = False` for longer than the SLA threshold
+**And** a Velero BackupStorageLocation exists with recent backups for "prod-eu-1"
+**When** I initiate disaster recovery for "prod-eu-1"
+**Then** a replacement cluster "prod-eu-1-dr" is provisioned via UC-01
+
+### Scenario: Restore workloads from Velero backup
+
+**Given** a replacement cluster "prod-eu-1-dr" is provisioned and Available
+**And** Velero is deployed on the replacement cluster via ManifestWork
+**When** I create a Velero Restore targeting the latest backup
+**Then** namespaces, workloads, and PersistentVolumeClaims are restored
+**And** the restore status is reported back to the hub
+
+### Scenario: GitOps re-deploys configuration to the replacement cluster
+
+**Given** the replacement cluster "prod-eu-1-dr" inherits the same labels and ClusterSet as the original
+**When** ArgoCD ApplicationSet evaluates the Placement
+**Then** all applications that targeted "prod-eu-1" now deploy to "prod-eu-1-dr"
+**And** the configuration drift is zero
+
+### Scenario: Verify recovery completeness
+
+**Given** workloads are restored and GitOps has converged
+**When** I run a recovery report for "prod-eu-1-dr"
+**Then** the report shows restored namespaces, running pods, and bound PVCs
+**And** any gaps between the original and restored state are flagged
+
+### Relationship to other UCs
+
+UC-36 handles hub-level backup/restore (OADP). UC-42 covers workload-level disaster recovery on spoke clusters: provisioning a replacement (UC-01), restoring data (Velero), and re-deploying config (UC-32 GitOps). UC-08 handles decommissioning the failed original.
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` (health detection, label inheritance)
+`api/work/v1.ManifestWork` (Velero operator deployment)
+`apps.open-cluster-management.io/v1beta1.Placement` (GitOps cluster selection)
+`velero.io/v1.Restore`, `velero.io/v1.BackupStorageLocation` (backup/restore)
+
+### Package
+
+New `internal/recovery/` package: DetectFailure, ProvisionReplacement, DeployVelero, RestoreWorkloads, VerifyRecovery
+
+---
+
+## UC-43: Cluster relocation (planned workload migration)
+
+**Feature**: Migrate workloads from one cluster to another in a planned, controlled manner
+
+As a platform operator
+I want to relocate workloads between clusters without downtime
+So that I can move tenants across regions for cost, compliance, or capacity reasons
+
+### Scenario: Initiate a planned relocation
+
+**Given** a source cluster "prod-us-1" with running workloads
+**And** a target cluster "prod-eu-2" is provisioned and Available
+**When** I initiate a relocation from "prod-us-1" to "prod-eu-2" for namespace "tenant-alpha"
+**Then** a relocation plan is created listing workloads, volumes, and network endpoints
+
+### Scenario: Replicate workloads to the target cluster
+
+**Given** a relocation plan exists for "tenant-alpha"
+**When** I execute the replication phase
+**Then** Velero backs up namespace "tenant-alpha" from "prod-us-1"
+**And** Velero restores namespace "tenant-alpha" on "prod-eu-2"
+**And** GitOps ApplicationSet detects the new cluster and deploys configuration
+
+### Scenario: Validate target before cutover
+
+**Given** workloads are replicated to "prod-eu-2"
+**When** I run a pre-cutover validation
+**Then** pod readiness, PVC bindings, and endpoint health are verified on the target
+**And** the report confirms the target is ready for traffic
+
+### Scenario: Cutover and decommission source namespace
+
+**Given** pre-cutover validation passes
+**When** I execute the cutover
+**Then** the source namespace is cordoned (new workloads blocked)
+**And** Placement labels are updated so policies and applications target "prod-eu-2"
+**And** the source namespace on "prod-us-1" is drained and deleted
+**And** a final report confirms zero workloads remain on the source
+
+### Scenario: Cross-cluster networking during migration (Submariner)
+
+**Given** both clusters are connected via Submariner (UC-26)
+**When** the migration is in the replication phase
+**Then** workloads on the source can communicate with workloads on the target
+**And** the migration can proceed without a hard cutover for stateless services
+
+### Relationship to other UCs
+
+UC-43 composes UC-01 (provision target), UC-26 (Submariner connectivity), UC-32 (GitOps redeploy), UC-42 (Velero backup/restore mechanics), and UC-08 (decommission source namespace). The difference from UC-42: this is a planned, zero-downtime migration, not a reactive recovery.
+
+### ACM types
+
+`cluster.open-cluster-management.io/v1.ManagedCluster` (label updates for Placement)
+`api/work/v1.ManifestWork` (Velero deployment, cordon/drain)
+`submariner.io/v1alpha1.SubmarinerConfig` (cross-cluster networking)
+`apps.open-cluster-management.io/v1beta1.Placement` (traffic cutover)
+`velero.io/v1.Backup`, `velero.io/v1.Restore` (data replication)
+
+### Package
+
+New `internal/migration/` package: CreatePlan, Replicate, ValidateTarget, Cutover, DecommissionSource
+
+---
+
 ## Summary
 
 | UC  |  What it validates  |  ACM Go module  |  ComputeRequest field |
@@ -2263,6 +2381,8 @@ Extends `internal/lifecycle/` with CAPI hibernate path
 | UC-39  |  Cloud-provider native scaling for imported clusters  |  `ManagedCluster` + `ManagedClusterInfo` + cloud API  |  spec.scaling.cloudProvider |
 | UC-40  |  CAPI provisioning for vanilla Kubernetes  |  `cluster.x-k8s.io/v1beta1.Cluster` + `MachineDeployment`  |  spec.type=capi |
 | UC-41  |  CAPI hibernate via scale-to-zero  |  `cluster.x-k8s.io/v1beta1.MachineDeployment`  |  spec.lifecycle.capiHibernate |
+| UC-42  |  Workload disaster recovery (Velero + GitOps)  |  `ManifestWork` + `Placement` + `velero.io/v1`  |  spec.recovery |
+| UC-43  |  Cluster relocation (planned migration)  |  `ManifestWork` + `Placement` + `SubmarinerConfig` + `velero.io/v1`  |  spec.migration |
 
 ## Go Dependencies (for the lab repo)
 
