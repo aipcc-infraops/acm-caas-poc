@@ -57,6 +57,8 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-48 | Placement scoring (resource-based workload scheduling) | ✅ Implemented | `internal/fleet/` |
 | UC-49 | PolicySet compliance profiles (golden config) | ✅ Implemented | `internal/policy/` |
 | UC-50 | ClusterCurator day-2 automation hooks | ✅ Implemented | `internal/lifecycle/` |
+| UC-51 | VM lifecycle management (OpenShift Virtualization) | ✅ Implemented | `internal/virtualization/` |
+| UC-52 | Observability stack customisation (pull secret, OBC, rules, dashboards) | ✅ Implemented | `internal/observability/` |
 
 ### PoC Priority Areas
 
@@ -249,7 +251,30 @@ bin/acmlab addon configure observability-config --set replica-count=3 --set log-
 bin/acmlab addon list-configs
 bin/acmlab addon remove-config observability-config
 
-# 26. Hub backup and restore
+# 26. Virtual machines (OpenShift Virtualization)
+bin/acmlab vm deploy --name web-vm --cluster spoke1 --cpu 4 --memory 8Gi
+bin/acmlab vm start web-vm --cluster spoke1
+bin/acmlab vm stop web-vm --cluster spoke1
+bin/acmlab vm migrate web-vm --cluster spoke1
+bin/acmlab vm status web-vm --cluster spoke1
+bin/acmlab vm list
+bin/acmlab vm remove web-vm --cluster spoke1
+
+# 27. Observability stack customisation
+bin/acmlab observability setup
+bin/acmlab observability status
+bin/acmlab observability configure-pull-secret
+bin/acmlab observability configure-storage --storage-class gp3-csi --bucket thanos
+bin/acmlab observability deploy-rules --rules-file custom-rules.yaml
+bin/acmlab observability remove-rules
+bin/acmlab observability deploy-dashboard --name gpu-overview --dashboard-file gpu-dashboard.json
+bin/acmlab observability remove-dashboard gpu-overview
+bin/acmlab observability configure-metrics --metric node_cpu_seconds_total --metric container_memory_rss
+bin/acmlab observability addon-health
+bin/acmlab observability configure-retention --retention 24h --block-duration 2h --delete-delay 48h
+bin/acmlab observability teardown
+
+# 28. Hub backup and restore
 bin/acmlab backup enable --schedule "0 */6 * * *" --ttl 720h
 bin/acmlab backup status
 bin/acmlab backup list

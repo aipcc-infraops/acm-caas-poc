@@ -23,12 +23,15 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 	scheme := runtime.NewScheme()
 	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			client.GVRNamespace:                     "NamespaceList",
-			client.GVRPersistentVolumeClaim:         "PersistentVolumeClaimList",
-			client.GVRDeployment:                    "DeploymentList",
-			client.GVRService:                       "ServiceList",
-			client.GVRSecret:                        "SecretList",
-			client.GVRMultiClusterObservability:      "MultiClusterObservabilityList",
+			client.GVRNamespace:                 "NamespaceList",
+			client.GVRPersistentVolumeClaim:     "PersistentVolumeClaimList",
+			client.GVRDeployment:                "DeploymentList",
+			client.GVRService:                   "ServiceList",
+			client.GVRSecret:                    "SecretList",
+			client.GVRMultiClusterObservability: "MultiClusterObservabilityList",
+			client.GVRConfigMap:                 "ConfigMapList",
+			client.GVRManagedClusterAddOn:       "ManagedClusterAddOnList",
+			client.GVRObjectBucketClaim:         "ObjectBucketClaimList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -239,6 +242,174 @@ func TestTeardownStepError(t *testing.T) {
 	err := mgr.Teardown(context.Background())
 	if err == nil {
 		t.Fatal("expected error from Teardown when delete fails")
+	}
+}
+
+func TestConfigurePullSecret(t *testing.T) {
+	src := &unstructured.Unstructured{}
+	src.SetGroupVersionKind(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"})
+	src.SetName("pull-secret")
+	src.SetNamespace(PullSecretSourceNS)
+	src.Object["type"] = "kubernetes.io/dockerconfigjson"
+	src.Object["data"] = map[string]interface{}{".dockerconfigjson": "dGVzdA=="}
+
+	c := fakeClient(src)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.ensureNamespace(context.Background()); err != nil {
+		t.Fatalf("namespace: %v", err)
+	}
+	if err := mgr.ConfigurePullSecret(context.Background()); err != nil {
+		t.Fatalf("ConfigurePullSecret failed: %v", err)
+	}
+	if _, err := c.Get(context.Background(), client.GVRSecret, Namespace, PullSecretName); err != nil {
+		t.Errorf("pull secret not found: %v", err)
+	}
+}
+
+func TestConfigureOBCStorage(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.ConfigureOBCStorage(context.Background(), StorageOpts{Type: "obc", StorageClass: "gp3-csi"}); err != nil {
+		t.Fatalf("ConfigureOBCStorage failed: %v", err)
+	}
+	if _, err := c.Get(context.Background(), client.GVRObjectBucketClaim, Namespace, OBCName); err != nil {
+		t.Errorf("OBC not found: %v", err)
+	}
+}
+
+func TestDeployCustomRules(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	rules := "groups:\n- name: custom\n  rules:\n  - alert: HighCPU\n    expr: cpu > 80"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: rules}); err != nil {
+		t.Fatalf("DeployCustomRules failed: %v", err)
+	}
+	if _, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, CustomRulesCM); err != nil {
+		t.Errorf("custom rules CM not found: %v", err)
+	}
+}
+
+func TestRemoveCustomRules(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	_ = mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: "test"})
+	if err := mgr.RemoveCustomRules(context.Background()); err != nil {
+		t.Fatalf("RemoveCustomRules failed: %v", err)
+	}
+	_, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err == nil {
+		t.Error("custom rules CM still exists")
+	}
+}
+
+func TestDeployDashboard(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.DeployDashboard(context.Background(), DashboardOpts{Name: "gpu-overview", JSON: `{"title":"GPU"}`}); err != nil {
+		t.Fatalf("DeployDashboard failed: %v", err)
+	}
+	obj, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, "gpu-overview")
+	if err != nil {
+		t.Fatalf("dashboard CM not found: %v", err)
+	}
+	labels := obj.GetLabels()
+	if labels[DashboardLabelKey] != DashboardLabelValue {
+		t.Errorf("missing dashboard label")
+	}
+}
+
+func TestRemoveDashboard(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	_ = mgr.DeployDashboard(context.Background(), DashboardOpts{Name: "temp", JSON: "{}"})
+	if err := mgr.RemoveDashboard(context.Background(), "temp"); err != nil {
+		t.Fatalf("RemoveDashboard failed: %v", err)
+	}
+}
+
+func TestConfigureMetricsAllowlist(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.ConfigureMetricsAllowlist(context.Background(), MetricsOpts{Metrics: []string{"node_cpu_seconds_total", "container_memory_rss"}}); err != nil {
+		t.Fatalf("ConfigureMetricsAllowlist failed: %v", err)
+	}
+	if _, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, MetricsAllowlistCM); err != nil {
+		t.Errorf("metrics allowlist CM not found: %v", err)
+	}
+}
+
+func TestListAddonHealth(t *testing.T) {
+	addon := &unstructured.Unstructured{}
+	addon.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Kind: "ManagedClusterAddOn",
+	})
+	addon.SetName("observability-controller")
+	addon.SetNamespace("spoke1")
+	addon.Object["status"] = map[string]interface{}{
+		"conditions": []interface{}{
+			map[string]interface{}{"type": "Available", "status": "True"},
+			map[string]interface{}{"type": "Degraded", "status": "False"},
+		},
+	}
+
+	c := fakeClient(addon)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	health, err := mgr.ListAddonHealth(context.Background())
+	if err != nil {
+		t.Fatalf("ListAddonHealth failed: %v", err)
+	}
+	if len(health) != 1 {
+		t.Fatalf("got %d addons, want 1", len(health))
+	}
+	if !health[0].Available {
+		t.Error("expected Available=true")
+	}
+	if health[0].Degraded {
+		t.Error("expected Degraded=false")
+	}
+}
+
+func TestListAddonHealthEmpty(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	health, err := mgr.ListAddonHealth(context.Background())
+	if err != nil {
+		t.Fatalf("ListAddonHealth failed: %v", err)
+	}
+	if len(health) != 0 {
+		t.Errorf("got %d, want 0", len(health))
+	}
+}
+
+func TestConfigureRetention(t *testing.T) {
+	mco := &unstructured.Unstructured{}
+	mco.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "observability.open-cluster-management.io", Version: "v1beta2", Kind: "MultiClusterObservability",
+	})
+	mco.SetName(MCOName)
+	mco.Object["spec"] = map[string]interface{}{}
+
+	c := fakeClient(mco)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.ConfigureRetention(context.Background(), RetentionOpts{RetentionInLocal: "24h", BlockDuration: "2h", DeleteDelay: "48h"})
+	if err != nil {
+		t.Fatalf("ConfigureRetention failed: %v", err)
+	}
+	obj, _ := c.Get(context.Background(), client.GVRMultiClusterObservability, "", MCOName)
+	spec := obj.Object["spec"].(map[string]interface{})
+	ret := spec["retentionConfig"].(map[string]interface{})
+	if ret["retentionInLocal"] != "24h" {
+		t.Errorf("retentionInLocal = %v, want 24h", ret["retentionInLocal"])
 	}
 }
 
