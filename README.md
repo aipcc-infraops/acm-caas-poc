@@ -50,10 +50,10 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-41 | Kubernetes cluster hibernate via CAPI scale-to-zero | ✅ Implemented | `internal/lifecycle/` |
 | UC-42 | Workload disaster recovery (Velero + GitOps) | ✅ Implemented | `internal/recovery/` |
 | UC-43 | Cluster relocation (planned workload migration) | ✅ Implemented | `internal/migration/` |
-| UC-44 | Disconnected cluster GitOps (Argo CD Agent pull-based) | 📋 Planned | `internal/gitops/` |
-| UC-45 | Fleet right-sizing recommendations (MCOA) | 📋 Planned | `internal/observability/` |
-| UC-46 | Cluster Proxy (spoke service exposure to hub) | 📋 Planned | `internal/access/` |
-| UC-47 | Add-on lifecycle management (AddOnDeploymentConfig) | 📋 Planned | `internal/addon/` |
+| UC-44 | Disconnected cluster GitOps (Argo CD Agent pull-based) | ✅ Implemented | `internal/gitops/` |
+| UC-45 | Fleet right-sizing recommendations (MCOA) | ✅ Implemented | `internal/rightsizing/` |
+| UC-46 | Cluster Proxy (spoke service exposure to hub) | ✅ Implemented | `internal/access/` |
+| UC-47 | Add-on lifecycle management (AddOnDeploymentConfig) | ✅ Implemented | `internal/addon/` |
 | UC-48 | Placement scoring (resource-based workload scheduling) | 📋 Planned | `internal/fleet/` |
 | UC-49 | PolicySet compliance profiles (golden config) | 📋 Planned | `internal/policy/` |
 | UC-50 | ClusterCurator day-2 automation hooks | 📋 Planned | `internal/lifecycle/` |
@@ -224,7 +224,32 @@ bin/acmlab gitops list
 bin/acmlab gitops sync training-stack
 bin/acmlab gitops delete training-stack
 
-# 22. Hub backup and restore
+# 22. Agent-mode GitOps (disconnected clusters)
+bin/acmlab gitops enable-agent edge-apps --repo https://github.com/org/edge-configs --path manifests/edge --cluster edge-01 --cluster edge-02
+bin/acmlab gitops agent-status edge-apps
+bin/acmlab gitops disable-agent edge-apps
+
+# 23. Resource right-sizing
+bin/acmlab rightsizing enable spoke1
+bin/acmlab rightsizing advise spoke1
+bin/acmlab rightsizing adjust spoke1 --dry-run
+bin/acmlab rightsizing adjust spoke1
+bin/acmlab rightsizing list
+bin/acmlab rightsizing disable spoke1
+
+# 24. Cluster proxy
+bin/acmlab access enable-proxy spoke1
+bin/acmlab access proxy-status spoke1
+bin/acmlab access disable-proxy spoke1
+
+# 25. Add-on lifecycle management
+bin/acmlab addon list
+bin/acmlab addon get work-manager
+bin/acmlab addon configure observability-config --set replica-count=3 --set log-level=debug
+bin/acmlab addon list-configs
+bin/acmlab addon remove-config observability-config
+
+# 26. Hub backup and restore
 bin/acmlab backup enable --schedule "0 */6 * * *" --ttl 720h
 bin/acmlab backup status
 bin/acmlab backup list

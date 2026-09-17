@@ -16,7 +16,7 @@ func gitopsCmd() *cobra.Command {
 		Use:   "gitops",
 		Short: "Manage GitOps fleet deployments via ApplicationSet",
 	}
-	cmd.AddCommand(gitopsCreateCmd(), gitopsGetCmd(), gitopsListCmd(), gitopsDeleteCmd(), gitopsSyncCmd())
+	cmd.AddCommand(gitopsCreateCmd(), gitopsGetCmd(), gitopsListCmd(), gitopsDeleteCmd(), gitopsSyncCmd(), gitopsEnableAgentCmd(), gitopsDisableAgentCmd(), gitopsAgentStatusCmd())
 	return cmd
 }
 
@@ -203,5 +203,118 @@ func gitopsSyncCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&namespace, "namespace", "", "Namespace (default: openshift-gitops)")
+	return cmd
+}
+
+func gitopsEnableAgentCmd() *cobra.Command {
+	var repoURL, path, revision, namespace string
+	var clusters []string
+
+	cmd := &cobra.Command{
+		Use:   "enable-agent <name>",
+		Short: "Enable agent-mode GitOps for disconnected clusters",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if repoURL == "" {
+				return fmt.Errorf("--repo is required")
+			}
+			if path == "" {
+				return fmt.Errorf("--path is required")
+			}
+			if len(clusters) == 0 {
+				return fmt.Errorf("--cluster is required (at least one)")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := gitops.New(c, cfg, logger)
+			opts := gitops.AgentModeOpts{
+				Name:      args[0],
+				Namespace: namespace,
+				RepoURL:   repoURL,
+				Path:      path,
+				Revision:  revision,
+				Clusters:  clusters,
+			}
+			fmt.Printf("Enabling agent-mode GitOps %s for %d cluster(s)...\n", args[0], len(clusters))
+			if err := mgr.EnableAgentMode(context.Background(), opts); err != nil {
+				return err
+			}
+			fmt.Println("Agent-mode ApplicationSet created with PullMode=true. Disconnected clusters will pull configurations.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&repoURL, "repo", "", "Git repository URL (required)")
+	cmd.Flags().StringVar(&path, "path", "", "Path in repository (required)")
+	cmd.Flags().StringVar(&revision, "revision", "", "Git revision (default: main)")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "Namespace (default: openshift-gitops)")
+	cmd.Flags().StringSliceVar(&clusters, "cluster", nil, "Target cluster names (repeatable, required)")
+	return cmd
+}
+
+func gitopsDisableAgentCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "disable-agent <name>",
+		Short: "Disable agent-mode GitOps",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := gitops.New(c, cfg, logger)
+			removed, err := mgr.DisableAgentMode(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if removed {
+				fmt.Printf("Agent-mode ApplicationSet %s deleted\n", args[0])
+			} else {
+				fmt.Printf("Agent-mode ApplicationSet %s not found\n", args[0])
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "Namespace (default: openshift-gitops)")
+	return cmd
+}
+
+func gitopsAgentStatusCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "agent-status <name>",
+		Short: "Show agent-mode GitOps status",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := gitops.New(c, cfg, logger)
+			info, err := mgr.AgentModeStatus(context.Background(), args[0], namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(info, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Name:       %s\n", info.Name)
+			fmt.Printf("Namespace:  %s\n", info.Namespace)
+			fmt.Printf("Repo:       %s\n", info.RepoURL)
+			fmt.Printf("Path:       %s\n", info.Path)
+			fmt.Printf("Mode:       %s\n", info.Mode)
+			fmt.Printf("Status:     %s\n", info.Status)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "Namespace (default: openshift-gitops)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }

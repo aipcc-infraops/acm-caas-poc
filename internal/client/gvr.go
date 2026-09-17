@@ -126,4 +126,10 @@ var (
 	GVRCAPIMachineDeployment = schema.GroupVersionResource{
 		Group: "cluster.x-k8s.io", Version: "v1beta1", Resource: "machinedeployments",
 	}
+	GVRClusterManagementAddOn = schema.GroupVersionResource{
+		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "clustermanagementaddons",
+	}
+	GVRAddOnDeploymentConfig = schema.GroupVersionResource{
+		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "addondeploymentconfigs",
+	}
 )
