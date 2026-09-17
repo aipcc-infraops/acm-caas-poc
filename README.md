@@ -177,6 +177,12 @@ bin/acmlab security status spoke1
 bin/acmlab security list-baselines
 bin/acmlab security remove-baseline --cluster spoke1
 
+# Custom Rego policies
+bin/acmlab security apply-rego --cluster spoke1 --rego-file deny-latest.rego
+bin/acmlab security apply-rego --cluster spoke1 --rego-file no-hostpath.rego --name no-hostpath --match Pod,Deployment
+bin/acmlab security list-rego
+bin/acmlab security remove-rego deny_latest --cluster spoke1
+
 # 17. Progressive rollout
 bin/acmlab rollout create my-rollout --manifest configmap.yaml --placement prod-clusters --strategy rolling --max-concurrency 25%
 bin/acmlab rollout get my-rollout
