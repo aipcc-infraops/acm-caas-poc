@@ -24,6 +24,19 @@ var gvrKinds = map[schema.GroupVersionResource]string{
 	client.GVRManifestWork:        "ManifestWorkList",
 	client.GVRConfigurationPolicy: "ConfigurationPolicyList",
 	client.GVRApplicationSet:      "ApplicationSetList",
+	client.GVRManagedCluster:      "ManagedClusterList",
+}
+
+func managedClusterObj(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": name,
+			},
+		},
+	}
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -112,7 +125,7 @@ func TestNewReturnsManager(t *testing.T) {
 }
 
 func TestEnableDRCreatesResources(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("prod-east"), managedClusterObj("prod-west"))
 	err := mgr.EnableDR(context.Background(), DROpts{
 		SourceCluster: "prod-east",
 		TargetCluster: "prod-west",
@@ -137,7 +150,7 @@ func TestEnableDRCreatesResources(t *testing.T) {
 }
 
 func TestEnableDRIdempotent(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("prod-east"), managedClusterObj("prod-west"))
 	opts := DROpts{SourceCluster: "prod-east", TargetCluster: "prod-west"}
 	if err := mgr.EnableDR(context.Background(), opts); err != nil {
 		t.Fatalf("first enable: %v", err)
@@ -148,7 +161,7 @@ func TestEnableDRIdempotent(t *testing.T) {
 }
 
 func TestEnableDRWithCustomOpts(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("prod-east"), managedClusterObj("prod-west"))
 	err := mgr.EnableDR(context.Background(), DROpts{
 		SourceCluster: "prod-east",
 		TargetCluster: "prod-west",
@@ -167,7 +180,7 @@ func TestEnableDRWithCustomOpts(t *testing.T) {
 }
 
 func TestEnableDRSourceError(t *testing.T) {
-	c := fakeClient()
+	c := fakeClient(managedClusterObj("prod-east"), managedClusterObj("prod-west"))
 	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "manifestworks", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("forbidden")
 	})
@@ -275,11 +288,11 @@ func TestDisableDR(t *testing.T) {
 	}
 }
 
-func TestDisableDRNoMatch(t *testing.T) {
+func TestDisableDRNoMatchReturnsError(t *testing.T) {
 	mgr := newManager()
 	err := mgr.DisableDR(context.Background(), "nonexistent")
-	if err != nil {
-		t.Fatalf("DisableDR should not error on no matches: %v", err)
+	if err == nil {
+		t.Fatal("expected error for nonexistent DR pair")
 	}
 }
 

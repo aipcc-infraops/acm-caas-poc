@@ -284,7 +284,7 @@ func securityListPoliciesCmd() *cobra.Command {
 			}
 			mgr := security.New(c, cfg, logger)
 
-			var all []policyEntry
+			all := make([]policyEntry, 0)
 			if engine == "" || engine == "gatekeeper" {
 				policies, err := mgr.ListCustomPolicies(context.Background())
 				if err != nil {

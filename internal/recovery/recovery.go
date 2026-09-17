@@ -55,6 +55,13 @@ func (m *Manager) EnableDR(ctx context.Context, opts DROpts) error {
 	m.logger.Info("recovery.EnableDR", "source", opts.SourceCluster, "target", opts.TargetCluster)
 	applyDRDefaults(&opts)
 
+	if _, err := m.client.Get(ctx, client.GVRManagedCluster, "", opts.SourceCluster); err != nil {
+		return fmt.Errorf("source cluster %s not found: %w", opts.SourceCluster, err)
+	}
+	if _, err := m.client.Get(ctx, client.GVRManagedCluster, "", opts.TargetCluster); err != nil {
+		return fmt.Errorf("target cluster %s not found: %w", opts.TargetCluster, err)
+	}
+
 	sourceLabels := buildDRLabels(opts.SourceCluster, opts.PairName, "primary")
 	if err := m.client.CreateIfNotExists(ctx, client.GVRManifestWork, opts.SourceCluster, sourceLabels); err != nil {
 		return fmt.Errorf("labelling source cluster: %w", err)
@@ -143,10 +150,12 @@ func (m *Manager) DisableDR(ctx context.Context, cluster string) error {
 		return fmt.Errorf("listing DR pairs: %w", err)
 	}
 
+	found := false
 	for _, pair := range pairs {
 		if pair.SourceCluster != cluster && pair.TargetCluster != cluster {
 			continue
 		}
+		found = true
 		_ = m.client.DeleteIfExists(ctx, client.GVRManifestWork, pair.SourceCluster, "dr-velero-"+pair.Name)
 		_ = m.client.DeleteIfExists(ctx, client.GVRManifestWork, pair.SourceCluster, "dr-labels-"+pair.Name)
 		_ = m.client.DeleteIfExists(ctx, client.GVRManifestWork, pair.TargetCluster, "dr-restore-"+pair.Name)
@@ -155,6 +164,9 @@ func (m *Manager) DisableDR(ctx context.Context, cluster string) error {
 		_ = m.client.DeleteIfExists(ctx, client.GVRApplicationSet, "openshift-gitops", "dr-failover-"+pair.Name)
 	}
 
+	if !found {
+		return fmt.Errorf("no DR pair found for cluster %s", cluster)
+	}
 	return nil
 }
 
