@@ -48,6 +48,8 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-39 | Cloud-provider native scaling for imported clusters | 📋 Planned | `internal/scaling/` |
 | UC-40 | Cluster API (CAPI) provisioning for vanilla Kubernetes | 📋 Planned | `internal/provisioning/` |
 | UC-41 | Kubernetes cluster hibernate via CAPI scale-to-zero | 📋 Planned | `internal/lifecycle/` |
+| UC-42 | Workload disaster recovery (Velero + GitOps) | 📋 Planned | `internal/recovery/` |
+| UC-43 | Cluster relocation (planned workload migration) | 📋 Planned | `internal/migration/` |
 
 ### PoC Priority Areas
 
