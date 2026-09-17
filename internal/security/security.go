@@ -187,6 +187,86 @@ func (m *Manager) ListCustomPolicies(ctx context.Context) ([]BaselineInfo, error
 	return infos, nil
 }
 
+type KyvernoPolicyOpts struct {
+	Name       string
+	Cluster    string
+	PolicyFile string
+	PolicyYAML string
+}
+
+func (m *Manager) ApplyKyvernoPolicy(ctx context.Context, opts KyvernoPolicyOpts) error {
+	m.logger.Info("security.ApplyKyvernoPolicy", "name", opts.Name, "cluster", opts.Cluster)
+
+	policyYAML, err := resolveKyvernoPolicy(opts)
+	if err != nil {
+		return err
+	}
+
+	name := opts.Name
+	if name == "" {
+		name = extractKyvernoPolicyName(policyYAML)
+	}
+	if name == "" {
+		return fmt.Errorf("could not determine policy name — provide --name or include metadata.name in YAML")
+	}
+
+	mw := buildKyvernoManifestWork(opts.Cluster, name, policyYAML)
+	if err := m.client.CreateIfNotExists(ctx, client.GVRManifestWork, opts.Cluster, mw); err != nil {
+		return fmt.Errorf("creating Kyverno policy ManifestWork: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) RemoveKyvernoPolicy(ctx context.Context, name, cluster string) error {
+	m.logger.Info("security.RemoveKyvernoPolicy", "name", name, "cluster", cluster)
+	mwName := "kyverno-policy-" + name + "-" + cluster
+	_, err := m.client.Get(ctx, client.GVRManifestWork, cluster, mwName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("Kyverno policy %s not found on cluster %s", name, cluster)
+		}
+		return fmt.Errorf("checking Kyverno policy: %w", err)
+	}
+	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, mwName)
+}
+
+func (m *Manager) ListKyvernoPolicies(ctx context.Context) ([]BaselineInfo, error) {
+	m.logger.Info("security.ListKyvernoPolicies")
+	list, err := m.client.List(ctx, client.GVRManifestWork, "", "acmlab.redhat.com/kyverno-policy")
+	if err != nil {
+		return nil, fmt.Errorf("listing Kyverno policies: %w", err)
+	}
+	infos := make([]BaselineInfo, 0, len(list.Items))
+	for _, item := range list.Items {
+		infos = append(infos, parseBaselineInfo(item.Object))
+	}
+	return infos, nil
+}
+
+func resolveKyvernoPolicy(opts KyvernoPolicyOpts) (string, error) {
+	if opts.PolicyFile != "" {
+		data, err := os.ReadFile(opts.PolicyFile)
+		if err != nil {
+			return "", fmt.Errorf("reading Kyverno policy file %s: %w", opts.PolicyFile, err)
+		}
+		return string(data), nil
+	}
+	if opts.PolicyYAML != "" {
+		return opts.PolicyYAML, nil
+	}
+	return "", fmt.Errorf("either PolicyFile or PolicyYAML must be provided")
+}
+
+func extractKyvernoPolicyName(yaml string) string {
+	for _, line := range strings.Split(yaml, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "name:") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))
+		}
+	}
+	return ""
+}
+
 func resolveRego(opts CustomPolicyOpts) (string, error) {
 	if opts.RegoFile != "" {
 		data, err := os.ReadFile(opts.RegoFile)

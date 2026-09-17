@@ -350,6 +350,42 @@ func splitPkgName(pkg string) []string {
 	return parts
 }
 
+func buildKyvernoManifestWork(cluster, name, policyYAML string) *unstructured.Unstructured {
+	mwName := "kyverno-policy-" + name + "-" + cluster
+
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "work.open-cluster-management.io/v1",
+			"kind":       "ManifestWork",
+			"metadata": map[string]interface{}{
+				"name":      mwName,
+				"namespace": cluster,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed":        "true",
+					"acmlab.redhat.com/kyverno-policy": "true",
+					"acmlab.redhat.com/policy-name":    name,
+				},
+			},
+			"spec": map[string]interface{}{
+				"workload": map[string]interface{}{
+					"manifests": []interface{}{
+						map[string]interface{}{
+							"apiVersion": "kyverno.io/v1",
+							"kind":       "ClusterPolicy",
+							"metadata": map[string]interface{}{
+								"name": name,
+								"annotations": map[string]interface{}{
+									"acmlab.redhat.com/policy-source": policyYAML,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func buildGatekeeperHealthPolicy(cluster, clusterSet string) *unstructured.Unstructured {
 	policyName := healthPolicyName(cluster)
 

@@ -606,6 +606,151 @@ func TestToKebab(t *testing.T) {
 	}
 }
 
+func kyvernoManifestWork(cluster, name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "work.open-cluster-management.io/v1",
+			"kind":       "ManifestWork",
+			"metadata": map[string]interface{}{
+				"name":      "kyverno-policy-" + name + "-" + cluster,
+				"namespace": cluster,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed":        "true",
+					"acmlab.redhat.com/kyverno-policy": "true",
+					"acmlab.redhat.com/policy-name":    name,
+				},
+			},
+		},
+	}
+}
+
+func TestApplyKyvernoPolicyFromInline(t *testing.T) {
+	mgr := newManager()
+	yaml := "apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: disallow-latest\nspec:\n  rules:\n  - name: deny-latest\n    match:\n      resources:\n        kinds:\n        - Pod"
+	opts := KyvernoPolicyOpts{
+		Cluster:    "spoke1",
+		PolicyYAML: yaml,
+	}
+	err := mgr.ApplyKyvernoPolicy(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ApplyKyvernoPolicy failed: %v", err)
+	}
+
+	mw, err := mgr.client.Get(context.Background(), client.GVRManifestWork, "spoke1", "kyverno-policy-disallow-latest-spoke1")
+	if err != nil {
+		t.Fatalf("ManifestWork not found: %v", err)
+	}
+	labels := mw.GetLabels()
+	if labels["acmlab.redhat.com/kyverno-policy"] != "true" {
+		t.Error("kyverno-policy label missing")
+	}
+}
+
+func TestApplyKyvernoPolicyWithName(t *testing.T) {
+	mgr := newManager()
+	yaml := "apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: original-name\nspec: {}"
+	opts := KyvernoPolicyOpts{
+		Name:       "custom-name",
+		Cluster:    "spoke1",
+		PolicyYAML: yaml,
+	}
+	err := mgr.ApplyKyvernoPolicy(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("ApplyKyvernoPolicy failed: %v", err)
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRManifestWork, "spoke1", "kyverno-policy-custom-name-spoke1")
+	if err != nil {
+		t.Fatalf("ManifestWork not found: %v", err)
+	}
+}
+
+func TestApplyKyvernoPolicyNoYAML(t *testing.T) {
+	mgr := newManager()
+	opts := KyvernoPolicyOpts{Cluster: "spoke1"}
+	err := mgr.ApplyKyvernoPolicy(context.Background(), opts)
+	if err == nil {
+		t.Fatal("expected error when no policy YAML provided")
+	}
+}
+
+func TestApplyKyvernoPolicyNoName(t *testing.T) {
+	mgr := newManager()
+	opts := KyvernoPolicyOpts{
+		Cluster:    "spoke1",
+		PolicyYAML: "apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nspec: {}",
+	}
+	err := mgr.ApplyKyvernoPolicy(context.Background(), opts)
+	if err == nil {
+		t.Fatal("expected error when no name can be determined")
+	}
+}
+
+func TestRemoveKyvernoPolicy(t *testing.T) {
+	mgr := newManager()
+	yaml := "apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: to-remove\nspec: {}"
+	opts := KyvernoPolicyOpts{Cluster: "spoke1", PolicyYAML: yaml}
+	if err := mgr.ApplyKyvernoPolicy(context.Background(), opts); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	err := mgr.RemoveKyvernoPolicy(context.Background(), "to-remove", "spoke1")
+	if err != nil {
+		t.Fatalf("RemoveKyvernoPolicy failed: %v", err)
+	}
+}
+
+func TestRemoveKyvernoPolicyNotFound(t *testing.T) {
+	mgr := newManager()
+	err := mgr.RemoveKyvernoPolicy(context.Background(), "nonexistent", "spoke1")
+	if err == nil {
+		t.Fatal("expected error for nonexistent policy")
+	}
+}
+
+func TestListKyvernoPolicies(t *testing.T) {
+	mw := kyvernoManifestWork("spoke1", "deny-latest")
+	mgr := newManager(mw)
+
+	policies, err := mgr.ListKyvernoPolicies(context.Background())
+	if err != nil {
+		t.Fatalf("ListKyvernoPolicies failed: %v", err)
+	}
+	if len(policies) != 1 {
+		t.Errorf("got %d policies, want 1", len(policies))
+	}
+}
+
+func TestExtractKyvernoPolicyName(t *testing.T) {
+	tests := []struct {
+		yaml string
+		want string
+	}{
+		{"apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata:\n  name: disallow-latest\nspec: {}", "disallow-latest"},
+		{"apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nspec: {}", ""},
+	}
+	for _, tt := range tests {
+		got := extractKyvernoPolicyName(tt.yaml)
+		if got != tt.want {
+			t.Errorf("extractKyvernoPolicyName() = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+func TestBuildKyvernoManifestWork(t *testing.T) {
+	mw := buildKyvernoManifestWork("spoke1", "deny-latest", "apiVersion: kyverno.io/v1\nkind: ClusterPolicy")
+	if mw.GetName() != "kyverno-policy-deny-latest-spoke1" {
+		t.Errorf("Name = %q", mw.GetName())
+	}
+	labels := mw.GetLabels()
+	if labels["acmlab.redhat.com/kyverno-policy"] != "true" {
+		t.Error("kyverno-policy label missing")
+	}
+	if labels["acmlab.redhat.com/policy-name"] != "deny-latest" {
+		t.Errorf("policy-name label = %q", labels["acmlab.redhat.com/policy-name"])
+	}
+}
+
 func TestApplyInvalidLevel(t *testing.T) {
 	mgr := newManager()
 	err := mgr.ApplyBaseline(context.Background(), "spoke1", "garbage", "")
