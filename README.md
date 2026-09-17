@@ -48,8 +48,15 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-39 | Cloud-provider native scaling for imported clusters | ✅ Implemented | `internal/scaling/` |
 | UC-40 | Cluster API (CAPI) provisioning for vanilla Kubernetes | ✅ Implemented | `internal/provisioning/` |
 | UC-41 | Kubernetes cluster hibernate via CAPI scale-to-zero | ✅ Implemented | `internal/lifecycle/` |
-| UC-42 | Workload disaster recovery (Velero + GitOps) | 📋 Planned | `internal/recovery/` |
-| UC-43 | Cluster relocation (planned workload migration) | 📋 Planned | `internal/migration/` |
+| UC-42 | Workload disaster recovery (Velero + GitOps) | ✅ Implemented | `internal/recovery/` |
+| UC-43 | Cluster relocation (planned workload migration) | ✅ Implemented | `internal/migration/` |
+| UC-44 | Disconnected cluster GitOps (Argo CD Agent pull-based) | 📋 Planned | `internal/gitops/` |
+| UC-45 | Fleet right-sizing recommendations (MCOA) | 📋 Planned | `internal/observability/` |
+| UC-46 | Cluster Proxy (spoke service exposure to hub) | 📋 Planned | `internal/access/` |
+| UC-47 | Add-on lifecycle management (AddOnDeploymentConfig) | 📋 Planned | `internal/addon/` |
+| UC-48 | Placement scoring (resource-based workload scheduling) | 📋 Planned | `internal/fleet/` |
+| UC-49 | PolicySet compliance profiles (golden config) | 📋 Planned | `internal/policy/` |
+| UC-50 | ClusterCurator day-2 automation hooks | 📋 Planned | `internal/lifecycle/` |
 
 ### PoC Priority Areas
 
