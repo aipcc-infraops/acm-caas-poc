@@ -63,6 +63,11 @@ func (m *Manager) DeployStack(ctx context.Context, cluster, clusterSet string) e
 func (m *Manager) RemoveStack(ctx context.Context, cluster string) error {
 	m.logger.Info("gpu.RemoveStack", "cluster", cluster)
 
+	_, err := m.client.Get(ctx, client.GVRManagedCluster, "", cluster)
+	if err != nil {
+		return fmt.Errorf("cluster %s not found: %w", cluster, err)
+	}
+
 	policyName := stackPolicyName(cluster)
 	_ = m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, cluster+"-kueue-stack")
 	_ = m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, cluster+"-kyverno-gpu")

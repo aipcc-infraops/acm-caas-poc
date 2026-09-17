@@ -58,7 +58,8 @@ func TestRouteByVersionSkipsUnavailable(t *testing.T) {
 }
 
 func TestEnforceVersionPolicyCreatesResources(t *testing.T) {
-	mgr := newTestManager()
+	mc := managedCluster("gpu-h100-01", map[string]string{})
+	mgr := newTestManager(mc)
 	ctx := context.Background()
 
 	if err := mgr.EnforceVersionPolicy(ctx, "gpu-h100-01", "2.18"); err != nil {
@@ -89,7 +90,8 @@ func TestEnforceVersionPolicyCreatesResources(t *testing.T) {
 }
 
 func TestRemoveVersionPolicyDeletesResources(t *testing.T) {
-	mgr := newTestManager()
+	mc := managedCluster("gpu-h100-01", map[string]string{})
+	mgr := newTestManager(mc)
 	ctx := context.Background()
 
 	if err := mgr.EnforceVersionPolicy(ctx, "gpu-h100-01", "2.18"); err != nil {
