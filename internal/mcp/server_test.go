@@ -650,7 +650,17 @@ func TestConfigureIdPOIDCViaMCP(t *testing.T) {
 }
 
 func TestRemoveIdPViaMCP(t *testing.T) {
-	c := fakeClientWithClusters()
+	mw := &unstructured.Unstructured{}
+	mw.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "work.open-cluster-management.io", Version: "v1", Kind: "ManifestWork",
+	})
+	mw.SetName("idp-my-github")
+	mw.SetNamespace("spoke1")
+	mw.SetLabels(map[string]string{
+		"acmlab.redhat.com/idp":  "my-github",
+		"acmlab.redhat.com/type": "github",
+	})
+	c := fakeClientWithClusters(mw)
 	resp := callTool(t, c, "acm_remove_idp", map[string]interface{}{
 		"name":    "my-github",
 		"cluster": "spoke1",
@@ -891,9 +901,9 @@ func TestReleaseClaimViaMCP(t *testing.T) {
 		"name":      "my-claim",
 		"namespace": "my-pool",
 	})
-	text := extractToolText(t, resp)
-	if text != "ClusterClaim my-claim released" {
-		t.Errorf("unexpected response: %s", text)
+	_, isErr := extractToolResult(t, resp)
+	if !isErr {
+		t.Error("expected error for nonexistent claim")
 	}
 }
 
@@ -902,8 +912,8 @@ func TestDeletePoolViaMCP(t *testing.T) {
 	resp := callTool(t, c, "acm_delete_pool", map[string]interface{}{
 		"name": "old-pool",
 	})
-	text := extractToolText(t, resp)
-	if text != "ClusterPool old-pool deleted" {
-		t.Errorf("unexpected response: %s", text)
+	_, isErr := extractToolResult(t, resp)
+	if !isErr {
+		t.Error("expected error for nonexistent pool")
 	}
 }

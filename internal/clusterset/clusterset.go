@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -74,6 +75,14 @@ func (m *Manager) Create(ctx context.Context, name, namespace string) error {
 
 func (m *Manager) Remove(ctx context.Context, name, namespace string) error {
 	m.logger.Info("clusterset.Remove", "name", name, "namespace", namespace)
+
+	_, err := m.client.Get(ctx, client.GVRManagedClusterSet, "", name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("ManagedClusterSet %s not found", name)
+		}
+		return fmt.Errorf("checking ManagedClusterSet %s: %w", name, err)
+	}
 
 	if err := m.client.DeleteIfExists(ctx, client.GVRManagedClusterSetBinding, namespace, name); err != nil {
 		return fmt.Errorf("deleting ManagedClusterSetBinding %s: %w", name, err)

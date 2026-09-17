@@ -48,7 +48,7 @@ func mwrs(name, namespace, strategy string) *unstructured.Unstructured {
 					map[string]interface{}{
 						"name": "gpu-placement",
 						"rolloutStrategy": map[string]interface{}{
-							"rolloutType": strategy,
+							"type": strategy,
 						},
 					},
 				},
@@ -138,8 +138,8 @@ func TestCreateDefaultsStrategy(t *testing.T) {
 	}
 	ref := refs[0].(map[string]interface{})
 	rs := ref["rolloutStrategy"].(map[string]interface{})
-	if rs["rolloutType"] != "All" {
-		t.Errorf("expected default strategy All, got %v", rs["rolloutType"])
+	if rs["type"] != "All" {
+		t.Errorf("expected default strategy All, got %v", rs["type"])
 	}
 }
 
@@ -361,8 +361,8 @@ func TestBuildManifestWorkReplicaSet(t *testing.T) {
 		t.Errorf("expected placement gpu-placement, got %v", ref["name"])
 	}
 	rs := ref["rolloutStrategy"].(map[string]interface{})
-	if rs["rolloutType"] != "Progressive" {
-		t.Errorf("expected Progressive, got %v", rs["rolloutType"])
+	if rs["type"] != "Progressive" {
+		t.Errorf("expected Progressive, got %v", rs["type"])
 	}
 	prog := rs["progressive"].(map[string]interface{})
 	if prog["maxConcurrency"] != int64(2) {
@@ -375,8 +375,8 @@ func TestBuildManifestWorkReplicaSet(t *testing.T) {
 
 func TestBuildRolloutStrategyAll(t *testing.T) {
 	strategy := buildRolloutStrategy("All", 0, "", "")
-	if strategy["rolloutType"] != "All" {
-		t.Errorf("expected All, got %v", strategy["rolloutType"])
+	if strategy["type"] != "All" {
+		t.Errorf("expected All, got %v", strategy["type"])
 	}
 	if _, ok := strategy["progressive"]; ok {
 		t.Error("All strategy should not have progressive config")
@@ -385,8 +385,8 @@ func TestBuildRolloutStrategyAll(t *testing.T) {
 
 func TestBuildRolloutStrategyProgressivePerGroup(t *testing.T) {
 	strategy := buildRolloutStrategy("ProgressivePerGroup", 5, "20%", "15m")
-	if strategy["rolloutType"] != "ProgressivePerGroup" {
-		t.Errorf("expected ProgressivePerGroup, got %v", strategy["rolloutType"])
+	if strategy["type"] != "ProgressivePerGroup" {
+		t.Errorf("expected ProgressivePerGroup, got %v", strategy["type"])
 	}
 	ppg, ok := strategy["progressivePerGroup"].(map[string]interface{})
 	if !ok {

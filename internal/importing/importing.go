@@ -193,11 +193,14 @@ func (m *Manager) updateAutoImportSecret(ctx context.Context, name string, kubec
 // underlying cluster — it just removes it from ACM management.
 func (m *Manager) Detach(ctx context.Context, name string) error {
 	m.logger.Info("importing.Detach", "cluster", name)
-	err := m.client.Delete(ctx, client.GVRManagedCluster, "", name)
-	if errors.IsNotFound(err) {
-		return nil
+	_, err := m.client.Get(ctx, client.GVRManagedCluster, "", name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("cluster %s not found", name)
+		}
+		return fmt.Errorf("checking cluster %s: %w", name, err)
 	}
-	return err
+	return m.client.Delete(ctx, client.GVRManagedCluster, "", name)
 }
 
 // WaitForImport polls the ManagedCluster until ManagedClusterConditionAvailable=True.

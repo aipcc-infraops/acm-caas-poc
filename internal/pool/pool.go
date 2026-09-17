@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
@@ -97,6 +98,13 @@ func (m *Manager) DeletePool(ctx context.Context, name, namespace string) error 
 	if namespace == "" {
 		namespace = name
 	}
+	_, err := m.client.Get(ctx, client.GVRClusterPool, namespace, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("ClusterPool %s not found", name)
+		}
+		return fmt.Errorf("checking ClusterPool %s: %w", name, err)
+	}
 	return m.client.DeleteIfExists(ctx, client.GVRClusterPool, namespace, name)
 }
 
@@ -126,6 +134,13 @@ func (m *Manager) ReleaseClaim(ctx context.Context, claimName, namespace string)
 	m.logger.Info("pool.ReleaseClaim", "claim", claimName)
 	if namespace == "" {
 		return fmt.Errorf("namespace is required to release a claim")
+	}
+	_, err := m.client.Get(ctx, client.GVRClusterClaim, namespace, claimName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("ClusterClaim %s not found in namespace %s", claimName, namespace)
+		}
+		return fmt.Errorf("checking ClusterClaim %s: %w", claimName, err)
 	}
 	return m.client.DeleteIfExists(ctx, client.GVRClusterClaim, namespace, claimName)
 }
