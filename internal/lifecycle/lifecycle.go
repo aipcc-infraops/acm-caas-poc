@@ -2,8 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -67,15 +69,22 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 	}
 }
 
-// Hibernate hibernates a Hive-provisioned cluster by patching powerState to Hibernating
+// Hibernate hibernates a cluster. Tries Hive powerState first; falls back to
+// CAPI MachineDeployment scale-to-zero for non-Hive clusters.
 func (m *Manager) Hibernate(ctx context.Context, namespace, name string) error {
 	m.logger.Info("lifecycle.Hibernate", "cluster", name)
+	_, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return m.HibernateCAPI(ctx, name)
+		}
+		return fmt.Errorf("checking ClusterDeployment: %w", err)
+	}
+
 	currentState, err := m.GetPowerState(ctx, namespace, name)
 	if err != nil {
 		return fmt.Errorf("checking current power state: %w", err)
 	}
-
-	// Idempotent: if already hibernating, do nothing
 	if currentState == PowerStateHibernating {
 		return nil
 	}
@@ -83,15 +92,22 @@ func (m *Manager) Hibernate(ctx context.Context, namespace, name string) error {
 	return m.setPowerState(ctx, namespace, name, PowerStateHibernating)
 }
 
-// Resume resumes a hibernated cluster by patching powerState to Running
+// Resume resumes a hibernated cluster. Tries Hive powerState first; falls back
+// to CAPI MachineDeployment scale-up for non-Hive clusters.
 func (m *Manager) Resume(ctx context.Context, namespace, name string) error {
 	m.logger.Info("lifecycle.Resume", "cluster", name)
+	_, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return m.ResumeCAPI(ctx, name)
+		}
+		return fmt.Errorf("checking ClusterDeployment: %w", err)
+	}
+
 	currentState, err := m.GetPowerState(ctx, namespace, name)
 	if err != nil {
 		return fmt.Errorf("checking current power state: %w", err)
 	}
-
-	// Idempotent: if already running, do nothing
 	if currentState == PowerStateRunning {
 		return nil
 	}
@@ -99,18 +115,19 @@ func (m *Manager) Resume(ctx context.Context, namespace, name string) error {
 	return m.setPowerState(ctx, namespace, name, PowerStateRunning)
 }
 
-// GetPowerState returns the current power state of a cluster
+// GetPowerState returns the current power state of a cluster.
+// For Hive clusters, reads ClusterDeployment.spec.powerState.
+// For CAPI clusters, infers state from MachineDeployment replicas.
 func (m *Manager) GetPowerState(ctx context.Context, namespace, name string) (PowerState, error) {
 	m.logger.Info("lifecycle.GetPowerState", "cluster", name)
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return "", fmt.Errorf("no ClusterDeployment found for cluster %s/%s: this cluster may be imported (not Hive-provisioned)", namespace, name)
+			return m.getCAPIPowerState(ctx, name)
 		}
 		return "", fmt.Errorf("getting ClusterDeployment: %w", err)
 	}
 
-	// Read spec.powerState
 	powerState, found, err := unstructured.NestedString(cd.Object, "spec", "powerState")
 	if err != nil {
 		return "", fmt.Errorf("reading spec.powerState: %w", err)
@@ -210,11 +227,9 @@ func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name str
 
 	switch clusterType {
 	case client.ClusterTypeKubernetes:
-		// UC-41: Kubernetes hibernate via CAPI MachineDeployment scale-to-zero is planned.
 		return &LifecycleSupportReason{
-			Support:     LifecycleNotYetImplemented,
+			Support:     LifecycleFull,
 			ClusterType: clusterType,
-			Alternative: "acmlab scaling set " + name + " --replicas 0",
 		}, nil
 	default:
 		return &LifecycleSupportReason{
@@ -249,6 +264,119 @@ func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, erro
 		names = append(names, fmt.Sprintf("%s/%s", namespace, name))
 	}
 	return names, nil
+}
+
+const preHibernateAnnotation = "acmlab.redhat.com/pre-hibernate-replicas"
+const defaultCAPIReplicas = 2
+
+func (m *Manager) HibernateCAPI(ctx context.Context, name string) error {
+	m.logger.Info("lifecycle.HibernateCAPI", "cluster", name)
+	mds, err := m.listCAPIMachineDeployments(ctx, name)
+	if err != nil {
+		return err
+	}
+	if len(mds) == 0 {
+		return fmt.Errorf("no CAPI MachineDeployments found for cluster %s", name)
+	}
+
+	for _, md := range mds {
+		replicas, _, _ := unstructured.NestedInt64(md.Object, "spec", "replicas")
+		if replicas == 0 {
+			continue
+		}
+
+		annotations := md.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[preHibernateAnnotation] = strconv.FormatInt(replicas, 10)
+		md.SetAnnotations(annotations)
+
+		patch := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"annotations": annotations,
+			},
+			"spec": map[string]interface{}{
+				"replicas": int64(0),
+			},
+		}
+		data, err := json.Marshal(patch)
+		if err != nil {
+			return fmt.Errorf("marshaling CAPI patch: %w", err)
+		}
+		_, err = m.client.Patch(ctx, client.GVRCAPIMachineDeployment, md.GetNamespace(), md.GetName(), types.MergePatchType, data)
+		if err != nil {
+			return fmt.Errorf("patching MachineDeployment %s/%s: %w", md.GetNamespace(), md.GetName(), err)
+		}
+	}
+	m.logger.Info("lifecycle.HibernateCAPI", "cluster", name, "method", "CAPI scale-to-zero")
+	return nil
+}
+
+func (m *Manager) ResumeCAPI(ctx context.Context, name string) error {
+	m.logger.Info("lifecycle.ResumeCAPI", "cluster", name)
+	mds, err := m.listCAPIMachineDeployments(ctx, name)
+	if err != nil {
+		return err
+	}
+	if len(mds) == 0 {
+		return fmt.Errorf("no CAPI MachineDeployments found for cluster %s", name)
+	}
+
+	for _, md := range mds {
+		targetReplicas := int64(defaultCAPIReplicas)
+		annotations := md.GetAnnotations()
+		if v, ok := annotations[preHibernateAnnotation]; ok {
+			if parsed, err := strconv.ParseInt(v, 10, 64); err == nil && parsed > 0 {
+				targetReplicas = parsed
+			}
+		}
+
+		patch := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"replicas": targetReplicas,
+			},
+		}
+		data, err := json.Marshal(patch)
+		if err != nil {
+			return fmt.Errorf("marshaling CAPI patch: %w", err)
+		}
+		_, err = m.client.Patch(ctx, client.GVRCAPIMachineDeployment, md.GetNamespace(), md.GetName(), types.MergePatchType, data)
+		if err != nil {
+			return fmt.Errorf("patching MachineDeployment %s/%s: %w", md.GetNamespace(), md.GetName(), err)
+		}
+	}
+	m.logger.Info("lifecycle.ResumeCAPI", "cluster", name, "method", "CAPI scale-up")
+	return nil
+}
+
+func (m *Manager) getCAPIPowerState(ctx context.Context, name string) (PowerState, error) {
+	mds, err := m.listCAPIMachineDeployments(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if len(mds) == 0 {
+		return "", fmt.Errorf("no ClusterDeployment or CAPI MachineDeployment found for cluster %s", name)
+	}
+
+	for _, md := range mds {
+		replicas, _, _ := unstructured.NestedInt64(md.Object, "spec", "replicas")
+		if replicas > 0 {
+			return PowerStateRunning, nil
+		}
+	}
+	return PowerStateHibernating, nil
+}
+
+func (m *Manager) listCAPIMachineDeployments(ctx context.Context, clusterName string) ([]unstructured.Unstructured, error) {
+	list, err := m.client.List(ctx, client.GVRCAPIMachineDeployment, clusterName, "")
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing CAPI MachineDeployments for %s: %w", clusterName, err)
+	}
+	return list.Items, nil
 }
 
 func (m *Manager) Diagnose(ctx context.Context, namespace, name string) (*DiagnosticReport, error) {

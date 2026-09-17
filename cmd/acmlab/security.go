@@ -13,9 +13,19 @@ import (
 func securityCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "security",
-		Short: "Manage security baselines via Gatekeeper/OPA on managed clusters",
+		Short: "Manage security baselines and compliance scanning on managed clusters",
 	}
-	cmd.AddCommand(securityApplyCmd(), securityStatusCmd(), securityListCmd(), securityRemoveCmd())
+	cmd.AddCommand(
+		securityApplyCmd(),
+		securityStatusCmd(),
+		securityListCmd(),
+		securityRemoveCmd(),
+		securityDeployComplianceCmd(),
+		securityScanCmd(),
+		securityScanStatusCmd(),
+		securityComplianceReportCmd(),
+		securityRemoveComplianceCmd(),
+	)
 	return cmd
 }
 
@@ -143,6 +153,177 @@ func securityRemoveCmd() *cobra.Command {
 			} else {
 				fmt.Printf("No security baseline found on %s (nothing to remove)\n", args[0])
 			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+func securityDeployComplianceCmd() *cobra.Command {
+	var cluster, clusterSet string
+
+	cmd := &cobra.Command{
+		Use:   "deploy-compliance",
+		Short: "Deploy Compliance Operator to a cluster via ACM OperatorPolicy",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cluster == "" {
+				return fmt.Errorf("--cluster is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			fmt.Printf("Deploying Compliance Operator to %s...\n", cluster)
+			if err := mgr.DeployComplianceOperator(context.Background(), cluster, clusterSet); err != nil {
+				return err
+			}
+			fmt.Println("Compliance Operator deployed. Use 'acmlab security scan' to start a scan.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster name (required)")
+	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "scope placement to a ClusterSet")
+	return cmd
+}
+
+func securityScanCmd() *cobra.Command {
+	var cluster, profile, clusterSet string
+
+	cmd := &cobra.Command{
+		Use:   "scan",
+		Short: "Create a compliance scan on a cluster",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cluster == "" {
+				return fmt.Errorf("--cluster is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			opts := security.ComplianceScanOpts{
+				Cluster:    cluster,
+				Profile:    profile,
+				ClusterSet: clusterSet,
+			}
+			fmt.Printf("Creating compliance scan on %s with profile %s...\n", cluster, opts.Profile)
+			if err := mgr.CreateComplianceScan(context.Background(), opts); err != nil {
+				return err
+			}
+			fmt.Println("Compliance scan created. Use 'acmlab security scan-status' to check progress.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster name (required)")
+	cmd.Flags().StringVar(&profile, "profile", "ocp4-cis", "compliance profile (e.g. ocp4-cis, ocp4-moderate)")
+	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "scope placement to a ClusterSet")
+	return cmd
+}
+
+func securityScanStatusCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "scan-status <cluster>",
+		Short: "Show compliance scan status for a cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			status, err := mgr.GetComplianceStatus(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(status, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Cluster:       %s\n", status.Cluster)
+			fmt.Printf("Profile:       %s\n", status.Profile)
+			fmt.Printf("Phase:         %s\n", status.Phase)
+			fmt.Printf("Compliant:     %d\n", status.Compliant)
+			fmt.Printf("Non-Compliant: %d\n", status.NonCompliant)
+			if len(status.Conditions) > 0 {
+				fmt.Println("Conditions:")
+				for _, c := range status.Conditions {
+					fmt.Printf("  - %s\n", c)
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func securityComplianceReportCmd() *cobra.Command {
+	var profile string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "compliance-report <cluster>",
+		Short: "Show detailed compliance check results for a cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			report, err := mgr.GetComplianceReport(context.Background(), args[0], profile)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Cluster: %s\n", report.Cluster)
+			fmt.Printf("Profile: %s\n", report.Profile)
+			fmt.Printf("Phase:   %s\n", report.Summary.Phase)
+			fmt.Printf("Pass:    %d  Fail: %d\n\n", report.Summary.Compliant, report.Summary.NonCompliant)
+			if len(report.Results) == 0 {
+				fmt.Println("No results available yet.")
+				return nil
+			}
+			fmt.Printf("%-40s %-8s %-8s %s\n", "RULE", "STATUS", "SEV", "DETAIL")
+			for _, r := range report.Results {
+				detail := r.Detail
+				if len(detail) > 40 {
+					detail = detail[:37] + "..."
+				}
+				fmt.Printf("%-40s %-8s %-8s %s\n", r.Rule, r.Status, r.Severity, detail)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&profile, "profile", "ocp4-cis", "compliance profile")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func securityRemoveComplianceCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remove-compliance <cluster>",
+		Short: "Remove compliance scanning from a cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			fmt.Printf("Removing compliance scanning from %s...\n", args[0])
+			if err := mgr.RemoveComplianceScan(context.Background(), args[0]); err != nil {
+				return err
+			}
+			fmt.Println("Compliance scanning removed.")
 			return nil
 		},
 	}

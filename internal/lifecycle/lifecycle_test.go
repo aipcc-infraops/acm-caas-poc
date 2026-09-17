@@ -100,16 +100,17 @@ func TestGetPowerStateReturnsCurrentState(t *testing.T) {
 
 func TestGetPowerStateReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.GetPowerState(context.Background(), "test-ns", "missing-cluster")
 	if err == nil {
 		t.Fatal("expected error for missing cluster, got nil")
-	}
-	if !contains(err.Error(), "no ClusterDeployment found") {
-		t.Errorf("expected error message to contain 'no ClusterDeployment found', got: %v", err)
 	}
 }
 
@@ -531,7 +532,11 @@ func TestResumeChangesState(t *testing.T) {
 
 func TestHibernateReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -543,7 +548,11 @@ func TestHibernateReturnsErrorForMissingCluster(t *testing.T) {
 
 func TestResumeReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -647,7 +656,7 @@ func TestCheckLifecycleSupportFullForHiveCluster(t *testing.T) {
 	}
 }
 
-func TestCheckLifecycleSupportNotYetImplementedForKubernetes(t *testing.T) {
+func TestCheckLifecycleSupportFullForKubernetes(t *testing.T) {
 	mci := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "internal.open-cluster-management.io/v1beta1",
@@ -673,14 +682,11 @@ func TestCheckLifecycleSupportNotYetImplementedForKubernetes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckLifecycleSupport() error = %v", err)
 	}
-	if reason.Support != LifecycleNotYetImplemented {
-		t.Errorf("expected LifecycleNotYetImplemented, got %v", reason.Support)
+	if reason.Support != LifecycleFull {
+		t.Errorf("expected LifecycleFull for Kubernetes (CAPI scale-to-zero), got %v", reason.Support)
 	}
 	if reason.ClusterType != client.ClusterTypeKubernetes {
 		t.Errorf("expected ClusterTypeKubernetes, got %v", reason.ClusterType)
-	}
-	if reason.Alternative == "" {
-		t.Error("expected non-empty alternative suggestion")
 	}
 }
 
