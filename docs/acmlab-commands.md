@@ -1284,6 +1284,135 @@ Addon Healthy:  true
 
 Lists all clusters with managed access enabled.
 
+### Virtual Machines (UC-51)
+
+#### `acmlab vm deploy`
+
+Deploy a virtual machine to a managed cluster via ManifestWork wrapping a KubeVirt VirtualMachine CRD.
+
+**Flags:**
+- `--name <name>`: VM name (required)
+- `--cluster <cluster>`: target cluster (required)
+- `--cpu <n>`: CPU cores (default: 2)
+- `--memory <size>`: memory (default: 4Gi)
+- `--image <image>`: container disk image (default: RHEL 9 guest image)
+- `--disk-size <size>`: disk size (default: 20Gi)
+
+#### `acmlab vm start <name>`
+
+Start a stopped virtual machine.
+
+**Flags:**
+- `--cluster <cluster>`: target cluster (required)
+
+#### `acmlab vm stop <name>`
+
+Stop a running virtual machine.
+
+**Flags:**
+- `--cluster <cluster>`: target cluster (required)
+
+#### `acmlab vm migrate <name>`
+
+Live-migrate a virtual machine to another node by adding a VirtualMachineInstanceMigration to the ManifestWork.
+
+**Flags:**
+- `--cluster <cluster>`: target cluster (required)
+
+#### `acmlab vm status <name>`
+
+Show detailed VM status including CPU, memory, image, disk, and node assignment.
+
+**Flags:**
+- `--cluster <cluster>`: target cluster (required)
+- `--json`: output as JSON
+
+#### `acmlab vm list`
+
+List all virtual machines deployed across the fleet.
+
+**Flags:**
+- `--json`: output as JSON
+
+#### `acmlab vm remove <name>`
+
+Remove a virtual machine from a managed cluster.
+
+**Flags:**
+- `--cluster <cluster>`: target cluster (required)
+
+### Observability (UC-52)
+
+#### `acmlab observability setup`
+
+Deploy the full observability stack (namespace, MinIO, Thanos secret, MCO).
+
+#### `acmlab observability teardown`
+
+Remove the observability stack and all associated resources.
+
+#### `acmlab observability status`
+
+Show observability stack status (NotInstalled, Pending, Progressing, Ready).
+
+#### `acmlab observability configure-pull-secret`
+
+Copy the pull secret from `openshift-config` namespace to the observability namespace. Required for image access.
+
+#### `acmlab observability configure-storage`
+
+Configure ObjectBucketClaim for production Thanos storage (replaces MinIO for production use).
+
+**Flags:**
+- `--storage-class <class>`: storage class for the OBC
+- `--bucket <name>`: bucket name prefix
+
+#### `acmlab observability deploy-rules`
+
+Deploy custom Prometheus recording and alerting rules via ConfigMap.
+
+**Flags:**
+- `--rules-file <path>`: path to YAML file with Prometheus rules (required)
+
+#### `acmlab observability remove-rules`
+
+Remove custom Prometheus rules.
+
+#### `acmlab observability deploy-dashboard`
+
+Deploy a custom Grafana dashboard via ConfigMap with the `grafana-custom-dashboard=true` label.
+
+**Flags:**
+- `--name <name>`: dashboard name (required)
+- `--dashboard-file <path>`: path to Grafana dashboard JSON file (required)
+
+#### `acmlab observability remove-dashboard <name>`
+
+Remove a custom Grafana dashboard.
+
+#### `acmlab observability configure-metrics`
+
+Configure custom metrics allowlist for collection from managed clusters.
+
+**Flags:**
+- `--metric <name>`: metric name to allowlist (repeatable)
+
+#### `acmlab observability addon-health`
+
+Show observability addon health status across all managed clusters.
+
+**Flags:**
+- `--json`: output as JSON
+
+#### `acmlab observability configure-retention`
+
+Configure Thanos retention settings on the MCO.
+
+**Flags:**
+- `--retention <duration>`: local retention duration (e.g. 24h)
+- `--block-duration <duration>`: TSDB block duration (e.g. 2h)
+- `--delete-delay <duration>`: deletion delay for blocks (e.g. 48h)
+
 ### Batch Operations
 
 All commands that take a single cluster name also accept multiple names and a `--from-file` flag.
