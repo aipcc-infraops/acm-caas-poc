@@ -308,6 +308,7 @@ func importStatusCmd() *cobra.Command {
 }
 
 func importListCmd() *cobra.Command {
+	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List imported (non-Hive) clusters",
@@ -330,6 +331,12 @@ func importListCmd() *cobra.Command {
 				return nil
 			}
 
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+
 			fmt.Printf("Imported clusters (%d):\n", len(clusters))
 			for _, cl := range clusters {
 				fmt.Printf("  - %s  Available=%s  Joined=%s\n", cl.Name, cl.Available, cl.Joined)
@@ -338,7 +345,7 @@ func importListCmd() *cobra.Command {
 			return nil
 		},
 	}
-
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -117,7 +118,15 @@ func (m *Manager) ensureOAuthRBAC(ctx context.Context, cluster string) error {
 
 func (m *Manager) Remove(ctx context.Context, idpName, cluster string) error {
 	m.logger.Info("idp.Remove", "name", idpName, "cluster", cluster)
-	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, manifestWorkName(idpName))
+	name := manifestWorkName(idpName)
+	_, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("IdP %s not found on cluster %s", idpName, cluster)
+		}
+		return fmt.Errorf("checking IdP %s on %s: %w", idpName, cluster, err)
+	}
+	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, name)
 }
 
 func (m *Manager) List(ctx context.Context, cluster string) ([]IdPInfo, error) {

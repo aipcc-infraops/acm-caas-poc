@@ -46,7 +46,7 @@ func buildRolloutStrategy(strategyType string, maxConcurrency int, maxFailures, 
 	}
 
 	strategy := map[string]interface{}{
-		"rolloutType": strategyType,
+		"type": strategyType,
 	}
 
 	if strategyType == "Progressive" || strategyType == "ProgressivePerGroup" {
@@ -82,7 +82,7 @@ func parseRolloutInfo(name string, obj map[string]interface{}) *RolloutInfo {
 		if refs, ok := spec["placementRefs"].([]interface{}); ok && len(refs) > 0 {
 			if ref, ok := refs[0].(map[string]interface{}); ok {
 				if rs, ok := ref["rolloutStrategy"].(map[string]interface{}); ok {
-					info.Strategy, _ = rs["rolloutType"].(string)
+					info.Strategy, _ = rs["type"].(string)
 				}
 			}
 		}

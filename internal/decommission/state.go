@@ -205,7 +205,7 @@ func listStates(ctx context.Context, c *client.Client) ([]DecommissionState, err
 	if err != nil {
 		return nil, err
 	}
-	var states []DecommissionState
+	states := make([]DecommissionState, 0)
 	for _, item := range list.Items {
 		s, err := stateFromConfigMap(&item)
 		if err != nil {

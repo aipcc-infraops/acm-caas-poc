@@ -233,11 +233,11 @@ func TestDeletePoolRemoves(t *testing.T) {
 	}
 }
 
-func TestDeletePoolIdempotent(t *testing.T) {
+func TestDeletePoolNonexistentReturnsError(t *testing.T) {
 	mgr := newManager()
 	err := mgr.DeletePool(context.Background(), "nonexistent", "ns")
-	if err != nil {
-		t.Fatalf("deleting nonexistent pool should be idempotent: %v", err)
+	if err == nil {
+		t.Fatal("deleting nonexistent pool should return an error")
 	}
 }
 
@@ -301,11 +301,11 @@ func TestReleaseClaimRequiresNamespace(t *testing.T) {
 	}
 }
 
-func TestReleaseClaimIdempotent(t *testing.T) {
+func TestReleaseClaimNonexistentReturnsError(t *testing.T) {
 	mgr := newManager()
 	err := mgr.ReleaseClaim(context.Background(), "gone", "ns")
-	if err != nil {
-		t.Fatalf("releasing nonexistent claim should be idempotent: %v", err)
+	if err == nil {
+		t.Fatal("releasing nonexistent claim should return an error")
 	}
 }
 

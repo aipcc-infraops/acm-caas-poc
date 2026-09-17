@@ -95,6 +95,13 @@ func (m *Manager) Disable(ctx context.Context, cluster string) (bool, error) {
 func (m *Manager) GetStatus(ctx context.Context, cluster string) (*AccessStatus, error) {
 	m.logger.Info("access.GetStatus", "cluster", cluster)
 
+	if _, err := m.client.Get(ctx, client.GVRManagedCluster, "", cluster); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("cluster %s not found", cluster)
+		}
+		return nil, fmt.Errorf("checking cluster %s: %w", cluster, err)
+	}
+
 	msaObj, err := m.client.Get(ctx, client.GVRManagedServiceAccount, cluster, msaName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -120,9 +127,18 @@ func (m *Manager) List(ctx context.Context) ([]AccessInfo, error) {
 		return nil, fmt.Errorf("listing ManagedServiceAccounts: %w", err)
 	}
 
+	seen := make(map[string]bool)
 	infos := make([]AccessInfo, 0, len(list.Items))
 	for _, item := range list.Items {
-		infos = append(infos, parseAccessInfo(item.GetNamespace(), item.Object))
+		cluster := item.GetNamespace()
+		if seen[cluster] {
+			continue
+		}
+		if item.GetName() != msaName {
+			continue
+		}
+		seen[cluster] = true
+		infos = append(infos, parseAccessInfo(cluster, item.Object))
 	}
 	return infos, nil
 }

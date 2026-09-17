@@ -258,11 +258,11 @@ func TestAccessListViaMCP(t *testing.T) {
 
 func TestAccessStatusNonexistentViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
-	text := extractToolText(t, callTool(t, c, "acm_access_status", map[string]interface{}{
+	_, isErr := extractToolResult(t, callTool(t, c, "acm_access_status", map[string]interface{}{
 		"cluster": "nonexistent",
 	}))
-	if !strings.Contains(strings.ToLower(text), "false") {
-		t.Errorf("expected disabled status for nonexistent cluster, got: %s", text)
+	if !isErr {
+		t.Error("expected error for nonexistent cluster")
 	}
 }
 

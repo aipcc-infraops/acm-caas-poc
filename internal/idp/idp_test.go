@@ -279,10 +279,11 @@ func TestRemove(t *testing.T) {
 	}
 }
 
-func TestRemoveNotFound(t *testing.T) {
+func TestRemoveNotFoundReturnsError(t *testing.T) {
 	mgr, _ := newManager()
-	if err := mgr.Remove(context.Background(), "nonexistent", "spoke1"); err != nil {
-		t.Fatalf("Remove of non-existent should succeed (idempotent): %v", err)
+	err := mgr.Remove(context.Background(), "nonexistent", "spoke1")
+	if err == nil {
+		t.Fatal("Remove of nonexistent IdP should return an error")
 	}
 }
 

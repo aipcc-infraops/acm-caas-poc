@@ -23,6 +23,17 @@ var gvrKinds = map[schema.GroupVersionResource]string{
 	client.GVRManagedServiceAccount: "ManagedServiceAccountList",
 	client.GVRManagedClusterAddOn:   "ManagedClusterAddOnList",
 	client.GVRSecret:                "SecretList",
+	client.GVRManagedCluster:        "ManagedClusterList",
+}
+
+func managedClusterObj(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata":   map[string]interface{}{"name": name},
+		},
+	}
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -194,6 +205,7 @@ func TestDisableNonexistent(t *testing.T) {
 
 func TestGetStatusEnabled(t *testing.T) {
 	mgr := newManager(
+		managedClusterObj("spoke1"),
 		msaWithToken("spoke1"),
 		proxyAddonHealthy("spoke1"),
 	)
@@ -220,7 +232,7 @@ func TestGetStatusEnabled(t *testing.T) {
 }
 
 func TestGetStatusDisabled(t *testing.T) {
-	mgr := newManager()
+	mgr := newManager(managedClusterObj("spoke1"))
 
 	status, err := mgr.GetStatus(context.Background(), "spoke1")
 	if err != nil {
@@ -235,7 +247,7 @@ func TestGetStatusDisabled(t *testing.T) {
 }
 
 func TestGetStatusWithoutProxy(t *testing.T) {
-	mgr := newManager(msaObj("spoke1"))
+	mgr := newManager(managedClusterObj("spoke1"), msaObj("spoke1"))
 
 	status, err := mgr.GetStatus(context.Background(), "spoke1")
 	if err != nil {
