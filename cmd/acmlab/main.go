@@ -81,6 +81,8 @@ func main() {
 	root.AddCommand(matrixCmd())
 	root.AddCommand(recoveryCmd())
 	root.AddCommand(migrationCmd())
+	root.AddCommand(rightsizingCmd())
+	root.AddCommand(addonCmd())
 
 	rejectUnknownSubcommands(root)
 

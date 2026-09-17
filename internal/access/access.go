@@ -119,6 +119,83 @@ func (m *Manager) GetStatus(ctx context.Context, cluster string) (*AccessStatus,
 	return parseAccessStatus(cluster, msaObj.Object, proxyMap), nil
 }
 
+type ProxyStatus struct {
+	Cluster  string `json:"cluster"`
+	Enabled  bool   `json:"enabled"`
+	Healthy  bool   `json:"healthy"`
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+func (m *Manager) EnableProxy(ctx context.Context, cluster string) error {
+	m.logger.Info("access.EnableProxy", "cluster", cluster)
+
+	addon := buildClusterProxyAddOn(cluster)
+	if err := m.client.CreateIfNotExists(ctx, client.GVRManagedClusterAddOn, cluster, addon); err != nil {
+		return fmt.Errorf("enabling cluster-proxy addon on %s: %w", cluster, err)
+	}
+	return nil
+}
+
+func (m *Manager) DisableProxy(ctx context.Context, cluster string) (bool, error) {
+	m.logger.Info("access.DisableProxy", "cluster", cluster)
+
+	_, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, cluster, "cluster-proxy")
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("checking cluster-proxy addon on %s: %w", cluster, err)
+	}
+
+	if err := m.client.DeleteIfExists(ctx, client.GVRManagedClusterAddOn, cluster, "cluster-proxy"); err != nil {
+		return false, fmt.Errorf("removing cluster-proxy addon on %s: %w", cluster, err)
+	}
+	return true, nil
+}
+
+func (m *Manager) GetProxyStatus(ctx context.Context, cluster string) (*ProxyStatus, error) {
+	m.logger.Info("access.GetProxyStatus", "cluster", cluster)
+
+	obj, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, cluster, "cluster-proxy")
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return &ProxyStatus{Cluster: cluster, Enabled: false}, nil
+		}
+		return nil, fmt.Errorf("getting cluster-proxy addon on %s: %w", cluster, err)
+	}
+
+	return parseProxyStatus(cluster, obj.Object), nil
+}
+
+func parseProxyStatus(cluster string, obj map[string]interface{}) *ProxyStatus {
+	ps := &ProxyStatus{
+		Cluster: cluster,
+		Enabled: true,
+	}
+
+	ps.Healthy = addonIsHealthy(obj)
+
+	status, _ := obj["status"].(map[string]interface{})
+	if status != nil {
+		configs, _ := status["configReferences"].([]interface{})
+		for _, raw := range configs {
+			ref, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if ref["name"] == "proxy-server-host" {
+				ps.Endpoint, _ = ref["desiredConfig"].(string)
+			}
+		}
+	}
+
+	if ps.Endpoint == "" && ps.Healthy {
+		ps.Endpoint = "https://cluster-proxy-addon-user.open-cluster-management.svc:8092/" + cluster
+	}
+
+	return ps
+}
+
 func (m *Manager) List(ctx context.Context) ([]AccessInfo, error) {
 	m.logger.Info("access.List")
 
