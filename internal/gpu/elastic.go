@@ -47,11 +47,16 @@ func (m *Manager) DetectSaturation(ctx context.Context, cluster string, threshol
 		utilization, _ = strconv.ParseFloat(raw, 64)
 	}
 
+	saturated := utilization >= threshold
+	if labels["gpu-available"] == "false" {
+		saturated = true
+	}
+
 	return &SaturationStatus{
 		Cluster:     cluster,
 		GPUType:     gpuType,
 		Utilization: utilization,
-		Saturated:   utilization >= threshold,
+		Saturated:   saturated,
 		Threshold:   threshold,
 	}, nil
 }
