@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/clientcmd"
@@ -31,6 +32,35 @@ type ScanOpts struct {
 }
 
 type CmdRunner func(name string, args ...string) ([]byte, error)
+
+type ImportOpts struct {
+	DryRun     bool
+	ClusterSet string
+}
+
+func (o ImportOpts) resolvedSet() string {
+	if o.ClusterSet != "" {
+		return o.ClusterSet
+	}
+	return "default"
+}
+
+type ImportPreview struct {
+	ClusterName string `json:"clusterName"`
+	ClusterSet  string `json:"clusterSet"`
+	Provider    string `json:"provider,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Region      string `json:"region,omitempty"`
+	Resources   []string `json:"resources"`
+}
+
+type ImportedCluster struct {
+	Name       string `json:"name"`
+	CreatedVia string `json:"createdVia"`
+	ClusterSet string `json:"clusterSet"`
+	CreatedAt  string `json:"createdAt"`
+	Status     string `json:"status"`
+}
 
 func DefaultCmdRunner(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
@@ -81,8 +111,8 @@ func (m *Manager) ScanClusters(ctx context.Context, opts ScanOpts) ([]CloudClust
 	return all, nil
 }
 
-func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string) error {
-	m.logger.Info("discovery.AutoImport", "cluster", clusterName, "provider", provider)
+func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string, opts ImportOpts) (*ImportPreview, error) {
+	m.logger.Info("discovery.AutoImport", "cluster", clusterName, "provider", provider, "dryRun", opts.DryRun)
 
 	runner := m.cmdRunner
 	if runner == nil {
@@ -94,7 +124,7 @@ func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string) 
 	case "aws":
 		clusters, err := scanAWS(runner, "")
 		if err != nil {
-			return fmt.Errorf("scanning AWS: %w", err)
+			return nil, fmt.Errorf("scanning AWS: %w", err)
 		}
 		for _, c := range clusters {
 			if c.Name == clusterName {
@@ -106,7 +136,7 @@ func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string) 
 	case "ibmcloud":
 		clusters, err := scanIBMCloud(runner, "")
 		if err != nil {
-			return fmt.Errorf("scanning IBM Cloud: %w", err)
+			return nil, fmt.Errorf("scanning IBM Cloud: %w", err)
 		}
 		for _, c := range clusters {
 			if c.Name == clusterName {
@@ -116,28 +146,45 @@ func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string) 
 			}
 		}
 	default:
-		return fmt.Errorf("unsupported provider %q (valid: aws, ibmcloud)", provider)
+		return nil, fmt.Errorf("unsupported provider %q (valid: aws, ibmcloud)", provider)
 	}
 
 	if cluster == nil {
-		return fmt.Errorf("cluster %s not found in %s", clusterName, provider)
+		return nil, fmt.Errorf("cluster %s not found in %s", clusterName, provider)
+	}
+
+	preview := &ImportPreview{
+		ClusterName: clusterName,
+		ClusterSet:  opts.resolvedSet(),
+		Provider:    provider,
+		Type:        cluster.Type,
+		Region:      cluster.Region,
+		Resources: []string{
+			fmt.Sprintf("Namespace/%s", clusterName),
+			fmt.Sprintf("ManagedCluster/%s (set=%s)", clusterName, opts.resolvedSet()),
+			fmt.Sprintf("KlusterletAddonConfig/%s", clusterName),
+		},
+	}
+
+	if opts.DryRun {
+		return preview, nil
 	}
 
 	if err := m.ensureNamespace(ctx, clusterName); err != nil {
-		return fmt.Errorf("creating namespace: %w", err)
+		return nil, fmt.Errorf("creating namespace: %w", err)
 	}
 
-	mc := buildCloudManagedCluster(clusterName, provider, cluster.Type, cluster.Region)
+	mc := buildCloudManagedCluster(clusterName, provider, cluster.Type, cluster.Region, opts.resolvedSet())
 	if err := m.client.CreateIfNotExists(ctx, client.GVRManagedCluster, "", mc); err != nil {
-		return fmt.Errorf("creating ManagedCluster: %w", err)
+		return nil, fmt.Errorf("creating ManagedCluster: %w", err)
 	}
 
 	kac := buildKlusterletAddonConfig(clusterName)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRKlusterletAddonConfig, clusterName, kac); err != nil {
-		return fmt.Errorf("creating KlusterletAddonConfig: %w", err)
+		return nil, fmt.Errorf("creating KlusterletAddonConfig: %w", err)
 	}
 
-	return nil
+	return preview, nil
 }
 
 func (m *Manager) listManagedNames(ctx context.Context) (map[string]bool, error) {
@@ -383,37 +430,56 @@ func (m *Manager) listManagedWithURLs(ctx context.Context) (map[string]bool, err
 	return lookup, nil
 }
 
-func (m *Manager) AutoImportKubeconfig(ctx context.Context, name, kubeconfigPath string) error {
-	m.logger.Info("discovery.AutoImportKubeconfig", "name", name, "kubeconfig", kubeconfigPath)
+func (m *Manager) AutoImportKubeconfig(ctx context.Context, name, kubeconfigPath string, opts ImportOpts) (*ImportPreview, error) {
+	m.logger.Info("discovery.AutoImportKubeconfig", "name", name, "kubeconfig", kubeconfigPath, "dryRun", opts.DryRun)
 
 	data, err := os.ReadFile(kubeconfigPath)
 	if err != nil {
-		return fmt.Errorf("reading kubeconfig %s: %w", kubeconfigPath, err)
+		return nil, fmt.Errorf("reading kubeconfig %s: %w", kubeconfigPath, err)
+	}
+
+	if _, err := clientcmd.Load(data); err != nil {
+		return nil, fmt.Errorf("invalid kubeconfig %s: %w", kubeconfigPath, err)
+	}
+
+	preview := &ImportPreview{
+		ClusterName: name,
+		ClusterSet:  opts.resolvedSet(),
+		Resources: []string{
+			fmt.Sprintf("Namespace/%s", name),
+			fmt.Sprintf("ManagedCluster/%s (set=%s)", name, opts.resolvedSet()),
+			fmt.Sprintf("KlusterletAddonConfig/%s", name),
+			fmt.Sprintf("Secret/%s/auto-import-secret", name),
+		},
+	}
+
+	if opts.DryRun {
+		return preview, nil
 	}
 
 	if err := m.ensureNamespace(ctx, name); err != nil {
-		return fmt.Errorf("creating namespace: %w", err)
+		return nil, fmt.Errorf("creating namespace: %w", err)
 	}
 
-	mc := buildKubeconfigManagedCluster(name)
+	mc := buildKubeconfigManagedCluster(name, opts.resolvedSet())
 	if err := m.client.CreateIfNotExists(ctx, client.GVRManagedCluster, "", mc); err != nil {
-		return fmt.Errorf("creating ManagedCluster: %w", err)
+		return nil, fmt.Errorf("creating ManagedCluster: %w", err)
 	}
 
 	kac := buildKlusterletAddonConfig(name)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRKlusterletAddonConfig, name, kac); err != nil {
-		return fmt.Errorf("creating KlusterletAddonConfig: %w", err)
+		return nil, fmt.Errorf("creating KlusterletAddonConfig: %w", err)
 	}
 
 	secret := buildAutoImportSecret(name, data)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, name, secret); err != nil {
-		return fmt.Errorf("creating auto-import secret: %w", err)
+		return nil, fmt.Errorf("creating auto-import secret: %w", err)
 	}
 
-	return nil
+	return preview, nil
 }
 
-func buildKubeconfigManagedCluster(name string) *unstructured.Unstructured {
+func buildKubeconfigManagedCluster(name, clusterSet string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "cluster.open-cluster-management.io/v1",
@@ -425,7 +491,7 @@ func buildKubeconfigManagedCluster(name string) *unstructured.Unstructured {
 					"acmlab.redhat.com/managed":   "true",
 					"acmlab.redhat.com/discovery": "true",
 					"created-via":                 "kubeconfig-discovery",
-					"cluster.open-cluster-management.io/clusterset": "default",
+					"cluster.open-cluster-management.io/clusterset": clusterSet,
 				},
 			},
 			"spec": map[string]interface{}{
@@ -455,7 +521,7 @@ func buildAutoImportSecret(name string, kubeconfig []byte) *unstructured.Unstruc
 	}
 }
 
-func buildCloudManagedCluster(name, provider, clusterType, region string) *unstructured.Unstructured {
+func buildCloudManagedCluster(name, provider, clusterType, region, clusterSet string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "cluster.open-cluster-management.io/v1",
@@ -470,7 +536,7 @@ func buildCloudManagedCluster(name, provider, clusterType, region string) *unstr
 					"cluster-type":                  clusterType,
 					"region":                        region,
 					"created-via":                   "cloud-discovery",
-					"cluster.open-cluster-management.io/clusterset": "default",
+					"cluster.open-cluster-management.io/clusterset": clusterSet,
 				},
 			},
 			"spec": map[string]interface{}{
@@ -478,4 +544,56 @@ func buildCloudManagedCluster(name, provider, clusterType, region string) *unstr
 			},
 		},
 	}
+}
+
+func (m *Manager) ListImports(ctx context.Context) ([]ImportedCluster, error) {
+	m.logger.Info("discovery.ListImports")
+
+	list, err := m.client.List(ctx, client.GVRManagedCluster, "", "acmlab.redhat.com/discovery=true")
+	if err != nil {
+		return nil, fmt.Errorf("listing imported clusters: %w", err)
+	}
+
+	result := make([]ImportedCluster, 0, len(list.Items))
+	for _, item := range list.Items {
+		labels := item.GetLabels()
+		createdVia := labels["created-via"]
+		clusterSet := labels["cluster.open-cluster-management.io/clusterset"]
+		createdAt := item.GetCreationTimestamp().Format("2006-01-02T15:04:05Z")
+
+		status := "Unknown"
+		conditions, found, _ := unstructured.NestedSlice(item.Object, "status", "conditions")
+		if found {
+			for _, cond := range conditions {
+				c, ok := cond.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				t, _, _ := unstructured.NestedString(c, "type")
+				s, _, _ := unstructured.NestedString(c, "status")
+				if t == "ManagedClusterConditionAvailable" {
+					if s == "True" {
+						status = "Available"
+					} else {
+						status = "Unavailable"
+					}
+					break
+				}
+			}
+		}
+
+		result = append(result, ImportedCluster{
+			Name:       item.GetName(),
+			CreatedVia: createdVia,
+			ClusterSet: clusterSet,
+			CreatedAt:  createdAt,
+			Status:     status,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt > result[j].CreatedAt
+	})
+
+	return result, nil
 }
