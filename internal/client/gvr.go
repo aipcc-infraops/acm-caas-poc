@@ -150,4 +150,10 @@ var (
 	GVRClusterDeploymentCustomization = schema.GroupVersionResource{
 		Group: "hive.openshift.io", Version: "v1", Resource: "clusterdeploymentcustomizations",
 	}
+	GVRDiscoveryConfig = schema.GroupVersionResource{
+		Group: "discovery.open-cluster-management.io", Version: "v1alpha1", Resource: "discoveryconfigs",
+	}
+	GVRDiscoveredCluster = schema.GroupVersionResource{
+		Group: "discovery.open-cluster-management.io", Version: "v1alpha1", Resource: "discoveredclusters",
+	}
 )
