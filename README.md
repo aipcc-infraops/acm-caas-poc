@@ -63,6 +63,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-53 | Cluster templating (ClusterDeploymentCustomization profiles) | ✅ Implemented | `internal/provisioning/` |
 | UC-54 | Global ManagedClusterSet (cross-team fleet visibility) | ✅ Implemented | `internal/clusterset/` |
 | UC-55 | ManifestWork ordering (dependency-aware sequencing) | ✅ Implemented | `internal/rollout/` |
+| UC-56 | Cluster discovery (DiscoveredCluster via OCM) | ✅ Implemented | `internal/discovery/` |
 
 ### PoC Priority Areas
 

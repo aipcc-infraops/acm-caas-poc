@@ -1,0 +1,188 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/pablofelix/acm-caas-poc/internal/discovery"
+)
+
+func discoveryCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "discovery",
+		Short: "Discover unmanaged OpenShift clusters via OpenShift Cluster Manager",
+	}
+	cmd.AddCommand(
+		discoveryEnableCmd(),
+		discoveryDisableCmd(),
+		discoveryListCmd(),
+		discoveryImportCmd(),
+		discoveryStatusCmd(),
+	)
+	return cmd
+}
+
+func discoveryEnableCmd() *cobra.Command {
+	var namespace, token string
+	var lastActive int
+	var versions []string
+
+	cmd := &cobra.Command{
+		Use:   "enable",
+		Short: "Enable cluster discovery in a namespace",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if namespace == "" {
+				return fmt.Errorf("--namespace is required")
+			}
+			if token == "" {
+				return fmt.Errorf("--token is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			opts := discovery.EnableDiscoveryOpts{
+				Namespace:  namespace,
+				OCMToken:   token,
+				LastActive: lastActive,
+				Versions:   versions,
+			}
+			fmt.Printf("Enabling cluster discovery in %s...\n", namespace)
+			if err := mgr.EnableDiscovery(context.Background(), opts); err != nil {
+				return err
+			}
+			fmt.Println("Discovery enabled. Clusters will appear as DiscoveredCluster resources.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "open-cluster-management", "namespace for discovery resources")
+	cmd.Flags().StringVar(&token, "token", "", "OpenShift Cluster Manager API token (required)")
+	cmd.Flags().IntVar(&lastActive, "last-active", 7, "discover clusters active within N days")
+	cmd.Flags().StringSliceVar(&versions, "versions", nil, "filter by OpenShift versions (e.g. 4.14,4.15)")
+	return cmd
+}
+
+func discoveryDisableCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "disable",
+		Short: "Disable cluster discovery in a namespace",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			fmt.Printf("Disabling cluster discovery in %s...\n", namespace)
+			if err := mgr.DisableDiscovery(context.Background(), namespace); err != nil {
+				return err
+			}
+			fmt.Println("Discovery disabled.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "open-cluster-management", "namespace for discovery resources")
+	return cmd
+}
+
+func discoveryListCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List discovered clusters",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			clusters, err := mgr.ListDiscovered(context.Background(), namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(clusters) == 0 {
+				fmt.Println("No discovered clusters found")
+				return nil
+			}
+			fmt.Printf("%-25s %-10s %-12s %-15s %s\n", "NAME", "CLOUD", "VERSION", "REGION", "STATUS")
+			for _, c := range clusters {
+				fmt.Printf("%-25s %-10s %-12s %-15s %s\n", c.DisplayName, c.CloudProvider, c.OpenshiftVersion, c.Region, c.Status)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "open-cluster-management", "namespace for discovery resources")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func discoveryImportCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "import <name>",
+		Short: "Import a discovered cluster into ACM",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			fmt.Printf("Importing discovered cluster %s...\n", args[0])
+			if err := mgr.ImportDiscovered(context.Background(), args[0], namespace); err != nil {
+				return err
+			}
+			fmt.Printf("Cluster %s imported. Apply import manifests on the spoke to complete.\n", args[0])
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "open-cluster-management", "namespace where cluster was discovered")
+	return cmd
+}
+
+func discoveryStatusCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show discovery configuration status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			status, err := mgr.DiscoveryStatus(context.Background(), namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(status, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Namespace:  %s\n", status.Namespace)
+			fmt.Printf("Credential: %s\n", status.Credential)
+			fmt.Printf("Last Active: %d days\n", status.LastActive)
+			fmt.Printf("Discovered: %d clusters\n", status.ClusterCount)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "open-cluster-management", "namespace for discovery resources")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
