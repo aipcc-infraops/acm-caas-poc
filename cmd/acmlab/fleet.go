@@ -18,7 +18,7 @@ func fleetCmd() *cobra.Command {
 		Use:   "fleet",
 		Short: "Query managed cluster fleet",
 	}
-	cmd.AddCommand(fleetListCmd(), fleetStatusCmd(), fleetScoringConfigureCmd(), fleetScoringStatusCmd(), fleetScoringRemoveCmd(), fleetScoringListCmd())
+	cmd.AddCommand(fleetListCmd(), fleetStatusCmd(), fleetScoringConfigureCmd(), fleetScoringStatusCmd(), fleetScoringRemoveCmd(), fleetScoringListCmd(), fleetAddTaintCmd(), fleetRemoveTaintCmd(), fleetListTaintsCmd(), fleetCreateTolerantPlacementCmd())
 	return cmd
 }
 
@@ -302,4 +302,134 @@ func parseLabelsFleet(s string) map[string]string {
 		}
 	}
 	return labels
+}
+
+func fleetAddTaintCmd() *cobra.Command {
+	var value, effect string
+	cmd := &cobra.Command{
+		Use:   "add-taint <cluster> --key <key>",
+		Short: "Add a taint to a managed cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			key, _ := cmd.Flags().GetString("key")
+			if key == "" {
+				return fmt.Errorf("--key is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			insp := fleet.New(c, cfg, logger)
+			if err := insp.AddTaint(context.Background(), args[0], key, value, effect); err != nil {
+				return err
+			}
+			fmt.Printf("Taint %s=%s:%s added to %s\n", key, value, effect, args[0])
+			return nil
+		},
+	}
+	cmd.Flags().String("key", "", "taint key (required)")
+	cmd.Flags().StringVar(&value, "value", "", "taint value")
+	cmd.Flags().StringVar(&effect, "effect", "NoSchedule", "taint effect (NoSchedule, PreferNoSchedule, NoExecute)")
+	return cmd
+}
+
+func fleetRemoveTaintCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remove-taint <cluster> --key <key>",
+		Short: "Remove a taint from a managed cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			key, _ := cmd.Flags().GetString("key")
+			if key == "" {
+				return fmt.Errorf("--key is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			insp := fleet.New(c, cfg, logger)
+			if err := insp.RemoveTaint(context.Background(), args[0], key); err != nil {
+				return err
+			}
+			fmt.Printf("Taint %s removed from %s\n", key, args[0])
+			return nil
+		},
+	}
+	cmd.Flags().String("key", "", "taint key (required)")
+	return cmd
+}
+
+func fleetListTaintsCmd() *cobra.Command {
+	var outputJSON bool
+	cmd := &cobra.Command{
+		Use:   "list-taints <cluster>",
+		Short: "List taints on a managed cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			insp := fleet.New(c, cfg, logger)
+			taints, err := insp.ListTaints(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(taints, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(taints) == 0 {
+				fmt.Printf("No taints on %s\n", args[0])
+				return nil
+			}
+			fmt.Printf("%-30s %-20s %s\n", "KEY", "VALUE", "EFFECT")
+			for _, t := range taints {
+				fmt.Printf("%-30s %-20s %s\n", t.Key, t.Value, t.Effect)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func fleetCreateTolerantPlacementCmd() *cobra.Command {
+	var namespace string
+	var clusterSets []string
+	cmd := &cobra.Command{
+		Use:   "create-tolerant-placement <name> --tolerate <key>=<value>",
+		Short: "Create a Placement with tolerations for tainted clusters",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tolerateStrs, _ := cmd.Flags().GetStringSlice("tolerate")
+			if len(tolerateStrs) == 0 {
+				return fmt.Errorf("--tolerate is required (format: key=value)")
+			}
+			tolerations := make([]fleet.Taint, 0, len(tolerateStrs))
+			for _, s := range tolerateStrs {
+				parts := strings.SplitN(s, "=", 2)
+				t := fleet.Taint{Key: parts[0]}
+				if len(parts) == 2 {
+					t.Value = parts[1]
+				}
+				tolerations = append(tolerations, t)
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			insp := fleet.New(c, cfg, logger)
+			if err := insp.CreateTolerantPlacement(context.Background(), args[0], namespace, tolerations, clusterSets); err != nil {
+				return err
+			}
+			fmt.Printf("Tolerant placement %s created\n", args[0])
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace for the placement")
+	cmd.Flags().StringSliceVar(&clusterSets, "cluster-set", nil, "ClusterSets to scope the placement")
+	cmd.Flags().StringSlice("tolerate", nil, "tolerations (format: key=value)")
+	return cmd
 }

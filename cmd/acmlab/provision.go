@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -25,6 +26,11 @@ func provisionCmd() *cobra.Command {
 		provisionImageSetsCmd(),
 		provisionListCAPICmd(),
 		provisionListHostedCmd(),
+		provisionTemplateCreateCmd(),
+		provisionTemplateGetCmd(),
+		provisionTemplateListCmd(),
+		provisionTemplateRemoveCmd(),
+		provisionTemplateApplyCmd(),
 	)
 	return cmd
 }
@@ -442,4 +448,138 @@ func provisionImageSetsCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func provisionTemplateCreateCmd() *cobra.Command {
+	var patches []string
+	cmd := &cobra.Command{
+		Use:   "template-create <name>",
+		Short: "Create a ClusterDeploymentCustomization template",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			parsed := make([]provisioning.TemplatePatch, 0, len(patches))
+			for _, p := range patches {
+				parts := strings.SplitN(p, ":", 3)
+				if len(parts) != 3 {
+					return fmt.Errorf("invalid patch format %q (expected op:path:value)", p)
+				}
+				parsed = append(parsed, provisioning.TemplatePatch{Op: parts[0], Path: parts[1], Value: parts[2]})
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			if err := mgr.CreateTemplate(context.Background(), args[0], parsed); err != nil {
+				return err
+			}
+			fmt.Printf("Template %s created with %d patches\n", args[0], len(parsed))
+			return nil
+		},
+	}
+	cmd.Flags().StringSliceVar(&patches, "patch", nil, "install config patches (format: op:path:value)")
+	return cmd
+}
+
+func provisionTemplateGetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "template-get <name>",
+		Short: "Get details of a cluster template",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			obj, err := mgr.GetTemplate(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			data, _ := json.MarshalIndent(obj, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		},
+	}
+}
+
+func provisionTemplateListCmd() *cobra.Command {
+	var outputJSON bool
+	cmd := &cobra.Command{
+		Use:   "template-list",
+		Short: "List all cluster templates",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			templates, err := mgr.ListTemplates(context.Background())
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(templates, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(templates) == 0 {
+				fmt.Println("No templates found")
+				return nil
+			}
+			fmt.Printf("%-30s %s\n", "NAME", "PATCHES")
+			for _, t := range templates {
+				fmt.Printf("%-30s %d\n", t.Name, t.Patches)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func provisionTemplateRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "template-remove <name>",
+		Short: "Remove a cluster template",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			if err := mgr.RemoveTemplate(context.Background(), args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Template %s removed\n", args[0])
+			return nil
+		},
+	}
+}
+
+func provisionTemplateApplyCmd() *cobra.Command {
+	var template string
+	cmd := &cobra.Command{
+		Use:   "template-apply <cluster>",
+		Short: "Apply a cluster template to a ClusterDeployment",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if template == "" {
+				return fmt.Errorf("--template is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			if err := mgr.ApplyTemplate(context.Background(), args[0], template); err != nil {
+				return err
+			}
+			fmt.Printf("Template %s applied to %s\n", template, args[0])
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&template, "template", "", "template name (required)")
+	return cmd
 }
