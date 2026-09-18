@@ -41,7 +41,7 @@ func buildDiscoveryConfig(namespace string, lastActive int, versions []string) *
 
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "discovery.open-cluster-management.io/v1alpha1",
+			"apiVersion": "discovery.open-cluster-management.io/v1",
 			"kind":       "DiscoveryConfig",
 			"metadata": map[string]interface{}{
 				"name":      "discovery",
