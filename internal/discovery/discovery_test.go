@@ -39,7 +39,7 @@ func newManager(objs ...runtime.Object) *Manager {
 func discoveredCluster(name, namespace, cloud, version, region, apiURL string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "discovery.open-cluster-management.io/v1alpha1",
+			"apiVersion": "discovery.open-cluster-management.io/v1",
 			"kind":       "DiscoveredCluster",
 			"metadata": map[string]interface{}{
 				"name":      name,
