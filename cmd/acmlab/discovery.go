@@ -23,6 +23,8 @@ func discoveryCmd() *cobra.Command {
 		discoveryStatusCmd(),
 		discoveryScanCmd(),
 		discoveryAutoImportCmd(),
+		discoveryScanKubeconfigsCmd(),
+		discoveryAutoImportKubeconfigCmd(),
 	)
 	return cmd
 }
@@ -261,5 +263,78 @@ func discoveryStatusCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&namespace, "namespace", "open-cluster-management", "namespace for discovery resources")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func discoveryScanKubeconfigsCmd() *cobra.Command {
+	var dir string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "scan-kubeconfigs",
+		Short: "Scan kubeconfig files to discover clusters not yet managed by ACM",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			clusters, err := mgr.ScanKubeconfigs(cmd.Context(), dir)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(clusters) == 0 {
+				fmt.Println("No clusters found in kubeconfig files")
+				return nil
+			}
+			fmt.Printf("%-25s %-45s %-25s %-8s %s\n", "NAME", "SERVER", "CONTEXT", "MANAGED", "SOURCE")
+			for _, cl := range clusters {
+				managed := ""
+				if cl.Managed {
+					managed = "yes"
+				}
+				fmt.Printf("%-25s %-45s %-25s %-8s %s\n", cl.Name, cl.Server, cl.Context, managed, cl.Source)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "directory to scan for kubeconfig files (default: ~/.kube/)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func discoveryAutoImportKubeconfigCmd() *cobra.Command {
+	var name, kubeconfigPath string
+
+	cmd := &cobra.Command{
+		Use:   "auto-import-kubeconfig",
+		Short: "Import a cluster discovered via kubeconfig into ACM",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if name == "" {
+				return fmt.Errorf("--name is required")
+			}
+			if kubeconfigPath == "" {
+				return fmt.Errorf("--kubeconfig is required")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			fmt.Printf("Importing cluster %s from kubeconfig %s...\n", name, kubeconfigPath)
+			if err := mgr.AutoImportKubeconfig(cmd.Context(), name, kubeconfigPath); err != nil {
+				return err
+			}
+			fmt.Printf("Cluster %s imported. ACM will use the kubeconfig to install the klusterlet.\n", name)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "cluster name for ACM (required)")
+	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "", "path to the spoke cluster kubeconfig (required)")
 	return cmd
 }

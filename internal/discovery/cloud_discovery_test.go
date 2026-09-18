@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -290,5 +292,124 @@ func TestBuildCloudManagedCluster(t *testing.T) {
 	}
 }
 
-// Suppress unused import warning
-var _ = client.GVRManagedCluster
+func writeKubeconfig(t *testing.T, dir, filename, clusterName, server string) string {
+	t.Helper()
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+  name: %s
+contexts:
+- context:
+    cluster: %s
+    user: admin
+  name: %s
+users:
+- name: admin
+  user:
+    token: test-token
+current-context: %s
+`, server, clusterName, clusterName, clusterName, clusterName)
+	path := filepath.Join(dir, filename)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("writing kubeconfig: %v", err)
+	}
+	return path
+}
+
+func TestScanKubeconfigs(t *testing.T) {
+	dir := t.TempDir()
+	writeKubeconfig(t, dir, "cluster-a.kubeconfig", "cluster-a", "https://api.cluster-a.example.com:6443")
+	writeKubeconfig(t, dir, "cluster-b.kubeconfig", "cluster-b", "https://api.cluster-b.example.com:6443")
+	os.WriteFile(filepath.Join(dir, "not-a-kubeconfig.txt"), []byte("hello"), 0644)
+
+	mgr := newManager()
+	clusters, err := mgr.ScanKubeconfigs(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("ScanKubeconfigs failed: %v", err)
+	}
+	if len(clusters) != 2 {
+		t.Fatalf("expected 2 clusters, got %d", len(clusters))
+	}
+	for _, c := range clusters {
+		if c.Name != "cluster-a" && c.Name != "cluster-b" {
+			t.Errorf("unexpected cluster name: %s", c.Name)
+		}
+		if c.Managed {
+			t.Errorf("cluster %s should not be managed", c.Name)
+		}
+	}
+}
+
+func TestScanKubeconfigsManagedCluster(t *testing.T) {
+	dir := t.TempDir()
+	writeKubeconfig(t, dir, "managed.kubeconfig", "spoke1", "https://api.spoke1.example.com:6443")
+	writeKubeconfig(t, dir, "unmanaged.kubeconfig", "new-cluster", "https://api.new.example.com:6443")
+
+	mc := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata":   map[string]interface{}{"name": "spoke1"},
+		},
+	}
+	mgr := newManager(mc)
+	clusters, err := mgr.ScanKubeconfigs(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("ScanKubeconfigs failed: %v", err)
+	}
+	for _, c := range clusters {
+		if c.Name == "spoke1" && !c.Managed {
+			t.Error("spoke1 should be marked as managed")
+		}
+		if c.Name == "new-cluster" && c.Managed {
+			t.Error("new-cluster should not be marked as managed")
+		}
+	}
+}
+
+func TestAutoImportKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+	path := writeKubeconfig(t, dir, "spoke.kubeconfig", "new-spoke", "https://api.new-spoke.example.com:6443")
+
+	mgr := newManager()
+	err := mgr.AutoImportKubeconfig(context.Background(), "new-spoke", path)
+	if err != nil {
+		t.Fatalf("AutoImportKubeconfig failed: %v", err)
+	}
+
+	mc, err := mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "new-spoke")
+	if err != nil {
+		t.Fatalf("ManagedCluster not created: %v", err)
+	}
+	labels := mc.GetLabels()
+	if labels["created-via"] != "kubeconfig-discovery" {
+		t.Errorf("expected created-via=kubeconfig-discovery, got %s", labels["created-via"])
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRSecret, "new-spoke", "auto-import-secret")
+	if err != nil {
+		t.Fatal("auto-import secret not created")
+	}
+}
+
+func TestAutoImportKubeconfigFileNotFound(t *testing.T) {
+	mgr := newManager()
+	err := mgr.AutoImportKubeconfig(context.Background(), "test", "/nonexistent/kubeconfig")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestScanKubeconfigsEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	mgr := newManager()
+	clusters, err := mgr.ScanKubeconfigs(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("ScanKubeconfigs failed: %v", err)
+	}
+	if len(clusters) != 0 {
+		t.Errorf("expected 0 clusters, got %d", len(clusters))
+	}
+}
