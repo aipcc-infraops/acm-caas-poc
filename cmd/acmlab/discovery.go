@@ -25,6 +25,7 @@ func discoveryCmd() *cobra.Command {
 		discoveryAutoImportCmd(),
 		discoveryScanKubeconfigsCmd(),
 		discoveryAutoImportKubeconfigCmd(),
+		discoveryListImportsCmd(),
 	)
 	return cmd
 }
@@ -205,7 +206,8 @@ func discoveryScanCmd() *cobra.Command {
 }
 
 func discoveryAutoImportCmd() *cobra.Command {
-	var provider string
+	var provider, clusterSet string
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "auto-import <name>",
@@ -220,15 +222,30 @@ func discoveryAutoImportCmd() *cobra.Command {
 				return err
 			}
 			mgr := discovery.New(c, cfg, logger)
-			fmt.Printf("Importing %s cluster %s...\n", provider, args[0])
-			if err := mgr.AutoImport(context.Background(), args[0], provider); err != nil {
+			opts := discovery.ImportOpts{DryRun: dryRun, ClusterSet: clusterSet}
+			if dryRun {
+				fmt.Printf("[DRY-RUN] Previewing import of %s cluster %s...\n", provider, args[0])
+			} else {
+				fmt.Printf("Importing %s cluster %s...\n", provider, args[0])
+			}
+			preview, err := mgr.AutoImport(context.Background(), args[0], provider, opts)
+			if err != nil {
 				return err
 			}
-			fmt.Printf("Cluster %s imported. Apply import manifests on the spoke to complete.\n", args[0])
+			if dryRun {
+				fmt.Printf("Would create the following resources:\n")
+				for _, r := range preview.Resources {
+					fmt.Printf("  - %s\n", r)
+				}
+				return nil
+			}
+			fmt.Printf("Cluster %s imported into set %s. Apply import manifests on the spoke to complete.\n", args[0], preview.ClusterSet)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&provider, "provider", "", "cloud provider: aws, ibmcloud (required)")
+	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "assign to a ManagedClusterSet (default: default)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview what would be created without creating resources")
 	return cmd
 }
 
@@ -309,7 +326,8 @@ func discoveryScanKubeconfigsCmd() *cobra.Command {
 }
 
 func discoveryAutoImportKubeconfigCmd() *cobra.Command {
-	var name, kubeconfigPath string
+	var name, kubeconfigPath, clusterSet string
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "auto-import-kubeconfig",
@@ -326,15 +344,66 @@ func discoveryAutoImportKubeconfigCmd() *cobra.Command {
 				return err
 			}
 			mgr := discovery.New(c, cfg, logger)
-			fmt.Printf("Importing cluster %s from kubeconfig %s...\n", name, kubeconfigPath)
-			if err := mgr.AutoImportKubeconfig(cmd.Context(), name, kubeconfigPath); err != nil {
+			opts := discovery.ImportOpts{DryRun: dryRun, ClusterSet: clusterSet}
+			if dryRun {
+				fmt.Printf("[DRY-RUN] Previewing import of cluster %s from %s...\n", name, kubeconfigPath)
+			} else {
+				fmt.Printf("Importing cluster %s from kubeconfig %s...\n", name, kubeconfigPath)
+			}
+			preview, err := mgr.AutoImportKubeconfig(cmd.Context(), name, kubeconfigPath, opts)
+			if err != nil {
 				return err
 			}
-			fmt.Printf("Cluster %s imported. ACM will use the kubeconfig to install the klusterlet.\n", name)
+			if dryRun {
+				fmt.Printf("Would create the following resources:\n")
+				for _, r := range preview.Resources {
+					fmt.Printf("  - %s\n", r)
+				}
+				return nil
+			}
+			fmt.Printf("Cluster %s imported into set %s. ACM will use the kubeconfig to install the klusterlet.\n", name, preview.ClusterSet)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "cluster name for ACM (required)")
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "", "path to the spoke cluster kubeconfig (required)")
+	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "assign to a ManagedClusterSet (default: default)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview what would be created without creating resources")
+	return cmd
+}
+
+func discoveryListImportsCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "list-imports",
+		Short: "List clusters imported via discovery (OCM, cloud, or kubeconfig)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			imports, err := mgr.ListImports(context.Background())
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(imports, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(imports) == 0 {
+				fmt.Println("No clusters imported via discovery")
+				return nil
+			}
+			fmt.Printf("%-30s %-22s %-15s %-22s %s\n", "NAME", "CREATED-VIA", "CLUSTER-SET", "IMPORTED-AT", "STATUS")
+			for _, imp := range imports {
+				fmt.Printf("%-30s %-22s %-15s %-22s %s\n", imp.Name, imp.CreatedVia, imp.ClusterSet, imp.CreatedAt, imp.Status)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
