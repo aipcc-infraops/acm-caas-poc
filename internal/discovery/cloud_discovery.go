@@ -214,14 +214,37 @@ type eksDescribeOutput struct {
 }
 
 type rosaCluster struct {
-	Name    string       `json:"name"`
-	ID      string       `json:"id"`
-	Region  string       `json:"region,omitempty"`
-	Status  string       `json:"status,omitempty"`
-	Version rosaVersion  `json:"version,omitempty"`
-	AWS     rosaAWS      `json:"aws,omitempty"`
-	State   string       `json:"state,omitempty"`
+	Name    string          `json:"name"`
+	ID      string          `json:"id"`
+	Region  json.RawMessage `json:"region,omitempty"`
+	Status  json.RawMessage `json:"status,omitempty"`
+	Version rosaVersion     `json:"version,omitempty"`
+	AWS     rosaAWS         `json:"aws,omitempty"`
+	State   string          `json:"state,omitempty"`
 	OpenshiftVersion string `json:"openshift_version,omitempty"`
+}
+
+func (rc rosaCluster) regionID() string {
+	var obj struct{ ID string `json:"id"` }
+	if json.Unmarshal(rc.Region, &obj) == nil && obj.ID != "" {
+		return obj.ID
+	}
+	var s string
+	if json.Unmarshal(rc.Region, &s) == nil {
+		return s
+	}
+	return rc.AWS.Region
+}
+
+func (rc rosaCluster) stateStr() string {
+	if rc.State != "" {
+		return rc.State
+	}
+	var obj struct{ State string `json:"state"` }
+	if json.Unmarshal(rc.Status, &obj) == nil {
+		return obj.State
+	}
+	return ""
 }
 
 type rosaVersion struct {
@@ -287,17 +310,13 @@ func scanAWS(runner CmdRunner, region string) ([]CloudCluster, error) {
 					Name:     rc.Name,
 					Provider: "aws",
 					Type:     "rosa",
-					Status:   rc.State,
+					Status:   rc.stateStr(),
+					Region:   rc.regionID(),
 				}
 				if rc.Version.ID != "" {
 					cc.Version = rc.Version.ID
 				} else if rc.OpenshiftVersion != "" {
 					cc.Version = rc.OpenshiftVersion
-				}
-				if rc.AWS.Region != "" {
-					cc.Region = rc.AWS.Region
-				} else if rc.Region != "" {
-					cc.Region = rc.Region
 				}
 				if region != "" && cc.Region != region {
 					continue
