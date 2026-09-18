@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -671,7 +672,7 @@ func TestParseROSAAdminOutput(t *testing.T) {
 }
 
 func TestBuildBasicAuthKubeconfig(t *testing.T) {
-	data, err := buildBasicAuthKubeconfig("test-cluster", testAPIURL, testUser, testToken)
+	data, err := buildBasicAuthKubeconfig("test-cluster", testAPIURL, testUser, testToken, false)
 	if err != nil {
 		t.Fatalf("buildBasicAuthKubeconfig failed: %v", err)
 	}
@@ -864,6 +865,122 @@ current-context: test-ibm-cluster
 	}
 	if cluster.Server != testAPIURL {
 		t.Errorf("server = %q, want %q", cluster.Server, testAPIURL)
+	}
+}
+
+func TestBuildBasicAuthKubeconfigInsecure(t *testing.T) {
+	data, err := buildBasicAuthKubeconfig("insecure-cluster", testAPIURL, testUser, testToken, true)
+	if err != nil {
+		t.Fatalf("buildBasicAuthKubeconfig failed: %v", err)
+	}
+
+	cfg, err := clientcmd.Load(data)
+	if err != nil {
+		t.Fatalf("failed to parse generated kubeconfig: %v", err)
+	}
+	cluster, ok := cfg.Clusters["insecure-cluster"]
+	if !ok {
+		t.Fatal("cluster not found")
+	}
+	if !cluster.InsecureSkipTLSVerify {
+		t.Error("InsecureSkipTLSVerify should be true when insecure=true")
+	}
+}
+
+func TestAutoImportKubeconfigRejectsInsecure(t *testing.T) {
+	dir := t.TempDir()
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+    insecure-skip-tls-verify: true
+  name: insecure-cluster
+contexts:
+- context:
+    cluster: insecure-cluster
+    user: admin
+  name: insecure-cluster
+users:
+- name: admin
+  user:
+    token: %s
+current-context: insecure-cluster
+`, testAPIURL, testToken)
+	path := filepath.Join(dir, "insecure.kubeconfig")
+	os.WriteFile(path, []byte(content), 0644)
+
+	mgr := newManager()
+	_, err := mgr.AutoImportKubeconfig(context.Background(), "insecure-cluster", path, ImportOpts{})
+	if err == nil {
+		t.Fatal("expected error when importing insecure kubeconfig without --allow-insecure")
+	}
+	if !strings.Contains(err.Error(), "insecure-skip-tls-verify") {
+		t.Errorf("error should mention insecure-skip-tls-verify, got: %v", err)
+	}
+}
+
+func TestAutoImportKubeconfigAllowInsecure(t *testing.T) {
+	dir := t.TempDir()
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+    insecure-skip-tls-verify: true
+  name: insecure-cluster
+contexts:
+- context:
+    cluster: insecure-cluster
+    user: admin
+  name: insecure-cluster
+users:
+- name: admin
+  user:
+    token: %s
+current-context: insecure-cluster
+`, testAPIURL, testToken)
+	path := filepath.Join(dir, "insecure.kubeconfig")
+	os.WriteFile(path, []byte(content), 0644)
+
+	mgr := newManager()
+	preview, err := mgr.AutoImportKubeconfig(context.Background(), "insecure-cluster", path, ImportOpts{AllowInsecure: true})
+	if err != nil {
+		t.Fatalf("AutoImportKubeconfig with --allow-insecure should succeed: %v", err)
+	}
+	if preview.ClusterName != "insecure-cluster" {
+		t.Errorf("expected cluster name insecure-cluster, got %s", preview.ClusterName)
+	}
+}
+
+func TestSecureKubeconfigNoInsecure(t *testing.T) {
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+  name: secure-cluster
+contexts:
+- context:
+    cluster: secure-cluster
+    user: admin
+  name: secure-cluster
+users:
+- name: admin
+  user:
+    token: %s
+current-context: secure-cluster
+`, testAPIURL, testToken)
+
+	data, fixed, err := SecureKubeconfig([]byte(content))
+	if err != nil {
+		t.Fatalf("SecureKubeconfig failed: %v", err)
+	}
+	if fixed != 0 {
+		t.Errorf("expected 0 fixed, got %d", fixed)
+	}
+	if len(data) == 0 {
+		t.Error("expected non-empty output")
 	}
 }
 

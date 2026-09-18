@@ -2,15 +2,21 @@ package discovery
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/clientcmd"
@@ -37,8 +43,10 @@ type ScanOpts struct {
 type CmdRunner func(name string, args ...string) ([]byte, error)
 
 type ImportOpts struct {
-	DryRun     bool
-	ClusterSet string
+	DryRun        bool
+	ClusterSet    string
+	AllowInsecure bool
+	FixTLS        bool
 }
 
 func (o ImportOpts) resolvedSet() string {
@@ -165,6 +173,12 @@ func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string, 
 
 	spokeKubeconfig, credErr := fetchSpokeKubeconfig(runner, clusterName, provider, cluster.Type, cluster.Region)
 	if credErr == nil {
+		if opts.FixTLS {
+			if secured, n, secErr := SecureKubeconfig(spokeKubeconfig); secErr == nil && n > 0 {
+				spokeKubeconfig = secured
+				m.logger.Info("secured kubeconfig TLS", "cluster", clusterName, "fixed", n)
+			}
+		}
 		resources = append(resources, fmt.Sprintf("Secret/%s/auto-import-secret", clusterName))
 	}
 
@@ -479,8 +493,33 @@ func (m *Manager) AutoImportKubeconfig(ctx context.Context, name, kubeconfigPath
 		return nil, fmt.Errorf("reading kubeconfig %s: %w", kubeconfigPath, err)
 	}
 
-	if _, err := clientcmd.Load(data); err != nil {
+	cfg, err := clientcmd.Load(data)
+	if err != nil {
 		return nil, fmt.Errorf("invalid kubeconfig %s: %w", kubeconfigPath, err)
+	}
+
+	hasInsecure := false
+	for _, cluster := range cfg.Clusters {
+		if cluster.InsecureSkipTLSVerify {
+			hasInsecure = true
+			break
+		}
+	}
+
+	if hasInsecure && !opts.AllowInsecure && !opts.FixTLS {
+		return nil, fmt.Errorf("kubeconfig contains insecure-skip-tls-verify; use --allow-insecure to import as-is or --fix-tls to fetch CA certificates automatically")
+	}
+
+	if hasInsecure && opts.FixTLS {
+		if secured, n, secErr := SecureKubeconfig(data); secErr == nil && n > 0 {
+			data = secured
+			m.logger.Info("secured kubeconfig TLS", "kubeconfig", kubeconfigPath, "fixed", n)
+		} else if secErr != nil {
+			m.logger.Warn("could not auto-secure kubeconfig", "error", secErr.Error())
+			if !opts.AllowInsecure {
+				return nil, fmt.Errorf("failed to secure kubeconfig and --allow-insecure not set: %w", secErr)
+			}
+		}
 	}
 
 	preview := &ImportPreview{
@@ -632,7 +671,7 @@ func fetchROSAKubeconfig(runner CmdRunner, clusterName string) ([]byte, error) {
 		apiURL = desc.API.URL
 	}
 
-	return buildBasicAuthKubeconfig(clusterName, apiURL, username, password)
+	return buildBasicAuthKubeconfig(clusterName, apiURL, username, password, false)
 }
 
 var rosaLoginRe = regexp.MustCompile(`oc\s+login\s+(https?://\S+)\s+--username\s+(\S+)\s+--password\s+'?([^'\s]+)'?`)
@@ -647,10 +686,11 @@ func parseROSAAdminOutput(output string) (apiURL, username, password string) {
 	return "", "", ""
 }
 
-func buildBasicAuthKubeconfig(name, server, username, password string) ([]byte, error) {
+func buildBasicAuthKubeconfig(name, server, username, password string, insecure bool) ([]byte, error) {
 	cfg := clientcmdapi.NewConfig()
 	cfg.Clusters[name] = &clientcmdapi.Cluster{
-		Server: server,
+		Server:                server,
+		InsecureSkipTLSVerify: insecure,
 	}
 	cfg.AuthInfos[name] = &clientcmdapi.AuthInfo{
 		Username: username,
@@ -719,6 +759,160 @@ func fetchIBMCloudKubeconfig(runner CmdRunner, clusterName string) ([]byte, erro
 	}
 
 	return nil, fmt.Errorf("no valid kubeconfig found in ibmcloud output")
+}
+
+func FetchServerCA(serverURL string) ([]byte, error) {
+	u, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing server URL: %w", err)
+	}
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+
+	conn, err := tls.DialWithDialer(
+		&net.Dialer{Timeout: 10 * time.Second},
+		"tcp",
+		net.JoinHostPort(host, port),
+		&tls.Config{InsecureSkipVerify: true},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to %s: %w", serverURL, err)
+	}
+	defer conn.Close()
+
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil, fmt.Errorf("no certificates returned by %s", serverURL)
+	}
+
+	var pemData []byte
+	for _, cert := range certs {
+		if cert.IsCA || cert.BasicConstraintsValid && (cert.MaxPathLen > 0 || cert.MaxPathLenZero) {
+			pemData = append(pemData, pem.EncodeToMemory(&pem.Block{
+				Type:  "CERTIFICATE",
+				Bytes: cert.Raw,
+			})...)
+		}
+	}
+
+	if len(pemData) == 0 {
+		pemData = pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: certs[len(certs)-1].Raw,
+		})
+	}
+
+	return pemData, nil
+}
+
+func SecureKubeconfig(kubeconfigData []byte) ([]byte, int, error) {
+	cfg, err := clientcmd.Load(kubeconfigData)
+	if err != nil {
+		return nil, 0, fmt.Errorf("parsing kubeconfig: %w", err)
+	}
+
+	fixed := 0
+	for name, cluster := range cfg.Clusters {
+		if !cluster.InsecureSkipTLSVerify {
+			continue
+		}
+		if cluster.Server == "" {
+			continue
+		}
+		caData, err := FetchServerCA(cluster.Server)
+		if err != nil {
+			return nil, fixed, fmt.Errorf("fetching CA for cluster %s (%s): %w", name, cluster.Server, err)
+		}
+
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caData) {
+			return nil, fixed, fmt.Errorf("fetched CA for %s is not valid PEM", name)
+		}
+
+		cluster.InsecureSkipTLSVerify = false
+		cluster.CertificateAuthorityData = caData
+		fixed++
+	}
+
+	data, err := clientcmd.Write(*cfg)
+	if err != nil {
+		return nil, fixed, fmt.Errorf("writing kubeconfig: %w", err)
+	}
+	return data, fixed, nil
+}
+
+type FixTLSResult struct {
+	ClusterName string `json:"clusterName"`
+	Server      string `json:"server"`
+	Fixed       bool   `json:"fixed"`
+	Message     string `json:"message"`
+}
+
+func (m *Manager) FixTLS(ctx context.Context, clusterName string) (*FixTLSResult, error) {
+	m.logger.Info("discovery.FixTLS", "cluster", clusterName)
+
+	secret, err := m.client.Get(ctx, client.GVRSecret, clusterName, "auto-import-secret")
+	if err != nil {
+		return nil, fmt.Errorf("getting auto-import-secret for %s: %w", clusterName, err)
+	}
+
+	dataField, _, _ := unstructured.NestedMap(secret.Object, "data")
+	kubeconfigB64, ok := dataField["kubeconfig"].(string)
+	if !ok {
+		return nil, fmt.Errorf("auto-import-secret for %s has no kubeconfig field", clusterName)
+	}
+
+	kubeconfigData, err := base64.StdEncoding.DecodeString(kubeconfigB64)
+	if err != nil {
+		return nil, fmt.Errorf("decoding kubeconfig: %w", err)
+	}
+
+	cfg, err := clientcmd.Load(kubeconfigData)
+	if err != nil {
+		return nil, fmt.Errorf("parsing kubeconfig: %w", err)
+	}
+
+	hasInsecure := false
+	var server string
+	for _, cluster := range cfg.Clusters {
+		if cluster.InsecureSkipTLSVerify {
+			hasInsecure = true
+			server = cluster.Server
+			break
+		}
+	}
+
+	if !hasInsecure {
+		return &FixTLSResult{
+			ClusterName: clusterName,
+			Server:      server,
+			Fixed:       false,
+			Message:     "already secure",
+		}, nil
+	}
+
+	securedData, fixed, err := SecureKubeconfig(kubeconfigData)
+	if err != nil {
+		return nil, fmt.Errorf("securing kubeconfig: %w", err)
+	}
+	if fixed == 0 {
+		return &FixTLSResult{ClusterName: clusterName, Server: server, Fixed: false, Message: "no insecure clusters to fix"}, nil
+	}
+
+	updatedSecret := buildAutoImportSecret(clusterName, securedData)
+	if _, err := m.client.Update(ctx, client.GVRSecret, clusterName, updatedSecret); err != nil {
+		return nil, fmt.Errorf("updating auto-import-secret: %w", err)
+	}
+
+	return &FixTLSResult{
+		ClusterName: clusterName,
+		Server:      server,
+		Fixed:       true,
+		Message:     fmt.Sprintf("replaced insecure-skip-tls-verify with CA certificate for %d cluster(s)", fixed),
+	}, nil
 }
 
 func (m *Manager) ListImports(ctx context.Context) ([]ImportedCluster, error) {
