@@ -1993,10 +1993,40 @@ my-rosa-cluster           aws        ROSA     us-east-1       4.15.2       ready
 
 #### `acmlab discovery auto-import <name>`
 
-Import a cloud-discovered cluster into ACM.
+Import a cloud-discovered cluster into ACM. Automatically fetches spoke credentials via provider CLI (ROSA: `rosa create admin`, EKS: `aws eks update-kubeconfig`, IBM Cloud: `ibmcloud ks cluster config --admin`) and creates an auto-import-secret so ACM installs the klusterlet without manual steps. Falls back gracefully if credentials are not available. Idempotent.
 
 Options:
 - `--provider`: cloud provider — aws, ibmcloud (required)
+- `--cluster-set`: assign to a ManagedClusterSet (default: default)
+- `--dry-run`: preview resources without creating them
+
+```
+$ acmlab discovery auto-import my-rosa-cluster --provider aws --cluster-set production
+Importing aws cluster my-rosa-cluster...
+Cluster my-rosa-cluster imported into set production. ACM will automatically install the klusterlet.
+
+$ acmlab discovery auto-import my-rosa-cluster --provider aws --dry-run
+[DRY-RUN] Previewing import of aws cluster my-rosa-cluster...
+Would create the following resources:
+  - Namespace/my-rosa-cluster
+  - ManagedCluster/my-rosa-cluster (set=default)
+  - KlusterletAddonConfig/my-rosa-cluster
+  - Secret/my-rosa-cluster/auto-import-secret
+```
+
+#### `acmlab discovery list-imports`
+
+List clusters imported via discovery (OCM, cloud, or kubeconfig). Shows creation method, cluster set, and availability status. Filters by the `acmlab.redhat.com/discovery=true` label.
+
+Options:
+- `--json`: output as JSON
+
+```
+$ acmlab discovery list-imports
+NAME                      CREATED-VIA            CLUSTER-SET     IMPORTED-AT            STATUS
+my-rosa-cluster           cloud-discovery        production      2026-09-18T13:16:52Z   Available
+my-eks-cluster            cloud-discovery        default         2026-09-17T10:30:00Z   Available
+```
 
 #### `acmlab discovery scan-kubeconfigs`
 
@@ -2014,11 +2044,59 @@ my-cluster                https://api.my-cluster.example.com:6443   ~/.kube/my-c
 
 #### `acmlab discovery auto-import-kubeconfig`
 
-Import a cluster from a kubeconfig file into ACM.
+Import a cluster from a kubeconfig file into ACM. Creates an auto-import-secret so ACM installs the klusterlet automatically. Idempotent.
 
 Options:
 - `--name`: cluster name (required)
 - `--kubeconfig`: path to kubeconfig file (required)
+- `--cluster-set`: assign to a ManagedClusterSet (default: default)
+- `--dry-run`: preview resources without creating them
+
+### Context
+
+Manage kubeconfig context switching between hub and spoke clusters.
+
+#### `acmlab context current`
+
+Show the current kubeconfig context and detect whether it is the hub (can list ManagedClusters) or a spoke.
+
+```
+$ acmlab context current
+Context:  default/api-hub.example.com:6443/admin
+Server:   https://api.hub.example.com:6443
+Type:     hub
+```
+
+#### `acmlab context hub`
+
+Switch kubeconfig current-context to the ACM hub. Requires `ACM_HUB_CONTEXT` env var or `--context` flag.
+
+```
+$ acmlab context hub
+Switched to hub context: default/api-hub.example.com:6443/admin
+```
+
+#### `acmlab context spoke <cluster-name>`
+
+Switch to a managed spoke cluster's context. Queries the ManagedCluster API URL from the hub and finds the matching kubeconfig context.
+
+```
+$ acmlab context spoke my-rosa-cluster
+Switched to spoke context: default/api-my-rosa.example.com:443/admin
+Cluster:  my-rosa-cluster
+Server:   https://api.my-rosa.example.com:443
+```
+
+#### `acmlab context list`
+
+List all kubeconfig contexts with hub/spoke markers.
+
+```
+$ acmlab context list
+  CONTEXT                                  SERVER                                  TYPE
+* default/api-hub.example.com:6443/admin   https://api.hub.example.com:6443        hub
+  default/api-spoke.example.com:443/admin  https://api.spoke.example.com:443       spoke (my-rosa-cluster)
+```
 
 ### Batch Operations
 

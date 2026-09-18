@@ -2491,6 +2491,27 @@ So that I can identify and import them into the fleet regardless of their type
 **Then** I see all clusters from kubeconfig files cross-referenced against ACM ManagedClusters
 **And** unmanaged clusters can be auto-imported
 
+### Scenario: Auto-import with automatic credential retrieval
+
+**Given** a cloud-discovered cluster (ROSA, EKS, IKS, or ROKS)
+**When** I auto-import it
+**Then** the CLI fetches the spoke kubeconfig via provider CLI (rosa create admin / aws eks update-kubeconfig / ibmcloud ks cluster config --admin)
+**And** creates an auto-import-secret so ACM installs the klusterlet automatically
+**And** if credential retrieval fails, the import still succeeds but requires manual spoke-side steps
+
+### Scenario: Dry-run and cluster-set assignment
+
+**Given** a cloud-discovered cluster
+**When** I auto-import with `--dry-run`
+**Then** I see a preview of resources that would be created without creating them
+**And** I can use `--cluster-set` to assign the cluster to a specific ManagedClusterSet
+
+### Scenario: List discovery-imported clusters
+
+**Given** clusters imported via cloud or kubeconfig discovery
+**When** I list imports
+**Then** I see all discovery-imported clusters with creation method, cluster set, and status
+
 ### Supported providers
 
 - AWS: EKS (via `aws eks`) and ROSA (via `rosa describe cluster`)
@@ -2499,7 +2520,7 @@ So that I can identify and import them into the fleet regardless of their type
 
 ### Package
 
-`internal/discovery/cloud_discovery.go` — ScanClusters, AutoImport, ScanKubeconfigs, AutoImportKubeconfig
+`internal/discovery/cloud_discovery.go` — ScanClusters, AutoImport, ScanKubeconfigs, AutoImportKubeconfig, ListImports
 
 ---
 

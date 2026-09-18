@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # UC-57: Cloud-native cluster discovery (AWS, IBM Cloud, kubeconfig)
-# Demonstrates discovering clusters from cloud providers and kubeconfig files
+# Demonstrates discovering clusters from cloud providers, auto-importing with
+# automatic credential retrieval, and hub/spoke context switching.
 
 set -euo pipefail
 
@@ -26,16 +27,32 @@ echo "5. Scan kubeconfig directory"
 acmlab discovery scan-kubeconfigs --dir ~/.kube/
 
 echo ""
-echo "6. Scan as JSON"
-acmlab discovery scan --provider aws --json
+echo "6. Dry-run auto-import (preview without creating)"
+acmlab discovery auto-import my-rosa-cluster --provider aws --dry-run
 
 echo ""
-echo "7. Auto-import a cloud-discovered cluster"
-acmlab discovery auto-import my-eks-cluster --provider aws
+echo "7. Auto-import with cluster-set assignment"
+acmlab discovery auto-import my-rosa-cluster --provider aws --cluster-set production
 
 echo ""
 echo "8. Auto-import from kubeconfig"
 acmlab discovery auto-import-kubeconfig --name my-cluster --kubeconfig ~/.kube/my-cluster.kubeconfig
+
+echo ""
+echo "9. List discovery-imported clusters"
+acmlab discovery list-imports
+
+echo ""
+echo "10. Switch to spoke context"
+acmlab context spoke my-rosa-cluster
+
+echo ""
+echo "11. Check current context"
+acmlab context current
+
+echo ""
+echo "12. Switch back to hub"
+acmlab context hub
 
 echo ""
 echo "=== Done ==="
