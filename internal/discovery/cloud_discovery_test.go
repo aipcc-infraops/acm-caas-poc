@@ -691,8 +691,8 @@ func TestBuildBasicAuthKubeconfig(t *testing.T) {
 	if cluster.Server != testAPIURL {
 		t.Errorf("server = %q, want %q", cluster.Server, testAPIURL)
 	}
-	if !cluster.InsecureSkipTLSVerify {
-		t.Error("expected InsecureSkipTLSVerify=true")
+	if cluster.InsecureSkipTLSVerify {
+		t.Error("InsecureSkipTLSVerify should be false (ROSA uses public CA)")
 	}
 	auth, ok := cfg.AuthInfos["test-cluster"]
 	if !ok {

@@ -588,6 +588,9 @@ func buildCloudManagedCluster(name, provider, clusterType, region, clusterSet st
 	}
 }
 
+// PoC-grade credential handling: creates admin credentials on the spoke for import.
+// Production use should prefer short-lived tokens, least-privilege service accounts,
+// and post-import cleanup of the admin user.
 func fetchSpokeKubeconfig(runner CmdRunner, clusterName, provider, clusterType, region string) ([]byte, error) {
 	switch {
 	case provider == "aws" && clusterType == "rosa":
@@ -647,8 +650,7 @@ func parseROSAAdminOutput(output string) (apiURL, username, password string) {
 func buildBasicAuthKubeconfig(name, server, username, password string) ([]byte, error) {
 	cfg := clientcmdapi.NewConfig()
 	cfg.Clusters[name] = &clientcmdapi.Cluster{
-		Server:                server,
-		InsecureSkipTLSVerify: true,
+		Server: server,
 	}
 	cfg.AuthInfos[name] = &clientcmdapi.AuthInfo{
 		Username: username,

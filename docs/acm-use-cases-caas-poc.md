@@ -2512,6 +2512,15 @@ So that I can identify and import them into the fleet regardless of their type
 **When** I list imports
 **Then** I see all discovery-imported clusters with creation method, cluster set, and status
 
+### Security notes (PoC)
+
+Auto-credential retrieval creates admin-level access on the spoke cluster for import purposes. This is acceptable for a PoC but production use should:
+- Use short-lived tokens or least-privilege service accounts instead of cluster-admin
+- Clean up the admin user after the klusterlet joins (`rosa delete admin`)
+- Use ACM's native cloud provider credential integration where available
+
+TLS is verified using the provider's public CA (ROSA) or embedded CA cert (EKS). IBM Cloud kubeconfigs include their own CA.
+
 ### Supported providers
 
 - AWS: EKS (via `aws eks`) and ROSA (via `rosa describe cluster`)
