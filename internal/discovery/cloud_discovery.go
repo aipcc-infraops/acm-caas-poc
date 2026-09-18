@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 )
@@ -46,12 +49,13 @@ func (o ImportOpts) resolvedSet() string {
 }
 
 type ImportPreview struct {
-	ClusterName string `json:"clusterName"`
-	ClusterSet  string `json:"clusterSet"`
-	Provider    string `json:"provider,omitempty"`
-	Type        string `json:"type,omitempty"`
-	Region      string `json:"region,omitempty"`
-	Resources   []string `json:"resources"`
+	ClusterName  string   `json:"clusterName"`
+	ClusterSet   string   `json:"clusterSet"`
+	Provider     string   `json:"provider,omitempty"`
+	Type         string   `json:"type,omitempty"`
+	Region       string   `json:"region,omitempty"`
+	Resources    []string `json:"resources"`
+	AutoImported bool     `json:"autoImported"`
 }
 
 type ImportedCluster struct {
@@ -153,17 +157,25 @@ func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string, 
 		return nil, fmt.Errorf("cluster %s not found in %s", clusterName, provider)
 	}
 
+	resources := []string{
+		fmt.Sprintf("Namespace/%s", clusterName),
+		fmt.Sprintf("ManagedCluster/%s (set=%s)", clusterName, opts.resolvedSet()),
+		fmt.Sprintf("KlusterletAddonConfig/%s", clusterName),
+	}
+
+	spokeKubeconfig, credErr := fetchSpokeKubeconfig(runner, clusterName, provider, cluster.Type, cluster.Region)
+	if credErr == nil {
+		resources = append(resources, fmt.Sprintf("Secret/%s/auto-import-secret", clusterName))
+	}
+
 	preview := &ImportPreview{
-		ClusterName: clusterName,
-		ClusterSet:  opts.resolvedSet(),
-		Provider:    provider,
-		Type:        cluster.Type,
-		Region:      cluster.Region,
-		Resources: []string{
-			fmt.Sprintf("Namespace/%s", clusterName),
-			fmt.Sprintf("ManagedCluster/%s (set=%s)", clusterName, opts.resolvedSet()),
-			fmt.Sprintf("KlusterletAddonConfig/%s", clusterName),
-		},
+		ClusterName:  clusterName,
+		ClusterSet:   opts.resolvedSet(),
+		Provider:     provider,
+		Type:         cluster.Type,
+		Region:       cluster.Region,
+		Resources:    resources,
+		AutoImported: credErr == nil,
 	}
 
 	if opts.DryRun {
@@ -182,6 +194,16 @@ func (m *Manager) AutoImport(ctx context.Context, clusterName, provider string, 
 	kac := buildKlusterletAddonConfig(clusterName)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRKlusterletAddonConfig, clusterName, kac); err != nil {
 		return nil, fmt.Errorf("creating KlusterletAddonConfig: %w", err)
+	}
+
+	if credErr != nil {
+		m.logger.Warn("spoke credentials not available, manual import required", "cluster", clusterName, "reason", credErr.Error())
+	} else {
+		secret := buildAutoImportSecret(clusterName, spokeKubeconfig)
+		if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, clusterName, secret); err != nil {
+			m.logger.Warn("failed to create auto-import secret", "cluster", clusterName, "error", err.Error())
+			preview.AutoImported = false
+		}
 	}
 
 	return preview, nil
@@ -550,6 +572,7 @@ func buildCloudManagedCluster(name, provider, clusterType, region, clusterSet st
 				"labels": map[string]interface{}{
 					"name":                          name,
 					"acmlab.redhat.com/managed":     "true",
+					"acmlab.redhat.com/discovery":   "true",
 					"acmlab.redhat.com/discovered-from": provider,
 					"cloud":                         provider,
 					"cluster-type":                  clusterType,
@@ -563,6 +586,137 @@ func buildCloudManagedCluster(name, provider, clusterType, region, clusterSet st
 			},
 		},
 	}
+}
+
+func fetchSpokeKubeconfig(runner CmdRunner, clusterName, provider, clusterType, region string) ([]byte, error) {
+	switch {
+	case provider == "aws" && clusterType == "rosa":
+		return fetchROSAKubeconfig(runner, clusterName)
+	case provider == "aws" && clusterType == "eks":
+		return fetchEKSKubeconfig(runner, clusterName, region)
+	case provider == "ibmcloud":
+		return fetchIBMCloudKubeconfig(runner, clusterName)
+	default:
+		return nil, fmt.Errorf("auto-credentials not supported for %s/%s", provider, clusterType)
+	}
+}
+
+func fetchROSAKubeconfig(runner CmdRunner, clusterName string) ([]byte, error) {
+	descOut, err := runner("rosa", "describe", "cluster", "-c", clusterName, "-o", "json")
+	if err != nil {
+		return nil, fmt.Errorf("describing ROSA cluster: %w", err)
+	}
+
+	var desc struct {
+		API struct {
+			URL string `json:"url"`
+		} `json:"api"`
+	}
+	if err := json.Unmarshal(descOut, &desc); err != nil || desc.API.URL == "" {
+		return nil, fmt.Errorf("parsing ROSA cluster API URL")
+	}
+
+	adminOut, err := runner("rosa", "create", "admin", "-c", clusterName, "--yes")
+	if err != nil {
+		return nil, fmt.Errorf("creating ROSA admin: %w", err)
+	}
+
+	apiURL, username, password := parseROSAAdminOutput(string(adminOut))
+	if username == "" || password == "" {
+		return nil, fmt.Errorf("failed to parse ROSA admin credentials from output")
+	}
+	if apiURL == "" {
+		apiURL = desc.API.URL
+	}
+
+	return buildBasicAuthKubeconfig(clusterName, apiURL, username, password)
+}
+
+var rosaLoginRe = regexp.MustCompile(`oc\s+login\s+(https?://\S+)\s+--username\s+(\S+)\s+--password\s+'?([^'\s]+)'?`)
+
+func parseROSAAdminOutput(output string) (apiURL, username, password string) {
+	for _, line := range strings.Split(output, "\n") {
+		matches := rosaLoginRe.FindStringSubmatch(line)
+		if len(matches) == 4 {
+			return matches[1], matches[2], matches[3]
+		}
+	}
+	return "", "", ""
+}
+
+func buildBasicAuthKubeconfig(name, server, username, password string) ([]byte, error) {
+	cfg := clientcmdapi.NewConfig()
+	cfg.Clusters[name] = &clientcmdapi.Cluster{
+		Server:                server,
+		InsecureSkipTLSVerify: true,
+	}
+	cfg.AuthInfos[name] = &clientcmdapi.AuthInfo{
+		Username: username,
+		Password: password,
+	}
+	cfg.Contexts[name] = &clientcmdapi.Context{
+		Cluster:  name,
+		AuthInfo: name,
+	}
+	cfg.CurrentContext = name
+	return clientcmd.Write(*cfg)
+}
+
+func fetchEKSKubeconfig(runner CmdRunner, clusterName, region string) ([]byte, error) {
+	tmpFile, err := os.CreateTemp("", "eks-kubeconfig-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	args := []string{"eks", "update-kubeconfig", "--name", clusterName, "--kubeconfig", tmpPath}
+	if region != "" {
+		args = append(args, "--region", region)
+	}
+	if _, err := runner("aws", args...); err != nil {
+		return nil, fmt.Errorf("fetching EKS kubeconfig: %w", err)
+	}
+
+	data, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading EKS kubeconfig: %w", err)
+	}
+	return data, nil
+}
+
+func fetchIBMCloudKubeconfig(runner CmdRunner, clusterName string) ([]byte, error) {
+	tmpDir, err := os.MkdirTemp("", "ibmcloud-kubeconfig-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	_, err = runner("ibmcloud", "ks", "cluster", "config", "--cluster", clusterName, "--admin", "--output", "yaml", "--dir", tmpDir)
+	if err != nil {
+		return nil, fmt.Errorf("fetching IBM Cloud kubeconfig: %w", err)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading temp dir: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(tmpDir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if _, err := clientcmd.Load(data); err == nil {
+			return data, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no valid kubeconfig found in ibmcloud output")
 }
 
 func (m *Manager) ListImports(ctx context.Context) ([]ImportedCluster, error) {

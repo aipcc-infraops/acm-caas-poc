@@ -239,7 +239,11 @@ func discoveryAutoImportCmd() *cobra.Command {
 				}
 				return nil
 			}
-			fmt.Printf("Cluster %s imported into set %s. Apply import manifests on the spoke to complete.\n", args[0], preview.ClusterSet)
+			if preview.AutoImported {
+				fmt.Printf("Cluster %s imported into set %s. ACM will automatically install the klusterlet.\n", args[0], preview.ClusterSet)
+			} else {
+				fmt.Printf("Cluster %s imported into set %s. Auto-credentials not available; apply import manifests on the spoke manually.\n", args[0], preview.ClusterSet)
+			}
 			return nil
 		},
 	}
