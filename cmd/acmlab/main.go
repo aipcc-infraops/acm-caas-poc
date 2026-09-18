@@ -85,6 +85,7 @@ func main() {
 	root.AddCommand(addonCmd())
 	root.AddCommand(vmCmd())
 	root.AddCommand(observabilityCmd())
+	root.AddCommand(workorderCmd())
 
 	rejectUnknownSubcommands(root)
 

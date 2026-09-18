@@ -147,4 +147,7 @@ var (
 	GVRVirtualMachine = schema.GroupVersionResource{
 		Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines",
 	}
+	GVRClusterDeploymentCustomization = schema.GroupVersionResource{
+		Group: "hive.openshift.io", Version: "v1", Resource: "clusterdeploymentcustomizations",
+	}
 )

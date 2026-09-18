@@ -20,6 +20,10 @@ func clustersetCmd() *cobra.Command {
 		clustersetRemoveCmd(),
 		clustersetListCmd(),
 		clustersetAssignCmd(),
+		clustersetGlobalEnableCmd(),
+		clustersetGlobalBindCmd(),
+		clustersetGlobalUnbindCmd(),
+		clustersetGlobalStatusCmd(),
 	)
 	return cmd
 }
@@ -141,5 +145,99 @@ func clustersetAssignCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&setName, "to", "", "target ClusterSet name (required)")
+	return cmd
+}
+
+func clustersetGlobalEnableCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "global-enable",
+		Short: "Create or ensure the global ManagedClusterSet (matches all clusters)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := clusterset.New(c, cfg, logger)
+			if err := mgr.EnableGlobal(context.Background()); err != nil {
+				return err
+			}
+			fmt.Println("Global ManagedClusterSet enabled.")
+			return nil
+		},
+	}
+}
+
+func clustersetGlobalBindCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "global-bind <namespace>",
+		Short: "Bind the global ClusterSet to a namespace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := clusterset.New(c, cfg, logger)
+			if err := mgr.BindGlobal(context.Background(), args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Global ClusterSet bound to namespace %s\n", args[0])
+			return nil
+		},
+	}
+	return cmd
+}
+
+func clustersetGlobalUnbindCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "global-unbind <namespace>",
+		Short: "Remove the global ClusterSet binding from a namespace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := clusterset.New(c, cfg, logger)
+			if err := mgr.UnbindGlobal(context.Background(), args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Global ClusterSet unbound from namespace %s\n", args[0])
+			return nil
+		},
+	}
+}
+
+func clustersetGlobalStatusCmd() *cobra.Command {
+	var outputJSON bool
+	cmd := &cobra.Command{
+		Use:   "global-status",
+		Short: "Show status and bindings of the global ManagedClusterSet",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := clusterset.New(c, cfg, logger)
+			status, err := mgr.GlobalStatus(context.Background())
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(status, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Enabled: %v\n", status.Enabled)
+			if len(status.Bindings) > 0 {
+				fmt.Println("Bindings:")
+				for _, b := range status.Bindings {
+					fmt.Printf("  - %s\n", b.Namespace)
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
