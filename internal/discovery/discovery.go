@@ -13,13 +13,14 @@ import (
 )
 
 type Manager struct {
-	client *client.Client
-	cfg    config.Config
-	logger *slog.Logger
+	client    *client.Client
+	cfg       config.Config
+	logger    *slog.Logger
+	cmdRunner CmdRunner
 }
 
 func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
-	return &Manager{client: c, cfg: cfg, logger: logger}
+	return &Manager{client: c, cfg: cfg, logger: logger, cmdRunner: DefaultCmdRunner}
 }
 
 type EnableDiscoveryOpts struct {
