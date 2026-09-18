@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 )
@@ -585,5 +587,463 @@ func TestListImportsEmpty(t *testing.T) {
 	}
 	if len(imports) != 0 {
 		t.Errorf("expected 0 imports, got %d", len(imports))
+	}
+}
+
+func fakeROSAAdminOutput(clusterName, apiURL, user, token string, quoted bool) string {
+	cred := token
+	if quoted {
+		cred = "'" + token + "'"
+	}
+	return fmt.Sprintf(`I: Admin account has been added to cluster '%s'.
+I: To login, run the following command:
+
+   oc login %s --username %s --password %s
+
+I: It may take several minutes for this access to become active.`, clusterName, apiURL, user, cred)
+}
+
+func fakeROSAExistingAdminOutput(clusterName, apiURL, user, token string) string {
+	return fmt.Sprintf(`W: There is already an admin on cluster '%s'. To login, run the following command:
+
+   oc login %s --username %s --password '%s'
+
+I: It may take several minutes for this access to become active.`, clusterName, apiURL, user, token)
+}
+
+const (
+	testAPIURL = "https://api.test.example.com:443"
+	testUser   = "cluster-admin"
+	testToken  = "test-token-do-not-use"
+)
+
+func TestParseROSAAdminOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantURL  string
+		wantUser string
+		wantPass string
+	}{
+		{
+			name:     "single-quoted token",
+			input:    fakeROSAAdminOutput("test-cluster", testAPIURL, testUser, testToken, true),
+			wantURL:  testAPIURL,
+			wantUser: testUser,
+			wantPass: testToken,
+		},
+		{
+			name:     "unquoted token",
+			input:    fakeROSAAdminOutput("test-cluster", testAPIURL, testUser, testToken, false),
+			wantURL:  testAPIURL,
+			wantUser: testUser,
+			wantPass: testToken,
+		},
+		{
+			name:     "no match",
+			input:    "I: Something else entirely",
+			wantURL:  "",
+			wantUser: "",
+			wantPass: "",
+		},
+		{
+			name:     "existing admin",
+			input:    fakeROSAExistingAdminOutput("test-cluster", testAPIURL, testUser, testToken),
+			wantURL:  testAPIURL,
+			wantUser: testUser,
+			wantPass: testToken,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotURL, gotUser, gotPass := parseROSAAdminOutput(tt.input)
+			if gotURL != tt.wantURL {
+				t.Errorf("apiURL = %q, want %q", gotURL, tt.wantURL)
+			}
+			if gotUser != tt.wantUser {
+				t.Errorf("username = %q, want %q", gotUser, tt.wantUser)
+			}
+			if gotPass != tt.wantPass {
+				t.Errorf("password = %q, want %q", gotPass, tt.wantPass)
+			}
+		})
+	}
+}
+
+func TestBuildBasicAuthKubeconfig(t *testing.T) {
+	data, err := buildBasicAuthKubeconfig("test-cluster", testAPIURL, testUser, testToken, false)
+	if err != nil {
+		t.Fatalf("buildBasicAuthKubeconfig failed: %v", err)
+	}
+
+	cfg, err := clientcmd.Load(data)
+	if err != nil {
+		t.Fatalf("failed to parse generated kubeconfig: %v", err)
+	}
+
+	if cfg.CurrentContext != "test-cluster" {
+		t.Errorf("current context = %q, want %q", cfg.CurrentContext, "test-cluster")
+	}
+	cluster, ok := cfg.Clusters["test-cluster"]
+	if !ok {
+		t.Fatal("cluster 'test-cluster' not found")
+	}
+	if cluster.Server != testAPIURL {
+		t.Errorf("server = %q, want %q", cluster.Server, testAPIURL)
+	}
+	if cluster.InsecureSkipTLSVerify {
+		t.Error("InsecureSkipTLSVerify should be false (ROSA uses public CA)")
+	}
+	auth, ok := cfg.AuthInfos["test-cluster"]
+	if !ok {
+		t.Fatal("auth info 'test-cluster' not found")
+	}
+	if auth.Username != testUser {
+		t.Errorf("username = %q, want %q", auth.Username, testUser)
+	}
+	if auth.Password != testToken {
+		t.Errorf("got unexpected auth token")
+	}
+}
+
+func TestFetchROSAKubeconfig(t *testing.T) {
+	descJSON := fmt.Sprintf(`{"api":{"url":"%s"}}`, testAPIURL)
+	adminOutput := fakeROSAAdminOutput("my-rosa", testAPIURL, testUser, testToken, true)
+
+	runner := mockRunner(map[string][]byte{
+		"rosa describe": []byte(descJSON),
+		"rosa create":   []byte(adminOutput),
+	})
+
+	data, err := fetchROSAKubeconfig(runner, "my-rosa")
+	if err != nil {
+		t.Fatalf("fetchROSAKubeconfig failed: %v", err)
+	}
+
+	cfg, err := clientcmd.Load(data)
+	if err != nil {
+		t.Fatalf("failed to parse kubeconfig: %v", err)
+	}
+	cluster, ok := cfg.Clusters["my-rosa"]
+	if !ok {
+		t.Fatal("cluster 'my-rosa' not found")
+	}
+	if cluster.Server != testAPIURL {
+		t.Errorf("server = %q", cluster.Server)
+	}
+	auth, ok := cfg.AuthInfos["my-rosa"]
+	if !ok {
+		t.Fatal("auth info not found")
+	}
+	if auth.Username != testUser {
+		t.Errorf("username = %q", auth.Username)
+	}
+	if auth.Password != testToken {
+		t.Error("auth token mismatch")
+	}
+}
+
+func TestAutoImportWithCredentials(t *testing.T) {
+	descJSON := fmt.Sprintf(`{"api":{"url":"%s"}}`, testAPIURL)
+	adminOutput := fakeROSAAdminOutput("my-rosa-cred", testAPIURL, testUser, testToken, true)
+
+	mgr := newManager()
+	mgr.cmdRunner = func(name string, args ...string) ([]byte, error) {
+		key := name
+		if len(args) > 0 {
+			key = name + " " + args[0]
+		}
+		switch key {
+		case "rosa list":
+			return rosaListJSON(
+				rosaCluster{Name: "my-rosa-cred", State: "ready", OpenshiftVersion: "4.14.5", AWS: rosaAWS{Region: "us-east-1"}},
+			), nil
+		case "rosa describe":
+			return []byte(descJSON), nil
+		case "rosa create":
+			return []byte(adminOutput), nil
+		default:
+			return nil, fmt.Errorf("command not found: %s", key)
+		}
+	}
+
+	preview, err := mgr.AutoImport(context.Background(), "my-rosa-cred", "aws", ImportOpts{})
+	if err != nil {
+		t.Fatalf("AutoImport failed: %v", err)
+	}
+	if !preview.AutoImported {
+		t.Error("expected AutoImported=true")
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRSecret, "my-rosa-cred", "auto-import-secret")
+	if err != nil {
+		t.Fatal("auto-import-secret not created")
+	}
+}
+
+func TestAutoImportWithoutCredentials(t *testing.T) {
+	mgr := newManager()
+	mgr.cmdRunner = func(name string, args ...string) ([]byte, error) {
+		if name == "aws" && len(args) >= 2 {
+			switch args[1] {
+			case "list-clusters":
+				return eksListJSON("my-eks-nocred"), nil
+			case "describe-cluster":
+				return eksDescribeJSON("my-eks-nocred", "1.29", "ACTIVE"), nil
+			case "update-kubeconfig":
+				return nil, fmt.Errorf("credentials not available")
+			}
+		}
+		return nil, fmt.Errorf("command not found: %s", name)
+	}
+
+	preview, err := mgr.AutoImport(context.Background(), "my-eks-nocred", "aws", ImportOpts{})
+	if err != nil {
+		t.Fatalf("AutoImport failed: %v", err)
+	}
+	if preview.AutoImported {
+		t.Error("expected AutoImported=false when EKS kubeconfig fetch fails")
+	}
+
+	mc, err := mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "my-eks-nocred")
+	if err != nil {
+		t.Fatal("ManagedCluster should still be created")
+	}
+	labels := mc.GetLabels()
+	if labels["created-via"] != "cloud-discovery" {
+		t.Error("missing created-via label")
+	}
+}
+
+func TestFetchIBMCloudKubeconfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	kubeconfigContent := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+  name: test-ibm-cluster
+contexts:
+- context:
+    cluster: test-ibm-cluster
+    user: admin
+  name: test-ibm-cluster
+users:
+- name: admin
+  user:
+    token: %s
+current-context: test-ibm-cluster
+`, testAPIURL, testToken)
+
+	runner := func(name string, args ...string) ([]byte, error) {
+		if name == "ibmcloud" && len(args) > 0 && args[0] == "ks" {
+			for i, arg := range args {
+				if arg == "--dir" && i+1 < len(args) {
+					os.WriteFile(filepath.Join(args[i+1], "kube-config.yaml"), []byte(kubeconfigContent), 0600)
+					return []byte("OK"), nil
+				}
+			}
+			os.WriteFile(filepath.Join(tmpDir, "kube-config.yaml"), []byte(kubeconfigContent), 0600)
+			return []byte("OK"), nil
+		}
+		return nil, fmt.Errorf("command not found: %s", name)
+	}
+
+	data, err := fetchIBMCloudKubeconfig(runner, "test-ibm-cluster")
+	if err != nil {
+		t.Fatalf("fetchIBMCloudKubeconfig failed: %v", err)
+	}
+
+	cfg, err := clientcmd.Load(data)
+	if err != nil {
+		t.Fatalf("failed to parse kubeconfig: %v", err)
+	}
+	cluster, ok := cfg.Clusters["test-ibm-cluster"]
+	if !ok {
+		t.Fatal("cluster not found in kubeconfig")
+	}
+	if cluster.Server != testAPIURL {
+		t.Errorf("server = %q, want %q", cluster.Server, testAPIURL)
+	}
+}
+
+func TestBuildBasicAuthKubeconfigInsecure(t *testing.T) {
+	data, err := buildBasicAuthKubeconfig("insecure-cluster", testAPIURL, testUser, testToken, true)
+	if err != nil {
+		t.Fatalf("buildBasicAuthKubeconfig failed: %v", err)
+	}
+
+	cfg, err := clientcmd.Load(data)
+	if err != nil {
+		t.Fatalf("failed to parse generated kubeconfig: %v", err)
+	}
+	cluster, ok := cfg.Clusters["insecure-cluster"]
+	if !ok {
+		t.Fatal("cluster not found")
+	}
+	if !cluster.InsecureSkipTLSVerify {
+		t.Error("InsecureSkipTLSVerify should be true when insecure=true")
+	}
+}
+
+func TestAutoImportKubeconfigRejectsInsecure(t *testing.T) {
+	dir := t.TempDir()
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+    insecure-skip-tls-verify: true
+  name: insecure-cluster
+contexts:
+- context:
+    cluster: insecure-cluster
+    user: admin
+  name: insecure-cluster
+users:
+- name: admin
+  user:
+    token: %s
+current-context: insecure-cluster
+`, testAPIURL, testToken)
+	path := filepath.Join(dir, "insecure.kubeconfig")
+	os.WriteFile(path, []byte(content), 0644)
+
+	mgr := newManager()
+	_, err := mgr.AutoImportKubeconfig(context.Background(), "insecure-cluster", path, ImportOpts{})
+	if err == nil {
+		t.Fatal("expected error when importing insecure kubeconfig without --allow-insecure")
+	}
+	if !strings.Contains(err.Error(), "insecure-skip-tls-verify") {
+		t.Errorf("error should mention insecure-skip-tls-verify, got: %v", err)
+	}
+}
+
+func TestAutoImportKubeconfigAllowInsecure(t *testing.T) {
+	dir := t.TempDir()
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+    insecure-skip-tls-verify: true
+  name: insecure-cluster
+contexts:
+- context:
+    cluster: insecure-cluster
+    user: admin
+  name: insecure-cluster
+users:
+- name: admin
+  user:
+    token: %s
+current-context: insecure-cluster
+`, testAPIURL, testToken)
+	path := filepath.Join(dir, "insecure.kubeconfig")
+	os.WriteFile(path, []byte(content), 0644)
+
+	mgr := newManager()
+	preview, err := mgr.AutoImportKubeconfig(context.Background(), "insecure-cluster", path, ImportOpts{AllowInsecure: true})
+	if err != nil {
+		t.Fatalf("AutoImportKubeconfig with --allow-insecure should succeed: %v", err)
+	}
+	if preview.ClusterName != "insecure-cluster" {
+		t.Errorf("expected cluster name insecure-cluster, got %s", preview.ClusterName)
+	}
+}
+
+func TestSecureKubeconfigNoInsecure(t *testing.T) {
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+  name: secure-cluster
+contexts:
+- context:
+    cluster: secure-cluster
+    user: admin
+  name: secure-cluster
+users:
+- name: admin
+  user:
+    token: %s
+current-context: secure-cluster
+`, testAPIURL, testToken)
+
+	data, fixed, err := SecureKubeconfig([]byte(content))
+	if err != nil {
+		t.Fatalf("SecureKubeconfig failed: %v", err)
+	}
+	if fixed != 0 {
+		t.Errorf("expected 0 fixed, got %d", fixed)
+	}
+	if len(data) == 0 {
+		t.Error("expected non-empty output")
+	}
+}
+
+func TestAutoImportIBMCloudWithCredentials(t *testing.T) {
+	kubeconfigContent := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+  name: my-roks-cred
+contexts:
+- context:
+    cluster: my-roks-cred
+    user: admin
+  name: my-roks-cred
+users:
+- name: admin
+  user:
+    token: %s
+current-context: my-roks-cred
+`, testAPIURL, testToken)
+
+	mgr := newManager()
+	mgr.cmdRunner = func(name string, args ...string) ([]byte, error) {
+		key := name
+		if len(args) > 0 {
+			key = name + " " + args[0]
+		}
+		switch key {
+		case "ibmcloud ks":
+			if len(args) > 1 && args[1] == "cluster" && len(args) > 2 {
+				if args[2] == "ls" {
+					return ibmListJSON(
+						ibmCluster{Name: "my-roks-cred", Region: "us-south", State: "normal", Type: "openshift", MasterKubeVersion: "4.14.5"},
+					), nil
+				}
+				if args[2] == "config" {
+					for i, arg := range args {
+						if arg == "--dir" && i+1 < len(args) {
+							os.WriteFile(filepath.Join(args[i+1], "kube-config.yaml"), []byte(kubeconfigContent), 0600)
+							return []byte("OK"), nil
+						}
+					}
+				}
+			}
+			return ibmListJSON(
+				ibmCluster{Name: "my-roks-cred", Region: "us-south", State: "normal", Type: "openshift", MasterKubeVersion: "4.14.5"},
+			), nil
+		default:
+			return nil, fmt.Errorf("command not found: %s", key)
+		}
+	}
+
+	preview, err := mgr.AutoImport(context.Background(), "my-roks-cred", "ibmcloud", ImportOpts{})
+	if err != nil {
+		t.Fatalf("AutoImport failed: %v", err)
+	}
+	if !preview.AutoImported {
+		t.Error("expected AutoImported=true for IBM Cloud cluster")
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRSecret, "my-roks-cred", "auto-import-secret")
+	if err != nil {
+		t.Fatal("auto-import-secret not created")
 	}
 }
