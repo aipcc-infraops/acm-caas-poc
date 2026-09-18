@@ -26,6 +26,7 @@ func discoveryCmd() *cobra.Command {
 		discoveryScanKubeconfigsCmd(),
 		discoveryAutoImportKubeconfigCmd(),
 		discoveryListImportsCmd(),
+		discoveryFixTLSCmd(),
 	)
 	return cmd
 }
@@ -207,7 +208,7 @@ func discoveryScanCmd() *cobra.Command {
 
 func discoveryAutoImportCmd() *cobra.Command {
 	var provider, clusterSet string
-	var dryRun bool
+	var dryRun, allowInsecure, fixTLS bool
 
 	cmd := &cobra.Command{
 		Use:   "auto-import <name>",
@@ -222,7 +223,7 @@ func discoveryAutoImportCmd() *cobra.Command {
 				return err
 			}
 			mgr := discovery.New(c, cfg, logger)
-			opts := discovery.ImportOpts{DryRun: dryRun, ClusterSet: clusterSet}
+			opts := discovery.ImportOpts{DryRun: dryRun, ClusterSet: clusterSet, AllowInsecure: allowInsecure, FixTLS: fixTLS}
 			if dryRun {
 				fmt.Printf("[DRY-RUN] Previewing import of %s cluster %s...\n", provider, args[0])
 			} else {
@@ -250,6 +251,8 @@ func discoveryAutoImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&provider, "provider", "", "cloud provider: aws, ibmcloud (required)")
 	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "assign to a ManagedClusterSet (default: default)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview what would be created without creating resources")
+	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow importing clusters with insecure TLS (skip certificate verification)")
+	cmd.Flags().BoolVar(&fixTLS, "fix-tls", false, "fetch server CA certificates and replace insecure-skip-tls-verify")
 	return cmd
 }
 
@@ -331,7 +334,7 @@ func discoveryScanKubeconfigsCmd() *cobra.Command {
 
 func discoveryAutoImportKubeconfigCmd() *cobra.Command {
 	var name, kubeconfigPath, clusterSet string
-	var dryRun bool
+	var dryRun, allowInsecure, fixTLS bool
 
 	cmd := &cobra.Command{
 		Use:   "auto-import-kubeconfig",
@@ -348,7 +351,7 @@ func discoveryAutoImportKubeconfigCmd() *cobra.Command {
 				return err
 			}
 			mgr := discovery.New(c, cfg, logger)
-			opts := discovery.ImportOpts{DryRun: dryRun, ClusterSet: clusterSet}
+			opts := discovery.ImportOpts{DryRun: dryRun, ClusterSet: clusterSet, AllowInsecure: allowInsecure, FixTLS: fixTLS}
 			if dryRun {
 				fmt.Printf("[DRY-RUN] Previewing import of cluster %s from %s...\n", name, kubeconfigPath)
 			} else {
@@ -373,6 +376,35 @@ func discoveryAutoImportKubeconfigCmd() *cobra.Command {
 	cmd.Flags().StringVar(&kubeconfigPath, "kubeconfig", "", "path to the spoke cluster kubeconfig (required)")
 	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "assign to a ManagedClusterSet (default: default)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview what would be created without creating resources")
+	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow importing with insecure TLS (skip certificate verification)")
+	cmd.Flags().BoolVar(&fixTLS, "fix-tls", false, "fetch server CA certificates and replace insecure-skip-tls-verify")
+	return cmd
+}
+
+func discoveryFixTLSCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "fix-tls <cluster-name>",
+		Short: "Replace insecure-skip-tls-verify with server CA certificate in an imported cluster's auto-import-secret",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			fmt.Printf("Fixing TLS for cluster %s...\n", args[0])
+			result, err := mgr.FixTLS(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if result.Fixed {
+				fmt.Printf("TLS fixed for %s: %s\n", result.ClusterName, result.Message)
+			} else {
+				fmt.Printf("No changes needed for %s: %s\n", result.ClusterName, result.Message)
+			}
+			return nil
+		},
+	}
 	return cmd
 }
 

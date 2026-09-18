@@ -2521,6 +2521,11 @@ Auto-credential retrieval creates admin-level access on the spoke cluster for im
 
 TLS is verified using the provider's public CA (ROSA) or embedded CA cert (EKS). IBM Cloud kubeconfigs include their own CA.
 
+For clusters with self-signed or internal CA certificates:
+- `--allow-insecure` permits importing with TLS verification disabled (explicit opt-in)
+- `--fix-tls` automatically fetches the server's CA certificate and embeds it in the kubeconfig, converting an insecure connection to a verified one
+- `acmlab discovery fix-tls <cluster>` can retrofit security on already-imported clusters by patching the auto-import-secret
+
 ### Supported providers
 
 - AWS: EKS (via `aws eks`) and ROSA (via `rosa describe cluster`)
@@ -2529,7 +2534,7 @@ TLS is verified using the provider's public CA (ROSA) or embedded CA cert (EKS).
 
 ### Package
 
-`internal/discovery/cloud_discovery.go` — ScanClusters, AutoImport, ScanKubeconfigs, AutoImportKubeconfig, ListImports
+`internal/discovery/cloud_discovery.go` — ScanClusters, AutoImport, ScanKubeconfigs, AutoImportKubeconfig, ListImports, FixTLS, SecureKubeconfig, FetchServerCA
 
 ---
 

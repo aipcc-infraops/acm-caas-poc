@@ -1999,6 +1999,8 @@ Options:
 - `--provider`: cloud provider — aws, ibmcloud (required)
 - `--cluster-set`: assign to a ManagedClusterSet (default: default)
 - `--dry-run`: preview resources without creating them
+- `--allow-insecure`: allow importing clusters with insecure TLS (skip certificate verification)
+- `--fix-tls`: fetch server CA certificates and replace insecure-skip-tls-verify with proper CA data
 
 ```
 $ acmlab discovery auto-import my-rosa-cluster --provider aws --cluster-set production
@@ -2012,6 +2014,10 @@ Would create the following resources:
   - ManagedCluster/my-rosa-cluster (set=default)
   - KlusterletAddonConfig/my-rosa-cluster
   - Secret/my-rosa-cluster/auto-import-secret
+
+$ acmlab discovery auto-import my-onprem-cluster --provider aws --fix-tls
+Importing aws cluster my-onprem-cluster...
+Cluster my-onprem-cluster imported into set default. ACM will automatically install the klusterlet.
 ```
 
 #### `acmlab discovery list-imports`
@@ -2051,6 +2057,26 @@ Options:
 - `--kubeconfig`: path to kubeconfig file (required)
 - `--cluster-set`: assign to a ManagedClusterSet (default: default)
 - `--dry-run`: preview resources without creating them
+- `--allow-insecure`: allow importing kubeconfigs with insecure-skip-tls-verify
+- `--fix-tls`: fetch server CA certificates and replace insecure-skip-tls-verify with proper CA data
+
+If the kubeconfig contains `insecure-skip-tls-verify: true`, the command rejects it by default. Use `--allow-insecure` to import as-is, or `--fix-tls` to automatically fetch the server's CA certificate and make it secure.
+
+```
+$ acmlab discovery auto-import-kubeconfig --name my-cluster --kubeconfig ~/.kube/insecure.yaml --fix-tls
+Importing cluster my-cluster from kubeconfig ~/.kube/insecure.yaml...
+Cluster my-cluster imported into set default. ACM will use the kubeconfig to install the klusterlet.
+```
+
+#### `acmlab discovery fix-tls <cluster-name>`
+
+Replace `insecure-skip-tls-verify: true` with the server's actual CA certificate in an already-imported cluster's auto-import-secret. Connects to the API server, downloads its certificate chain, extracts the CA, and patches the secret. Useful for converting previously insecure imports to secure ones.
+
+```
+$ acmlab discovery fix-tls my-onprem-cluster
+Fixing TLS for cluster my-onprem-cluster...
+TLS fixed for my-onprem-cluster: replaced insecure-skip-tls-verify with CA certificate for 1 cluster(s)
+```
 
 ### Context
 
