@@ -41,6 +41,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-31 | SCAP scanning via Compliance Operator | ✅ Implemented | `internal/security/` |
 | UC-32 | GitOps fleet deployment via ApplicationSet | ✅ Implemented | `internal/gitops/` |
 | UC-33 | ManifestWorkReplicaSet progressive rollout | ✅ Implemented | `internal/rollout/` |
+| UC-34 | Placement tolerations and taints (advanced scheduling) | ✅ Implemented | `internal/fleet/` |
 | UC-35 | Credential-free spoke access (ManagedServiceAccount) | ✅ Implemented | `internal/access/` |
 | UC-36 | Hub backup and restore | ✅ Implemented | `internal/backup/` |
 | UC-37 | Worker node flavor change (rolling replacement) | ✅ Implemented | `internal/scaling/` |
@@ -59,6 +60,11 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-50 | ClusterCurator day-2 automation hooks | ✅ Implemented | `internal/lifecycle/` |
 | UC-51 | VM lifecycle management (OpenShift Virtualization) | ✅ Implemented | `internal/virtualization/` |
 | UC-52 | Observability stack customisation (pull secret, OBC, rules, dashboards) | ✅ Implemented | `internal/observability/` |
+| UC-53 | Cluster templating (ClusterDeploymentCustomization profiles) | ✅ Implemented | `internal/provisioning/` |
+| UC-54 | Global ManagedClusterSet (cross-team fleet visibility) | ✅ Implemented | `internal/clusterset/` |
+| UC-55 | ManifestWork ordering (dependency-aware sequencing) | ✅ Implemented | `internal/rollout/` |
+| UC-56 | Cluster discovery (DiscoveredCluster via OCM) | ✅ Implemented | `internal/discovery/` |
+| UC-57 | Cloud-native cluster discovery (AWS EKS/ROSA, IBM Cloud IKS/ROKS) | ✅ Implemented | `internal/discovery/` |
 
 ### PoC Priority Areas
 
