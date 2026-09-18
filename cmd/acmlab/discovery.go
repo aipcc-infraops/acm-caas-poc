@@ -13,7 +13,7 @@ import (
 func discoveryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "discovery",
-		Short: "Discover unmanaged OpenShift clusters via OpenShift Cluster Manager",
+		Short: "Discover unmanaged clusters via OCM or cloud provider APIs",
 	}
 	cmd.AddCommand(
 		discoveryEnableCmd(),
@@ -21,6 +21,8 @@ func discoveryCmd() *cobra.Command {
 		discoveryListCmd(),
 		discoveryImportCmd(),
 		discoveryStatusCmd(),
+		discoveryScanCmd(),
+		discoveryAutoImportCmd(),
 	)
 	return cmd
 }
@@ -150,6 +152,81 @@ func discoveryImportCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&namespace, "namespace", "open-cluster-management", "namespace where cluster was discovered")
+	return cmd
+}
+
+func discoveryScanCmd() *cobra.Command {
+	var provider, region string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "scan",
+		Short: "Scan cloud providers for unmanaged clusters (AWS EKS/ROSA, IBM Cloud IKS/ROKS)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			opts := discovery.ScanOpts{
+				Provider: provider,
+				Region:   region,
+			}
+			clusters, err := mgr.ScanClusters(context.Background(), opts)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(clusters, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			if len(clusters) == 0 {
+				fmt.Println("No clusters found")
+				return nil
+			}
+			fmt.Printf("%-25s %-10s %-8s %-15s %-12s %-10s %s\n", "NAME", "PROVIDER", "TYPE", "REGION", "VERSION", "STATUS", "MANAGED")
+			for _, cl := range clusters {
+				managed := ""
+				if cl.Managed {
+					managed = "yes"
+				}
+				fmt.Printf("%-25s %-10s %-8s %-15s %-12s %-10s %s\n", cl.Name, cl.Provider, cl.Type, cl.Region, cl.Version, cl.Status, managed)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "", "cloud provider: aws, ibmcloud (default: scan all)")
+	cmd.Flags().StringVar(&region, "region", "", "filter by region")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func discoveryAutoImportCmd() *cobra.Command {
+	var provider string
+
+	cmd := &cobra.Command{
+		Use:   "auto-import <name>",
+		Short: "Import a cloud-discovered cluster into ACM",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if provider == "" {
+				return fmt.Errorf("--provider is required (aws or ibmcloud)")
+			}
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := discovery.New(c, cfg, logger)
+			fmt.Printf("Importing %s cluster %s...\n", provider, args[0])
+			if err := mgr.AutoImport(context.Background(), args[0], provider); err != nil {
+				return err
+			}
+			fmt.Printf("Cluster %s imported. Apply import manifests on the spoke to complete.\n", args[0])
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "", "cloud provider: aws, ibmcloud (required)")
 	return cmd
 }
 
