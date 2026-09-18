@@ -211,9 +211,12 @@ func TestAutoImport(t *testing.T) {
 		"aws eks ": eksDescribeJSON("my-eks-1", "1.29", "ACTIVE"),
 	})
 
-	err := mgr.AutoImport(context.Background(), "my-eks-1", "aws")
+	preview, err := mgr.AutoImport(context.Background(), "my-eks-1", "aws", ImportOpts{})
 	if err != nil {
 		t.Fatalf("AutoImport failed: %v", err)
+	}
+	if preview.ClusterSet != "default" {
+		t.Errorf("expected default cluster set, got %s", preview.ClusterSet)
 	}
 
 	mc, err := mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "my-eks-1")
@@ -235,7 +238,7 @@ func TestAutoImportNotFound(t *testing.T) {
 		"aws eks": eksListJSON(),
 	})
 
-	err := mgr.AutoImport(context.Background(), "nonexistent", "aws")
+	_, err := mgr.AutoImport(context.Background(), "nonexistent", "aws", ImportOpts{})
 	if err == nil {
 		t.Fatal("expected error for nonexistent cluster")
 	}
@@ -249,7 +252,7 @@ func TestAutoImportIBMCloud(t *testing.T) {
 		),
 	})
 
-	err := mgr.AutoImport(context.Background(), "my-roks", "ibmcloud")
+	_, err := mgr.AutoImport(context.Background(), "my-roks", "ibmcloud", ImportOpts{})
 	if err != nil {
 		t.Fatalf("AutoImport failed: %v", err)
 	}
@@ -266,14 +269,14 @@ func TestAutoImportIBMCloud(t *testing.T) {
 
 func TestAutoImportInvalidProvider(t *testing.T) {
 	mgr := newManager()
-	err := mgr.AutoImport(context.Background(), "cluster", "gcp")
+	_, err := mgr.AutoImport(context.Background(), "cluster", "gcp", ImportOpts{})
 	if err == nil {
 		t.Fatal("expected error for unsupported provider")
 	}
 }
 
 func TestBuildCloudManagedCluster(t *testing.T) {
-	mc := buildCloudManagedCluster("test-eks", "aws", "eks", "us-east-1")
+	mc := buildCloudManagedCluster("test-eks", "aws", "eks", "us-east-1", "default")
 
 	labels := mc.GetLabels()
 	if labels["cloud"] != "aws" {
@@ -374,9 +377,12 @@ func TestAutoImportKubeconfig(t *testing.T) {
 	path := writeKubeconfig(t, dir, "spoke.kubeconfig", "new-spoke", "https://api.new-spoke.example.com:6443")
 
 	mgr := newManager()
-	err := mgr.AutoImportKubeconfig(context.Background(), "new-spoke", path)
+	preview, err := mgr.AutoImportKubeconfig(context.Background(), "new-spoke", path, ImportOpts{})
 	if err != nil {
 		t.Fatalf("AutoImportKubeconfig failed: %v", err)
+	}
+	if preview.ClusterSet != "default" {
+		t.Errorf("expected default cluster set, got %s", preview.ClusterSet)
 	}
 
 	mc, err := mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "new-spoke")
@@ -396,7 +402,7 @@ func TestAutoImportKubeconfig(t *testing.T) {
 
 func TestAutoImportKubeconfigFileNotFound(t *testing.T) {
 	mgr := newManager()
-	err := mgr.AutoImportKubeconfig(context.Background(), "test", "/nonexistent/kubeconfig")
+	_, err := mgr.AutoImportKubeconfig(context.Background(), "test", "/nonexistent/kubeconfig", ImportOpts{})
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
@@ -411,5 +417,173 @@ func TestScanKubeconfigsEmptyDir(t *testing.T) {
 	}
 	if len(clusters) != 0 {
 		t.Errorf("expected 0 clusters, got %d", len(clusters))
+	}
+}
+
+func TestAutoImportKubeconfigDryRun(t *testing.T) {
+	dir := t.TempDir()
+	path := writeKubeconfig(t, dir, "spoke.kubeconfig", "dry-spoke", "https://api.dry-spoke.example.com:6443")
+
+	mgr := newManager()
+	preview, err := mgr.AutoImportKubeconfig(context.Background(), "dry-spoke", path, ImportOpts{DryRun: true})
+	if err != nil {
+		t.Fatalf("AutoImportKubeconfig dry-run failed: %v", err)
+	}
+	if preview.ClusterName != "dry-spoke" {
+		t.Errorf("expected cluster name dry-spoke, got %s", preview.ClusterName)
+	}
+	if len(preview.Resources) != 4 {
+		t.Errorf("expected 4 preview resources, got %d", len(preview.Resources))
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "dry-spoke")
+	if err == nil {
+		t.Fatal("ManagedCluster should NOT be created in dry-run mode")
+	}
+}
+
+func TestAutoImportKubeconfigClusterSet(t *testing.T) {
+	dir := t.TempDir()
+	path := writeKubeconfig(t, dir, "spoke.kubeconfig", "set-spoke", "https://api.set-spoke.example.com:6443")
+
+	mgr := newManager()
+	preview, err := mgr.AutoImportKubeconfig(context.Background(), "set-spoke", path, ImportOpts{ClusterSet: "production"})
+	if err != nil {
+		t.Fatalf("AutoImportKubeconfig with cluster-set failed: %v", err)
+	}
+	if preview.ClusterSet != "production" {
+		t.Errorf("expected cluster set production, got %s", preview.ClusterSet)
+	}
+
+	mc, err := mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "set-spoke")
+	if err != nil {
+		t.Fatalf("ManagedCluster not created: %v", err)
+	}
+	labels := mc.GetLabels()
+	if labels["cluster.open-cluster-management.io/clusterset"] != "production" {
+		t.Errorf("expected clusterset=production, got %s", labels["cluster.open-cluster-management.io/clusterset"])
+	}
+}
+
+func TestAutoImportClusterSet(t *testing.T) {
+	mgr := newManager()
+	mgr.cmdRunner = mockRunner(map[string][]byte{
+		"aws eks":  eksListJSON("my-eks-set"),
+		"aws eks ": eksDescribeJSON("my-eks-set", "1.29", "ACTIVE"),
+	})
+
+	preview, err := mgr.AutoImport(context.Background(), "my-eks-set", "aws", ImportOpts{ClusterSet: "staging"})
+	if err != nil {
+		t.Fatalf("AutoImport with cluster-set failed: %v", err)
+	}
+	if preview.ClusterSet != "staging" {
+		t.Errorf("expected cluster set staging, got %s", preview.ClusterSet)
+	}
+
+	mc, err := mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "my-eks-set")
+	if err != nil {
+		t.Fatalf("ManagedCluster not created: %v", err)
+	}
+	labels := mc.GetLabels()
+	if labels["cluster.open-cluster-management.io/clusterset"] != "staging" {
+		t.Errorf("expected clusterset=staging, got %s", labels["cluster.open-cluster-management.io/clusterset"])
+	}
+}
+
+func TestAutoImportDryRun(t *testing.T) {
+	mgr := newManager()
+	mgr.cmdRunner = mockRunner(map[string][]byte{
+		"aws eks":  eksListJSON("dry-eks"),
+		"aws eks ": eksDescribeJSON("dry-eks", "1.29", "ACTIVE"),
+	})
+
+	preview, err := mgr.AutoImport(context.Background(), "dry-eks", "aws", ImportOpts{DryRun: true, ClusterSet: "test-set"})
+	if err != nil {
+		t.Fatalf("AutoImport dry-run failed: %v", err)
+	}
+	if preview.ClusterName != "dry-eks" {
+		t.Errorf("expected cluster name dry-eks, got %s", preview.ClusterName)
+	}
+	if preview.ClusterSet != "test-set" {
+		t.Errorf("expected cluster set test-set, got %s", preview.ClusterSet)
+	}
+	if preview.Provider != "aws" {
+		t.Errorf("expected provider aws, got %s", preview.Provider)
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRManagedCluster, "", "dry-eks")
+	if err == nil {
+		t.Fatal("ManagedCluster should NOT be created in dry-run mode")
+	}
+}
+
+func TestListImports(t *testing.T) {
+	mc1 := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": "imported-a",
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/discovery":                   "true",
+					"created-via":                                   "kubeconfig-discovery",
+					"cluster.open-cluster-management.io/clusterset": "production",
+				},
+			},
+		},
+	}
+	mc2 := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": "imported-b",
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/discovery":                   "true",
+					"created-via":                                   "cloud-discovery",
+					"cluster.open-cluster-management.io/clusterset": "staging",
+				},
+			},
+		},
+	}
+	mcNoDiscovery := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": "manual-cluster",
+			},
+		},
+	}
+	mgr := newManager(mc1, mc2, mcNoDiscovery)
+
+	imports, err := mgr.ListImports(context.Background())
+	if err != nil {
+		t.Fatalf("ListImports failed: %v", err)
+	}
+	if len(imports) != 2 {
+		t.Fatalf("expected 2 imported clusters, got %d", len(imports))
+	}
+
+	found := map[string]bool{}
+	for _, imp := range imports {
+		found[imp.Name] = true
+	}
+	if !found["imported-a"] || !found["imported-b"] {
+		t.Errorf("expected imported-a and imported-b, got %v", found)
+	}
+	if found["manual-cluster"] {
+		t.Error("manual-cluster should not appear in discovery imports list")
+	}
+}
+
+func TestListImportsEmpty(t *testing.T) {
+	mgr := newManager()
+	imports, err := mgr.ListImports(context.Background())
+	if err != nil {
+		t.Fatalf("ListImports failed: %v", err)
+	}
+	if len(imports) != 0 {
+		t.Errorf("expected 0 imports, got %d", len(imports))
 	}
 }
