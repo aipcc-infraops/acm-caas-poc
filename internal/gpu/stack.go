@@ -18,8 +18,46 @@ type DriftStatus struct {
 	Conditions []string `json:"conditions,omitempty"`
 }
 
+func (m *Manager) PreflightStack(ctx context.Context, cluster string) error {
+	m.logger.Info("gpu.PreflightStack", "cluster", cluster)
+
+	mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", cluster)
+	if err != nil {
+		return fmt.Errorf("cluster %s not found: %w", cluster, err)
+	}
+
+	labels, _, _ := unstructured.NestedStringMap(mc.Object, "metadata", "labels")
+	if labels["gpu-type"] == "" {
+		return fmt.Errorf("cluster %s has no gpu-type label", cluster)
+	}
+
+	conditions, _, _ := unstructured.NestedSlice(mc.Object, "status", "conditions")
+	available := false
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		condType, _ := cond["type"].(string)
+		condStatus, _ := cond["status"].(string)
+		if condType == "ManagedClusterConditionAvailable" && condStatus == "True" {
+			available = true
+			break
+		}
+	}
+	if !available {
+		return fmt.Errorf("cluster %s is not available", cluster)
+	}
+
+	return nil
+}
+
 func (m *Manager) DeployStack(ctx context.Context, cluster, clusterSet string) error {
 	m.logger.Info("gpu.DeployStack", "cluster", cluster)
+
+	if err := m.PreflightStack(ctx, cluster); err != nil {
+		return fmt.Errorf("preflight failed: %w", err)
+	}
 
 	kueueMW := buildKueueManifestWork(cluster)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRManifestWork, cluster, kueueMW); err != nil {

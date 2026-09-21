@@ -52,3 +52,27 @@ func managedCluster(name string, labels map[string]string) *unstructured.Unstruc
 		},
 	}
 }
+
+func gpuReadyCluster(name, gpuType string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": name,
+				"labels": map[string]interface{}{
+					"gpu-type":      gpuType,
+					"gpu-available": "true",
+				},
+			},
+			"status": map[string]interface{}{
+				"conditions": []interface{}{
+					map[string]interface{}{
+						"type":   "ManagedClusterConditionAvailable",
+						"status": "True",
+					},
+				},
+			},
+		},
+	}
+}

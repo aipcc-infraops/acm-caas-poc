@@ -30,8 +30,41 @@ func policyWithCompliance(cluster, compliant string, details []interface{}, cond
 	return &unstructured.Unstructured{Object: obj}
 }
 
-func TestDeployStackCreatesKueueManifestWork(t *testing.T) {
+func TestPreflightStackClusterNotFound(t *testing.T) {
+	mgr := newTestManager()
+	err := mgr.PreflightStack(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for missing cluster")
+	}
+}
+
+func TestPreflightStackNoGPULabel(t *testing.T) {
 	mgr := newTestManager(managedCluster("gpu1", nil))
+	err := mgr.PreflightStack(context.Background(), "gpu1")
+	if err == nil {
+		t.Fatal("expected error for missing gpu-type label")
+	}
+}
+
+func TestPreflightStackNotAvailable(t *testing.T) {
+	mc := managedCluster("gpu1", map[string]string{"gpu-type": "H100"})
+	mgr := newTestManager(mc)
+	err := mgr.PreflightStack(context.Background(), "gpu1")
+	if err == nil {
+		t.Fatal("expected error for unavailable cluster")
+	}
+}
+
+func TestPreflightStackSuccess(t *testing.T) {
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
+	err := mgr.PreflightStack(context.Background(), "gpu1")
+	if err != nil {
+		t.Fatalf("PreflightStack failed: %v", err)
+	}
+}
+
+func TestDeployStackCreatesKueueManifestWork(t *testing.T) {
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	if err := mgr.DeployStack(context.Background(), "gpu1", ""); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
 	}
@@ -42,7 +75,7 @@ func TestDeployStackCreatesKueueManifestWork(t *testing.T) {
 }
 
 func TestDeployStackCreatesKyvernoManifestWork(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	if err := mgr.DeployStack(context.Background(), "gpu1", ""); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
 	}
@@ -53,7 +86,7 @@ func TestDeployStackCreatesKyvernoManifestWork(t *testing.T) {
 }
 
 func TestDeployStackCreatesHealthPolicy(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	if err := mgr.DeployStack(context.Background(), "gpu1", ""); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
 	}
@@ -65,7 +98,7 @@ func TestDeployStackCreatesHealthPolicy(t *testing.T) {
 }
 
 func TestDeployStackCreatesPlacementAndBinding(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	if err := mgr.DeployStack(context.Background(), "gpu1", ""); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
 	}
@@ -81,7 +114,7 @@ func TestDeployStackCreatesPlacementAndBinding(t *testing.T) {
 }
 
 func TestDeployStackLabelsCluster(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	if err := mgr.DeployStack(context.Background(), "gpu1", ""); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
 	}
@@ -96,7 +129,7 @@ func TestDeployStackLabelsCluster(t *testing.T) {
 }
 
 func TestDeployStackWithClusterSet(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	if err := mgr.DeployStack(context.Background(), "gpu1", "team-gpu"); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
 	}
@@ -112,7 +145,7 @@ func TestDeployStackWithClusterSet(t *testing.T) {
 }
 
 func TestDeployStackWithoutClusterSetOmitsField(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	if err := mgr.DeployStack(context.Background(), "gpu1", ""); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
 	}
@@ -128,7 +161,7 @@ func TestDeployStackWithoutClusterSetOmitsField(t *testing.T) {
 }
 
 func TestRemoveStackDeletesResources(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	ctx := context.Background()
 	if err := mgr.DeployStack(ctx, "gpu1", ""); err != nil {
 		t.Fatalf("DeployStack failed: %v", err)
@@ -153,7 +186,7 @@ func TestRemoveStackDeletesResources(t *testing.T) {
 }
 
 func TestRemoveStackDeletesQueueManifestWork(t *testing.T) {
-	mgr := newTestManager(managedCluster("gpu1", nil))
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
 	ctx := context.Background()
 	_ = mgr.DeployStack(ctx, "gpu1", "")
 	_ = mgr.CreateClusterQueues(ctx, "gpu1", []string{"H100"})
