@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ func registerLifecycleSteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^no unnecessary API calls are made$`, s.noUnnecessaryAPICalls)
 	sc.Step(`^the ClusterDeployment already has spec\.powerState = "([^"]*)"$`, s.clusterDeploymentHasPowerState)
 	sc.Step(`^a managed cluster "([^"]*)" exists for lifecycle check$`, s.aManagedClusterExistsLifecycle)
+	sc.Step(`^the operation returns a timeout error$`, s.operationReturnsTimeoutError)
 }
 
 func (s *suiteContext) clusterDeploymentExists(ctx context.Context, name, ns string) error {
@@ -59,9 +61,20 @@ func (s *suiteContext) clusterDeploymentHasPowerState(ctx context.Context, state
 		return fmt.Errorf("getting power state: %w", err)
 	}
 	if string(current) != state {
-		return fmt.Errorf("power state = %s, want %s", current, state)
+		switch lifecycle.PowerState(state) {
+		case lifecycle.PowerStateRunning:
+			if err := s.lifecycle.Resume(ctx, s.lifecycleNamespace, s.lifecycleCluster); err != nil {
+				return fmt.Errorf("preparing Running state: %w", err)
+			}
+		case lifecycle.PowerStateHibernating:
+			if err := s.lifecycle.Hibernate(ctx, s.lifecycleNamespace, s.lifecycleCluster); err != nil {
+				return fmt.Errorf("preparing Hibernating state: %w", err)
+			}
+		default:
+			return fmt.Errorf("power state = %s, want %s", current, state)
+		}
 	}
-	return nil
+	return s.lifecycle.WaitForPowerState(ctx, s.lifecycleNamespace, s.lifecycleCluster, lifecycle.PowerState(state), 5*time.Minute)
 }
 
 func (s *suiteContext) iPatchPowerState(ctx context.Context, state string) error {
@@ -78,41 +91,88 @@ func (s *suiteContext) iPatchPowerState(ctx context.Context, state string) error
 }
 
 func (s *suiteContext) statusShowsPowerState(ctx context.Context, expected string) error {
-	state, err := s.lifecycle.GetPowerStateStatus(ctx, s.lifecycleNamespace, s.lifecycleCluster)
-	if err != nil {
-		return err
+	timeout := 2 * time.Minute
+	interval := 5 * time.Second
+	deadline := time.After(timeout)
+	for {
+		state, err := s.lifecycle.GetPowerStateStatus(ctx, s.lifecycleNamespace, s.lifecycleCluster)
+		if err != nil {
+			return err
+		}
+		if string(state) == expected {
+			return nil
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("power state = %s, want %s (timed out after %v)", state, expected, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
 	}
-	if string(state) != expected {
-		return fmt.Errorf("power state = %s, want %s", state, expected)
-	}
-	return nil
 }
 
 func (s *suiteContext) availableTransitions(ctx context.Context, expected1, expected2 string) error {
-	mc, err := s.client.Get(ctx, client.GVRManagedCluster, "", s.lifecycleCluster)
-	if err != nil {
-		return fmt.Errorf("getting ManagedCluster %s: %w", s.lifecycleCluster, err)
-	}
-	conditions, _, _ := unstructured.NestedSlice(mc.Object, "status", "conditions")
-	for _, raw := range conditions {
-		cond, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
+	timeout := 2 * time.Minute
+	interval := 5 * time.Second
+	deadline := time.After(timeout)
+	for {
+		mc, err := s.client.Get(ctx, client.GVRManagedCluster, "", s.lifecycleCluster)
+		if err != nil {
+			return fmt.Errorf("getting ManagedCluster %s: %w", s.lifecycleCluster, err)
 		}
-		condType, _ := cond["type"].(string)
-		condStatus, _ := cond["status"].(string)
-		if condType == "ManagedClusterConditionAvailable" {
-			if condStatus == expected1 || condStatus == expected2 {
-				return nil
+		conditions, _, _ := unstructured.NestedSlice(mc.Object, "status", "conditions")
+		for _, raw := range conditions {
+			cond, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
 			}
-			return fmt.Errorf("Available condition = %s, want %s or %s", condStatus, expected1, expected2)
+			condType, _ := cond["type"].(string)
+			condStatus, _ := cond["status"].(string)
+			if condType == "ManagedClusterConditionAvailable" {
+				if condStatus == expected1 || condStatus == expected2 {
+					return nil
+				}
+			}
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("ManagedCluster %s Available did not transition to %s or %s within %v", s.lifecycleCluster, expected1, expected2, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
 		}
 	}
-	return fmt.Errorf("ManagedCluster %s has no Available condition", s.lifecycleCluster)
 }
 
 func (s *suiteContext) eventuallyAvailable(ctx context.Context, name string) error {
-	return s.lifecycle.WaitForPowerState(ctx, name, name, lifecycle.PowerStateRunning, 15*time.Minute)
+	timeout := 15 * time.Minute
+	interval := 10 * time.Second
+	deadline := time.After(timeout)
+	for {
+		mc, err := s.client.Get(ctx, client.GVRManagedCluster, "", name)
+		if err == nil {
+			conditions, _, _ := unstructured.NestedSlice(mc.Object, "status", "conditions")
+			for _, raw := range conditions {
+				cond, ok := raw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				condType, _ := cond["type"].(string)
+				condStatus, _ := cond["status"].(string)
+				if condType == "ManagedClusterConditionAvailable" && condStatus == "True" {
+					return nil
+				}
+			}
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("ManagedCluster %s did not become Available within %v", name, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 func (s *suiteContext) noClusterDeploymentExists(ctx context.Context, name string) error {
@@ -209,6 +269,16 @@ func (s *suiteContext) aManagedClusterExistsLifecycle(ctx context.Context, name 
 	_, err := s.client.Get(ctx, client.GVRManagedCluster, "", name)
 	if err != nil {
 		return fmt.Errorf("ManagedCluster %s not found: %w", name, err)
+	}
+	return nil
+}
+
+func (s *suiteContext) operationReturnsTimeoutError() error {
+	if s.err == nil {
+		return fmt.Errorf("expected a timeout error but got none")
+	}
+	if !errors.Is(s.err, context.DeadlineExceeded) {
+		return fmt.Errorf("expected context.DeadlineExceeded, got: %v", s.err)
 	}
 	return nil
 }

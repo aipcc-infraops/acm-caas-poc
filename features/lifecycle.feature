@@ -48,9 +48,9 @@ Feature: Cluster power management via Hive Go API
 
   Scenario: Handle power state transition timeout gracefully
     Given a ClusterDeployment "spoke2" exists in namespace "spoke2"
+    And the ClusterDeployment has spec.powerState = "Running"
     When I wait for the power state to become "Hibernating" with timeout 1s
-    Then the operation returns an error
-    And the error message indicates "timeout waiting for power state"
+    Then the operation returns a timeout error
 
   Scenario: Idempotent hibernate operation
     Given a ClusterDeployment "spoke2" exists in namespace "spoke2"
