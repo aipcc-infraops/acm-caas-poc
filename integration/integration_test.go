@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"testing"
 
@@ -128,15 +129,16 @@ func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
 	}
 	s.client = c
 
-	s.fleet = fleet.New(c, cfg)
-	s.policy = policy.New(c, cfg)
-	s.tenant = tenant.New(c, cfg)
-	s.monitoring = monitoring.New(c, cfg)
-	s.lifecycle = lifecycle.New(c, cfg)
-	s.importing = importing.New(c, cfg)
-	s.scaling = scaling.New(c, cfg)
-	s.registry = registry.New(c, cfg)
-	s.provisioner = provisioning.New(c, cfg)
+	logger := slog.Default()
+	s.fleet = fleet.New(c, cfg, logger)
+	s.policy = policy.New(c, cfg, logger)
+	s.tenant = tenant.New(c, cfg, logger)
+	s.monitoring = monitoring.New(c, cfg, logger)
+	s.lifecycle = lifecycle.New(c, cfg, logger)
+	s.importing = importing.New(c, cfg, logger)
+	s.scaling = scaling.New(c, cfg, logger)
+	s.registry = registry.New(c, cfg, logger)
+	s.provisioner = provisioning.New(c, cfg, logger)
 
 	return nil
 }
