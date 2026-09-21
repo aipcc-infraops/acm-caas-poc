@@ -5,8 +5,11 @@ package integration
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cucumber/godog"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/provisioning"
@@ -30,10 +33,13 @@ func (s *suiteContext) cloudCredentialsExist(ctx context.Context, ns string) err
 	if err != nil {
 		return fmt.Errorf("listing secrets in %s: %w", ns, err)
 	}
-	if len(list.Items) == 0 {
-		return fmt.Errorf("no secrets found in namespace %s", ns)
+	for _, secret := range list.Items {
+		data, _, _ := unstructured.NestedMap(secret.Object, "data")
+		if len(data) > 0 {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("no cloud credential secrets with data found in namespace %s", ns)
 }
 
 func (s *suiteContext) clusterImageSetExists(ctx context.Context) error {
@@ -59,27 +65,34 @@ func (s *suiteContext) clusterDeploymentAccepted(ctx context.Context, name strin
 }
 
 func (s *suiteContext) clusterReachesProvisioned(ctx context.Context, name string) error {
-	obj, err := s.client.Get(ctx, client.GVRClusterDeployment, name, name)
-	if err != nil {
-		return fmt.Errorf("ClusterDeployment %s not found: %w", name, err)
-	}
-	status, _ := obj.Object["status"].(map[string]interface{})
-	if status == nil {
-		return fmt.Errorf("ClusterDeployment %s has no status", name)
-	}
-	conditions, _ := status["conditions"].([]interface{})
-	for _, raw := range conditions {
-		cond, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
+	timeout := 20 * time.Minute
+	interval := 30 * time.Second
+	deadline := time.After(timeout)
+	for {
+		obj, err := s.client.Get(ctx, client.GVRClusterDeployment, name, name)
+		if err != nil {
+			return fmt.Errorf("ClusterDeployment %s not found: %w", name, err)
 		}
-		condType, _ := cond["type"].(string)
-		condStatus, _ := cond["status"].(string)
-		if condType == "Provisioned" && condStatus == "True" {
-			return nil
+		conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+		for _, raw := range conditions {
+			cond, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			condType, _ := cond["type"].(string)
+			condStatus, _ := cond["status"].(string)
+			if condType == "Provisioned" && condStatus == "True" {
+				return nil
+			}
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("ClusterDeployment %s did not reach Provisioned within %v", name, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
 		}
 	}
-	return fmt.Errorf("ClusterDeployment %s is not yet Provisioned", name)
 }
 
 func (s *suiteContext) iListProvisionedClusters(ctx context.Context) error {
@@ -109,8 +122,11 @@ func (s *suiteContext) iDestroyCluster(ctx context.Context, name string) error {
 
 func (s *suiteContext) clusterDeploymentRemoved(ctx context.Context, name string) error {
 	_, err := s.client.Get(ctx, client.GVRClusterDeployment, name, name)
-	if err != nil {
-		return nil
+	if err == nil {
+		return fmt.Errorf("ClusterDeployment %s still exists", name)
 	}
-	return fmt.Errorf("ClusterDeployment %s still exists", name)
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("unexpected error checking ClusterDeployment %s: %w", name, err)
+	}
+	return nil
 }
