@@ -16,10 +16,5 @@ func (m *Manager) Backup(ctx context.Context, clusterName, outputDir string) err
 		return nil
 	}
 
-	if outputDir == "" {
-		outputDir = fmt.Sprintf("./decommission-backups/%s", clusterName)
-	}
-
-	state.BackupPath = outputDir
-	return setState(ctx, m.client, state)
+	return fmt.Errorf("backup not implemented: real cluster state export required before proceeding")
 }

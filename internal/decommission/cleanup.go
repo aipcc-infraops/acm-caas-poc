@@ -2,6 +2,7 @@ package decommission
 
 import (
 	"context"
+	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -20,6 +21,10 @@ func (m *Manager) Delete(ctx context.Context, clusterName string) (bool, error) 
 			return true, err
 		}
 		return true, nil
+	}
+
+	if !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("cannot determine cluster type (permissions or connectivity failure): %w", err)
 	}
 
 	if err := m.client.Delete(ctx, client.GVRManagedCluster, "", clusterName); err != nil && !apierrors.IsNotFound(err) {
