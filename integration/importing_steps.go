@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"strings"
 
+	"os"
+
 	"github.com/cucumber/godog"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/importing"
@@ -23,15 +26,25 @@ func registerImportingSteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^I get the import status of "([^"]*)"$`, s.iGetImportStatus)
 	sc.Step(`^I receive availability and join state$`, s.receiveAvailabilityAndJoinState)
 	sc.Step(`^I list all imported clusters$`, s.iListAllImportedClusters)
-	sc.Step(`^the list includes "([^"]*)"$`, s.importListIncludes)
+	sc.Step(`^the imported list includes "([^"]*)"$`, s.importListIncludes)
 	sc.Step(`^I detach cluster "([^"]*)"$`, s.iDetachCluster)
 	sc.Step(`^the ManagedCluster "([^"]*)" is removed from the hub$`, s.managedClusterRemovedFromHub)
 }
 
-func (s *suiteContext) iHaveKubeconfigForCluster(_ string) error {
-	if s.cfg.Kubeconfig == "" {
-		return fmt.Errorf("no kubeconfig configured")
+func (s *suiteContext) iHaveKubeconfigForCluster(name string) error {
+	envKey := fmt.Sprintf("IMPORT_KUBECONFIG_%s", strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+	path := os.Getenv(envKey)
+	if path == "" {
+		path = os.Getenv("IMPORT_KUBECONFIG")
 	}
+	if path == "" {
+		return fmt.Errorf("set %s or IMPORT_KUBECONFIG to the external cluster kubeconfig path", envKey)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading kubeconfig from %s: %w", path, err)
+	}
+	s.importKubeconfig = data
 	return nil
 }
 
@@ -44,8 +57,9 @@ func (s *suiteContext) iImportClusterWithLabels(ctx context.Context, name, label
 		}
 	}
 	_, err := s.importing.Import(ctx, importing.ImportOptions{
-		Name:   name,
-		Labels: labels,
+		Name:       name,
+		Labels:     labels,
+		Kubeconfig: s.importKubeconfig,
 	})
 	return err
 }
@@ -126,8 +140,11 @@ func (s *suiteContext) iDetachCluster(ctx context.Context, name string) error {
 
 func (s *suiteContext) managedClusterRemovedFromHub(ctx context.Context, name string) error {
 	_, err := s.client.Get(ctx, client.GVRManagedCluster, "", name)
-	if err != nil {
-		return nil
+	if err == nil {
+		return fmt.Errorf("ManagedCluster %s still exists", name)
 	}
-	return fmt.Errorf("ManagedCluster %s still exists", name)
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("unexpected error checking ManagedCluster %s: %w", name, err)
+	}
+	return nil
 }

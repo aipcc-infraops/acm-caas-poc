@@ -60,6 +60,7 @@ type suiteContext struct {
 	lifecycleNamespace     string
 	lastManifestWorkName   string
 	lastManifestWorkNS     string
+	importKubeconfig       []byte
 }
 
 func TestFeatures(t *testing.T) {
@@ -92,6 +93,20 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 	sc.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		s.err = nil
+		s.policyInfo = nil
+		s.policies = nil
+		s.tenants = nil
+		s.manifestStatus = nil
+		s.importStatus = nil
+		s.importList = nil
+		s.importKubeconfig = nil
+		s.clusters = nil
+		s.cluster = nil
+		s.powerState = ""
+		s.lifecycleCluster = ""
+		s.lifecycleNamespace = ""
+		s.lastManifestWorkName = ""
+		s.lastManifestWorkNS = ""
 		return ctx, nil
 	})
 
