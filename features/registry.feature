@@ -1,3 +1,4 @@
+@core
 Feature: Registry mirror for restricted-registry clusters
   As a platform operator
   I want to configure image registry mirrors for clusters with restricted access

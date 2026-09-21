@@ -4,6 +4,7 @@
 # I want to hibernate and resume clusters programmatically
 # So that the ComputeRequest controller can implement idle reclamation
 
+@core
 Feature: Cluster power management via Hive Go API
 
   Background:
