@@ -8,20 +8,24 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 )
 
-func (m *Manager) Delete(ctx context.Context, clusterName string) error {
+// Delete removes the cluster from ACM. For Hive-provisioned clusters it deletes
+// the ClusterDeployment (which triggers infrastructure destruction). For imported
+// clusters it only detaches from ACM — the external infrastructure is not managed.
+// Returns true if it was a Hive cluster (infrastructure destroyed), false if imported.
+func (m *Manager) Delete(ctx context.Context, clusterName string) (bool, error) {
 	m.logger.Info("decommission.Delete", "cluster", clusterName)
 	_, err := m.client.Get(ctx, client.GVRClusterDeployment, clusterName, clusterName)
 	if err == nil {
 		if err := m.client.Delete(ctx, client.GVRClusterDeployment, clusterName, clusterName); err != nil && !apierrors.IsNotFound(err) {
-			return err
+			return true, err
 		}
-		return nil
+		return true, nil
 	}
 
 	if err := m.client.Delete(ctx, client.GVRManagedCluster, "", clusterName); err != nil && !apierrors.IsNotFound(err) {
-		return err
+		return false, err
 	}
-	return nil
+	return false, nil
 }
 
 func (m *Manager) Cleanup(ctx context.Context, clusterName string) error {

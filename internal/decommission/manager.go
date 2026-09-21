@@ -79,10 +79,15 @@ func (m *Manager) Advance(ctx context.Context, clusterName string) (*Decommissio
 		}
 		msg = "Worker nodes drained"
 	case PhaseDeleted:
-		if err := m.Delete(ctx, clusterName); err != nil {
+		hive, err := m.Delete(ctx, clusterName)
+		if err != nil {
 			return state, err
 		}
-		msg = "Cluster infrastructure deleted"
+		if hive {
+			msg = "Cluster infrastructure deleted"
+		} else {
+			msg = "Cluster detached from ACM (external infrastructure not managed)"
+		}
 	case PhaseCleaned:
 		if err := m.Cleanup(ctx, clusterName); err != nil {
 			return state, err
