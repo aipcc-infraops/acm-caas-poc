@@ -2,6 +2,7 @@ package decommission
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -12,8 +13,7 @@ func (m *Manager) Drain(ctx context.Context, clusterName string, timeout time.Du
 	if timeout == 0 {
 		timeout = defaultDrainTimeout
 	}
-	_ = timeout
-	return nil
+	return fmt.Errorf("drain not implemented: real node drain required before cluster deletion")
 }
 
 func (m *Manager) Notify(ctx context.Context, clusterName, owner, deadline string) error {
@@ -25,12 +25,5 @@ func (m *Manager) Notify(ctx context.Context, clusterName, owner, deadline strin
 	if state.NotifiedAt != "" {
 		return nil
 	}
-	state.NotifiedAt = time.Now().UTC().Format(time.RFC3339)
-	if owner != "" {
-		state.Owner = owner
-	}
-	if deadline != "" {
-		state.Deadline = deadline
-	}
-	return setState(ctx, m.client, state)
+	return fmt.Errorf("notify not implemented: owner notification and acknowledgement required before proceeding")
 }
