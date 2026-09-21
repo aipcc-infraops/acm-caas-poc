@@ -8,13 +8,14 @@ import (
 
 	"github.com/cucumber/godog"
 
+	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/policy"
 )
 
 func registerPolicySteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^I apply policy "([^"]*)" with registries "([^"]*)"$`, s.iApplyPolicy)
 	sc.Step(`^the policy "([^"]*)" exists on the hub$`, s.policyExistsOnHub)
-	sc.Step(`^the policy has a PlacementRule and PlacementBinding$`, s.policyHasBindings)
+	sc.Step(`^the policy has a Placement and PlacementBinding$`, s.policyHasBindings)
 	sc.Step(`^policy "([^"]*)" exists$`, s.policyExists)
 	sc.Step(`^I list all policies$`, s.iListAllPolicies)
 	sc.Step(`^the list includes "([^"]*)"$`, s.listIncludesPolicy)
@@ -24,7 +25,7 @@ func registerPolicySteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^the policy remediation is "([^"]*)"$`, s.policyRemediationIs)
 	sc.Step(`^I remove policy "([^"]*)"$`, s.iRemovePolicy)
 	sc.Step(`^the policy "([^"]*)" no longer exists$`, s.policyNoLongerExists)
-	sc.Step(`^the PlacementRule and PlacementBinding are removed$`, s.bindingsRemoved)
+	sc.Step(`^the Placement and PlacementBinding are removed$`, s.bindingsRemoved)
 }
 
 func (s *suiteContext) iApplyPolicy(ctx context.Context, name, registries string) error {
@@ -45,9 +46,17 @@ func (s *suiteContext) policyExistsOnHub(ctx context.Context, name string) error
 	return nil
 }
 
-func (s *suiteContext) policyHasBindings() error {
+func (s *suiteContext) policyHasBindings(ctx context.Context) error {
 	if s.policyInfo == nil {
 		return fmt.Errorf("no policy info available")
+	}
+	name := s.policyInfo.Name
+	ns := "default"
+	if _, err := s.client.Get(ctx, client.GVRPlacement, ns, name); err != nil {
+		return fmt.Errorf("Placement %s/%s not found: %w", ns, name, err)
+	}
+	if _, err := s.client.Get(ctx, client.GVRPlacementBinding, ns, name); err != nil {
+		return fmt.Errorf("PlacementBinding %s/%s not found: %w", ns, name, err)
 	}
 	return nil
 }
@@ -125,6 +134,17 @@ func (s *suiteContext) policyNoLongerExists(ctx context.Context, name string) er
 	return fmt.Errorf("policy %s still exists", name)
 }
 
-func (s *suiteContext) bindingsRemoved() error {
+func (s *suiteContext) bindingsRemoved(ctx context.Context) error {
+	if s.policyInfo == nil {
+		return fmt.Errorf("no policy info available")
+	}
+	name := s.policyInfo.Name
+	ns := "default"
+	if _, err := s.client.Get(ctx, client.GVRPlacement, ns, name); err == nil {
+		return fmt.Errorf("Placement %s/%s still exists", ns, name)
+	}
+	if _, err := s.client.Get(ctx, client.GVRPlacementBinding, ns, name); err == nil {
+		return fmt.Errorf("PlacementBinding %s/%s still exists", ns, name)
+	}
 	return nil
 }

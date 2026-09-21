@@ -44,6 +44,8 @@ func (s *suiteContext) clusterDeploymentExists(ctx context.Context, name, ns str
 	if !supported {
 		return fmt.Errorf("no ClusterDeployment found for %s/%s", ns, name)
 	}
+	s.lifecycleCluster = name
+	s.lifecycleNamespace = ns
 	return nil
 }
 
@@ -52,11 +54,12 @@ func (s *suiteContext) clusterDeploymentHasPowerState(ctx context.Context, state
 }
 
 func (s *suiteContext) iPatchPowerState(ctx context.Context, state string) error {
+	ns, name := s.lifecycleNamespace, s.lifecycleCluster
 	switch lifecycle.PowerState(state) {
 	case lifecycle.PowerStateHibernating:
-		s.err = s.lifecycle.Hibernate(ctx, "spoke2", "spoke2")
+		s.err = s.lifecycle.Hibernate(ctx, ns, name)
 	case lifecycle.PowerStateRunning:
-		s.err = s.lifecycle.Resume(ctx, "spoke2", "spoke2")
+		s.err = s.lifecycle.Resume(ctx, ns, name)
 	default:
 		return fmt.Errorf("unknown power state: %s", state)
 	}
@@ -64,7 +67,7 @@ func (s *suiteContext) iPatchPowerState(ctx context.Context, state string) error
 }
 
 func (s *suiteContext) statusShowsPowerState(ctx context.Context, expected string) error {
-	state, err := s.lifecycle.GetPowerStateStatus(ctx, "spoke2", "spoke2")
+	state, err := s.lifecycle.GetPowerStateStatus(ctx, s.lifecycleNamespace, s.lifecycleCluster)
 	if err != nil {
 		return err
 	}
@@ -140,7 +143,7 @@ func (s *suiteContext) iWaitForPowerState(ctx context.Context, state string, amo
 	if unit == "m" {
 		timeout = time.Duration(amount) * time.Minute
 	}
-	s.err = s.lifecycle.WaitForPowerState(ctx, "spoke2", "spoke2", lifecycle.PowerState(state), timeout)
+	s.err = s.lifecycle.WaitForPowerState(ctx, s.lifecycleNamespace, s.lifecycleCluster, lifecycle.PowerState(state), timeout)
 	return nil
 }
 
@@ -149,17 +152,17 @@ func (s *suiteContext) waitCompletesSuccessfully() error {
 }
 
 func (s *suiteContext) iHibernateAgain(ctx context.Context) error {
-	s.err = s.lifecycle.Hibernate(ctx, "spoke2", "spoke2")
+	s.err = s.lifecycle.Hibernate(ctx, s.lifecycleNamespace, s.lifecycleCluster)
 	return nil
 }
 
 func (s *suiteContext) iResumeAgain(ctx context.Context) error {
-	s.err = s.lifecycle.Resume(ctx, "spoke2", "spoke2")
+	s.err = s.lifecycle.Resume(ctx, s.lifecycleNamespace, s.lifecycleCluster)
 	return nil
 }
 
 func (s *suiteContext) powerStateRemains(ctx context.Context, expected string) error {
-	state, err := s.lifecycle.GetPowerState(ctx, "spoke2", "spoke2")
+	state, err := s.lifecycle.GetPowerState(ctx, s.lifecycleNamespace, s.lifecycleCluster)
 	if err != nil {
 		return err
 	}

@@ -1,3 +1,4 @@
+@core
 Feature: External cluster import into ACM
   As a platform operator
   I want to import clusters not provisioned by ACM

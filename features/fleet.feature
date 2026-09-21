@@ -1,3 +1,4 @@
+@core
 Feature: Fleet-wide observability from the hub
   As a platform operator
   I want to query cluster health programmatically

@@ -29,6 +29,9 @@ func registerImportingSteps(sc *godog.ScenarioContext, s *suiteContext) {
 }
 
 func (s *suiteContext) iHaveKubeconfigForCluster(_ string) error {
+	if s.cfg.Kubeconfig == "" {
+		return fmt.Errorf("no kubeconfig configured")
+	}
 	return nil
 }
 
@@ -64,6 +67,10 @@ func (s *suiteContext) klusterletAddonConfigExists(ctx context.Context, ns strin
 }
 
 func (s *suiteContext) autoImportSecretExists(ctx context.Context, ns string) error {
+	_, err := s.client.Get(ctx, client.GVRSecret, ns, "auto-import-secret")
+	if err != nil {
+		return fmt.Errorf("auto-import-secret not found in %s: %w", ns, err)
+	}
 	return nil
 }
 

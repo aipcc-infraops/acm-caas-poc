@@ -32,6 +32,11 @@ tasks:
     cmds:
       - go test ./integration/... -tags=integration -v
 
+  test:integration:compile:
+    desc: Compile integration tests without running (CI gate)
+    cmds:
+      - go test -tags=integration -run ^$ ./integration/...
+
   lint:
     desc: Run go vet
     cmds:
