@@ -83,37 +83,37 @@ func (m *Manager) BestClusterWithTimeout(ctx context.Context, gpuType string, ti
 	}
 	tempName := fmt.Sprintf("gpu-best-%s-%s", gpuType, suffix)
 
-	if err := m.CreateGPUPlacement(ctx, tempName, gpuType, ""); err != nil {
+	opCtx, opCancel := context.WithTimeout(ctx, timeout)
+	defer opCancel()
+
+	if err := m.CreateGPUPlacement(opCtx, tempName, gpuType, ""); err != nil {
 		return "", fmt.Errorf("creating temporary placement: %w", err)
 	}
 	defer func() {
-		_ = m.client.DeleteIfExists(ctx, client.GVRPlacement, DefaultNamespace, tempName)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = m.client.DeleteIfExists(cleanupCtx, client.GVRPlacement, DefaultNamespace, tempName)
 	}()
 
-	deadline := time.After(timeout)
 	interval := 500 * time.Millisecond
 	for {
-		results, err := m.GetPlacementDecision(ctx, tempName)
+		results, hasObj, err := m.queryPlacementDecision(opCtx, tempName)
 		if err != nil {
 			return "", fmt.Errorf("reading placement decision: %w", err)
 		}
-		if results != nil && len(results) > 0 {
+		if len(results) > 0 {
 			return results[0].ClusterName, nil
 		}
-
-		hasDecisionObj, err := m.hasPlacementDecisionObject(ctx, tempName)
-		if err != nil {
-			return "", fmt.Errorf("checking placement decision existence: %w", err)
-		}
-		if hasDecisionObj {
+		if hasObj {
 			return "", ErrGPUNoMatch
 		}
 
 		select {
-		case <-deadline:
+		case <-opCtx.Done():
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
 			return "", ErrGPUPending
-		case <-ctx.Done():
-			return "", ctx.Err()
 		case <-time.After(interval):
 			if interval < 4*time.Second {
 				interval *= 2
@@ -122,13 +122,15 @@ func (m *Manager) BestClusterWithTimeout(ctx context.Context, gpuType string, ti
 	}
 }
 
-func (m *Manager) hasPlacementDecisionObject(ctx context.Context, placementName string) (bool, error) {
+func (m *Manager) queryPlacementDecision(ctx context.Context, placementName string) ([]PlacementResult, bool, error) {
 	selector := fmt.Sprintf("cluster.open-cluster-management.io/placement=%s", placementName)
 	list, err := m.client.List(ctx, client.GVRPlacementDecision, DefaultNamespace, selector)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	return len(list.Items) > 0, nil
+	hasObj := len(list.Items) > 0
+	results := parsePlacementDecisions(list)
+	return results, hasObj, nil
 }
 
 func randomSuffix() (string, error) {
