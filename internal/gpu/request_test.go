@@ -363,6 +363,43 @@ func TestRetryRequestNotPending(t *testing.T) {
 	}
 }
 
+func TestRetryRequestCompletedNotOverwritten(t *testing.T) {
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
+	mgr.reqTimeout = 500 * time.Millisecond
+	ctx := context.Background()
+
+	seedRequest(mgr, validRequest())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		time.Sleep(50 * time.Millisecond)
+		mgr.mu.Lock()
+		stored := mgr.reqs["req-001"]
+		stored.State = RequestStateAdmitted
+		stored.Cluster = "gpu1"
+		mgr.mu.Unlock()
+		_ = mgr.StartRequest(ctx, "req-001")
+		_ = mgr.CompleteRequest(ctx, "req-001")
+	}()
+
+	go simulatePlacementDecisions(ctx, mgr, "gpu1")
+
+	result, err := mgr.RetryRequest(ctx, "req-001")
+	<-done
+	if err != nil {
+		t.Fatalf("RetryRequest failed: %v", err)
+	}
+	if result.Admitted {
+		t.Error("late routing must not admit a completed request")
+	}
+
+	status, _ := mgr.GetRequestStatus(ctx, "req-001")
+	if status.State != RequestStateCompleted {
+		t.Errorf("state = %q, want Completed", status.State)
+	}
+}
+
 func TestRetryRequestNotFound(t *testing.T) {
 	mgr := newRequestTestManager()
 	_, err := mgr.RetryRequest(context.Background(), "nonexistent")
