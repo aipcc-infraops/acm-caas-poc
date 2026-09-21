@@ -405,9 +405,12 @@ func TestDeleteHiveCluster(t *testing.T) {
 	objs = append(objs, cd)
 	m := newTestManager(objs...)
 
-	err := m.Delete(context.Background(), "spoke1")
+	hive, err := m.Delete(context.Background(), "spoke1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
+	}
+	if !hive {
+		t.Error("Delete should report Hive cluster")
 	}
 
 	_, err = m.client.Get(context.Background(), client.GVRClusterDeployment, "spoke1", "spoke1")
@@ -420,9 +423,12 @@ func TestDeleteImportedCluster(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 
-	err := m.Delete(context.Background(), "spoke1")
+	hive, err := m.Delete(context.Background(), "spoke1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
+	}
+	if hive {
+		t.Error("Delete should report imported cluster")
 	}
 
 	_, err = m.client.Get(context.Background(), client.GVRManagedCluster, "", "spoke1")
@@ -433,7 +439,7 @@ func TestDeleteImportedCluster(t *testing.T) {
 
 func TestDeleteIdempotent(t *testing.T) {
 	m := newTestManager()
-	err := m.Delete(context.Background(), "nonexistent")
+	_, err := m.Delete(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("Delete should be idempotent: %v", err)
 	}
@@ -469,7 +475,7 @@ func TestDeleteWithClusterDeploymentDeleteError(t *testing.T) {
 	m := newTestManager(objs...)
 
 	m.Delete(context.Background(), "spoke1")
-	err := m.Delete(context.Background(), "spoke1")
+	_, err := m.Delete(context.Background(), "spoke1")
 	if err != nil {
 		t.Fatalf("Delete should handle already-deleted CD: %v", err)
 	}
