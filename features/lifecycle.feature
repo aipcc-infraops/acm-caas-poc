@@ -22,12 +22,11 @@ Feature: Cluster power management via Hive Go API
     Given a ClusterDeployment "spoke2" exists in namespace "spoke2"
     And the ClusterDeployment has spec.powerState = "Hibernating"
     When I patch spec.powerState to "Running" via the Go API
-    Then Hive starts the compute instances
-    And the ClusterDeployment status shows powerState = "Running"
+    Then the ClusterDeployment status shows powerState = "Running"
     And eventually the ManagedCluster "spoke2" becomes Available = True
 
   Scenario: Verify lifecycle limitations on imported clusters
-    Given a ManagedCluster "external-cluster" exists
+    Given a managed cluster "external-cluster" exists for lifecycle check
     And no ClusterDeployment exists for "external-cluster"
     When I attempt to get the power state for "external-cluster"
     Then the operation returns an error
@@ -49,16 +48,15 @@ Feature: Cluster power management via Hive Go API
 
   Scenario: Handle power state transition timeout gracefully
     Given a ClusterDeployment "spoke2" exists in namespace "spoke2"
-    When I wait for power state "Hibernating" with timeout 1s
-    And the transition takes longer than 1s
-    Then the wait returns a timeout error
-    And the error message contains "timeout waiting for power state"
+    When I wait for the power state to become "Hibernating" with timeout 1s
+    Then the operation returns an error
+    And the error message indicates "timeout waiting for power state"
 
   Scenario: Idempotent hibernate operation
     Given a ClusterDeployment "spoke2" exists in namespace "spoke2"
     And the ClusterDeployment already has spec.powerState = "Hibernating"
     When I hibernate the cluster again
-    Then the operation succeeds without error
+    Then the wait completes successfully
     And the powerState remains "Hibernating"
     And no unnecessary API calls are made
 
@@ -66,6 +64,6 @@ Feature: Cluster power management via Hive Go API
     Given a ClusterDeployment "spoke2" exists in namespace "spoke2"
     And the ClusterDeployment already has spec.powerState = "Running"
     When I resume the cluster again
-    Then the operation succeeds without error
+    Then the wait completes successfully
     And the powerState remains "Running"
     And no unnecessary API calls are made

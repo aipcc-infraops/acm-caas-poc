@@ -5,10 +5,13 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
 )
 
@@ -34,6 +37,7 @@ func registerLifecycleSteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^the powerState remains "([^"]*)"$`, s.powerStateRemains)
 	sc.Step(`^no unnecessary API calls are made$`, s.noUnnecessaryAPICalls)
 	sc.Step(`^the ClusterDeployment already has spec\.powerState = "([^"]*)"$`, s.clusterDeploymentHasPowerState)
+	sc.Step(`^a managed cluster "([^"]*)" exists for lifecycle check$`, s.aManagedClusterExistsLifecycle)
 }
 
 func (s *suiteContext) clusterDeploymentExists(ctx context.Context, name, ns string) error {
@@ -50,6 +54,13 @@ func (s *suiteContext) clusterDeploymentExists(ctx context.Context, name, ns str
 }
 
 func (s *suiteContext) clusterDeploymentHasPowerState(ctx context.Context, state string) error {
+	current, err := s.lifecycle.GetPowerState(ctx, s.lifecycleNamespace, s.lifecycleCluster)
+	if err != nil {
+		return fmt.Errorf("getting power state: %w", err)
+	}
+	if string(current) != state {
+		return fmt.Errorf("power state = %s, want %s", current, state)
+	}
 	return nil
 }
 
@@ -77,8 +88,27 @@ func (s *suiteContext) statusShowsPowerState(ctx context.Context, expected strin
 	return nil
 }
 
-func (s *suiteContext) availableTransitions(_, _ string) error {
-	return nil
+func (s *suiteContext) availableTransitions(ctx context.Context, expected1, expected2 string) error {
+	mc, err := s.client.Get(ctx, client.GVRManagedCluster, "", s.lifecycleCluster)
+	if err != nil {
+		return fmt.Errorf("getting ManagedCluster %s: %w", s.lifecycleCluster, err)
+	}
+	conditions, _, _ := unstructured.NestedSlice(mc.Object, "status", "conditions")
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		condType, _ := cond["type"].(string)
+		condStatus, _ := cond["status"].(string)
+		if condType == "ManagedClusterConditionAvailable" {
+			if condStatus == expected1 || condStatus == expected2 {
+				return nil
+			}
+			return fmt.Errorf("Available condition = %s, want %s or %s", condStatus, expected1, expected2)
+		}
+	}
+	return fmt.Errorf("ManagedCluster %s has no Available condition", s.lifecycleCluster)
 }
 
 func (s *suiteContext) eventuallyAvailable(ctx context.Context, name string) error {
@@ -108,6 +138,9 @@ func (s *suiteContext) operationReturnsError() error {
 func (s *suiteContext) errorMessageIndicates(msg string) error {
 	if s.err == nil {
 		return fmt.Errorf("no error to check")
+	}
+	if !strings.Contains(s.err.Error(), msg) {
+		return fmt.Errorf("error %q does not contain %q", s.err.Error(), msg)
 	}
 	return nil
 }
@@ -172,6 +205,15 @@ func (s *suiteContext) powerStateRemains(ctx context.Context, expected string) e
 	return nil
 }
 
+func (s *suiteContext) aManagedClusterExistsLifecycle(ctx context.Context, name string) error {
+	_, err := s.client.Get(ctx, client.GVRManagedCluster, "", name)
+	if err != nil {
+		return fmt.Errorf("ManagedCluster %s not found: %w", name, err)
+	}
+	return nil
+}
+
+// Verification not feasible without request-level auditing
 func (s *suiteContext) noUnnecessaryAPICalls() error {
 	return nil
 }
