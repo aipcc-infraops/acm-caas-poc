@@ -25,7 +25,14 @@ func registerProvisioningSteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^the ClusterDeployment "([^"]*)" is removed$`, s.clusterDeploymentRemoved)
 }
 
-func (s *suiteContext) cloudCredentialsExist(_ string) error {
+func (s *suiteContext) cloudCredentialsExist(ctx context.Context, ns string) error {
+	list, err := s.client.List(ctx, client.GVRSecret, ns, "")
+	if err != nil {
+		return fmt.Errorf("listing secrets in %s: %w", ns, err)
+	}
+	if len(list.Items) == 0 {
+		return fmt.Errorf("no secrets found in namespace %s", ns)
+	}
 	return nil
 }
 
@@ -51,8 +58,28 @@ func (s *suiteContext) clusterDeploymentAccepted(ctx context.Context, name strin
 	return err
 }
 
-func (s *suiteContext) clusterReachesProvisioned(_ string) error {
-	return godog.ErrPending
+func (s *suiteContext) clusterReachesProvisioned(ctx context.Context, name string) error {
+	obj, err := s.client.Get(ctx, client.GVRClusterDeployment, name, name)
+	if err != nil {
+		return fmt.Errorf("ClusterDeployment %s not found: %w", name, err)
+	}
+	status, _ := obj.Object["status"].(map[string]interface{})
+	if status == nil {
+		return fmt.Errorf("ClusterDeployment %s has no status", name)
+	}
+	conditions, _ := status["conditions"].([]interface{})
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		condType, _ := cond["type"].(string)
+		condStatus, _ := cond["status"].(string)
+		if condType == "Provisioned" && condStatus == "True" {
+			return nil
+		}
+	}
+	return fmt.Errorf("ClusterDeployment %s is not yet Provisioned", name)
 }
 
 func (s *suiteContext) iListProvisionedClusters(ctx context.Context) error {

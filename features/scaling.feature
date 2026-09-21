@@ -1,3 +1,4 @@
+@core
 Feature: Cluster worker node scaling via Hive MachinePool
   As a platform operator
   I want to scale worker nodes in managed clusters from the hub

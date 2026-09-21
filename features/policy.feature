@@ -1,3 +1,4 @@
+@core
 Feature: Governance policy management
   As a platform operator
   I want to restrict container images to approved registries

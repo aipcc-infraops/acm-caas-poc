@@ -1,3 +1,4 @@
+@core
 Feature: Tenant RBAC isolation via ManifestWork
   As a platform operator
   I want to deploy tenant isolation resources to spoke clusters
