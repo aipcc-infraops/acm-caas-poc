@@ -42,6 +42,8 @@ var (
 	ErrDuplicateRequest   = errors.New("request with this ID already exists")
 	ErrRequestTerminal    = errors.New("request is in a terminal state")
 	ErrRequestCancelled   = errors.New("request has been cancelled")
+	ErrRequestNotPending  = errors.New("request is not in Pending state")
+	ErrRequestNotAdmitted = errors.New("only Admitted requests can transition to Running")
 )
 
 func (m *Manager) SubmitRequest(ctx context.Context, req GPURequest) (*AdmissionResult, error) {
@@ -73,20 +75,30 @@ func (m *Manager) SubmitRequest(ctx context.Context, req GPURequest) (*Admission
 
 	m.logger.Info("gpu.SubmitRequest", "id", req.ID, "tenant", req.Tenant, "gpuType", req.GPUType)
 
-	cluster, err := m.BestClusterWithTimeout(ctx, req.GPUType, m.requestTimeout())
-	if err != nil {
-		m.mu.Lock()
-		defer m.mu.Unlock()
+	cluster, routeErr := m.BestClusterWithTimeout(ctx, req.GPUType, m.requestTimeout())
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stored := m.reqs[req.ID]
+	if stored.State == RequestStateCancelled {
+		return &AdmissionResult{
+			Admitted: false,
+			Reason:   "request cancelled during routing",
+			State:    RequestStateCancelled,
+		}, nil
+	}
+
+	if routeErr != nil {
 		reason := "placement pending"
-		if errors.Is(err, ErrGPUNoMatch) {
+		if errors.Is(routeErr, ErrGPUNoMatch) {
 			reason = "no matching cluster"
-		} else if !errors.Is(err, ErrGPUPending) {
-			return nil, fmt.Errorf("routing request: %w", err)
+		} else if !errors.Is(routeErr, ErrGPUPending) {
+			return nil, fmt.Errorf("routing request: %w", routeErr)
 		}
 
-		m.reqs[req.ID].Reason = reason
-		m.reqs[req.ID].UpdatedAt = time.Now()
+		stored.Reason = reason
+		stored.UpdatedAt = time.Now()
 		return &AdmissionResult{
 			Admitted: false,
 			Reason:   reason,
@@ -94,11 +106,9 @@ func (m *Manager) SubmitRequest(ctx context.Context, req GPURequest) (*Admission
 		}, nil
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reqs[req.ID].State = RequestStateAdmitted
-	m.reqs[req.ID].Cluster = cluster
-	m.reqs[req.ID].UpdatedAt = time.Now()
+	stored.State = RequestStateAdmitted
+	stored.Cluster = cluster
+	stored.UpdatedAt = time.Now()
 
 	return &AdmissionResult{
 		Admitted: true,
@@ -138,6 +148,80 @@ func (m *Manager) CancelRequest(_ context.Context, requestID string) error {
 	return nil
 }
 
+func (m *Manager) RetryRequest(ctx context.Context, requestID string) (*AdmissionResult, error) {
+	m.mu.Lock()
+	req, ok := m.reqs[requestID]
+	if !ok {
+		m.mu.Unlock()
+		return nil, ErrRequestNotFound
+	}
+	if req.State != RequestStatePending {
+		m.mu.Unlock()
+		return nil, ErrRequestNotPending
+	}
+	gpuType := req.GPUType
+	m.mu.Unlock()
+
+	m.logger.Info("gpu.RetryRequest", "id", requestID, "gpuType", gpuType)
+
+	cluster, routeErr := m.BestClusterWithTimeout(ctx, gpuType, m.requestTimeout())
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stored := m.reqs[requestID]
+	if stored.State == RequestStateCancelled {
+		return &AdmissionResult{
+			Admitted: false,
+			Reason:   "request cancelled during routing",
+			State:    RequestStateCancelled,
+		}, nil
+	}
+
+	if routeErr != nil {
+		reason := "placement pending"
+		if errors.Is(routeErr, ErrGPUNoMatch) {
+			reason = "no matching cluster"
+		} else if !errors.Is(routeErr, ErrGPUPending) {
+			return nil, fmt.Errorf("routing request: %w", routeErr)
+		}
+		stored.Reason = reason
+		stored.UpdatedAt = time.Now()
+		return &AdmissionResult{
+			Admitted: false,
+			Reason:   reason,
+			State:    RequestStatePending,
+		}, nil
+	}
+
+	stored.State = RequestStateAdmitted
+	stored.Cluster = cluster
+	stored.Reason = ""
+	stored.UpdatedAt = time.Now()
+	return &AdmissionResult{
+		Admitted: true,
+		Cluster:  cluster,
+		State:    RequestStateAdmitted,
+	}, nil
+}
+
+func (m *Manager) StartRequest(_ context.Context, requestID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	req, ok := m.reqs[requestID]
+	if !ok {
+		return ErrRequestNotFound
+	}
+	if req.State != RequestStateAdmitted {
+		return ErrRequestNotAdmitted
+	}
+
+	req.State = RequestStateRunning
+	req.UpdatedAt = time.Now()
+	return nil
+}
+
 func (m *Manager) CompleteRequest(_ context.Context, requestID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -149,6 +233,9 @@ func (m *Manager) CompleteRequest(_ context.Context, requestID string) error {
 
 	if req.State == RequestStateCancelled {
 		return ErrRequestCancelled
+	}
+	if req.State != RequestStateRunning && req.State != RequestStateAdmitted {
+		return fmt.Errorf("cannot complete request in %s state", req.State)
 	}
 
 	req.State = RequestStateCompleted
