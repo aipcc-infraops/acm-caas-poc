@@ -8,13 +8,22 @@ func buildClusterCurator(opts CuratorOpts) *unstructured.Unstructured {
 		ns = opts.Cluster
 	}
 
-	spec := map[string]interface{}{}
+	operation := opts.Operation
+	if operation == "" {
+		operation = "install"
+	}
 
+	opSpec := map[string]interface{}{}
 	if opts.PreHook != nil {
-		spec["prehook"] = []interface{}{buildHookSpec(opts.PreHook)}
+		opSpec["prehook"] = []interface{}{buildHookSpec(opts.PreHook)}
 	}
 	if opts.PostHook != nil {
-		spec["posthook"] = []interface{}{buildHookSpec(opts.PostHook)}
+		opSpec["posthook"] = []interface{}{buildHookSpec(opts.PostHook)}
+	}
+
+	spec := map[string]interface{}{
+		"desiredCuration": operation,
+		operation:         opSpec,
 	}
 
 	return &unstructured.Unstructured{

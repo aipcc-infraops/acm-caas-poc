@@ -20,8 +20,9 @@ Feature: ClusterPool and ClusterClaim for pre-warmed clusters (UC-25)
     Then a ClusterClaim "my-test" is created and bound in seconds
     And Hive provisions a replacement cluster to maintain pool size
 
-  Scenario: Release a claim back to the pool
+  Scenario: Release a claim and observe cluster destruction
     Given I have a claimed cluster "my-test"
     When I run "acmlab claim release my-test"
     Then the ClusterClaim is deleted
-    And the cluster is returned to the pool
+    And the claimed cluster is destroyed by Hive
+    And Hive provisions a replacement to maintain pool size
