@@ -10,7 +10,7 @@ Feature: Governance policy management
   Scenario: Create an image registry restriction policy
     When I apply policy "test-registry-policy" with registries "registry.redhat.io,quay.io"
     Then the policy "test-registry-policy" exists on the hub
-    And the policy has a PlacementRule and PlacementBinding
+    And the policy has a Placement and PlacementBinding
 
   Scenario: List governance policies
     Given policy "test-registry-policy" exists
@@ -31,4 +31,4 @@ Feature: Governance policy management
     Given policy "test-registry-policy" exists
     When I remove policy "test-registry-policy"
     Then the policy "test-registry-policy" no longer exists
-    And the PlacementRule and PlacementBinding are removed
+    And the Placement and PlacementBinding are removed

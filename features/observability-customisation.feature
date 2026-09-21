@@ -11,7 +11,7 @@ Feature: Observability stack customisation (UC-52)
     And the secret is named "multiclusterhub-operator-pull-secret"
 
   Scenario: Configure ObjectBucketClaim storage
-    When I run "acmlab observability configure-storage --storage-class gp3-csi --bucket thanos"
+    When I run "acmlab observability configure-storage --storage-class openshift-storage.noobaa.io-obc --bucket thanos"
     Then an ObjectBucketClaim "observability-obc" is created in the observability namespace
     And the OBC references the specified storage class
 
@@ -52,6 +52,6 @@ Feature: Observability stack customisation (UC-52)
   Scenario: Full observability stack setup with production storage
     Given I run "acmlab observability setup"
     And I run "acmlab observability configure-pull-secret"
-    And I run "acmlab observability configure-storage --storage-class gp3-csi"
+    And I run "acmlab observability configure-storage --storage-class openshift-storage.noobaa.io-obc"
     When I run "acmlab observability status"
     Then the observability stack is ready with production OBC storage
