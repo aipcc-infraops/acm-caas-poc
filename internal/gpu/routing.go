@@ -2,12 +2,21 @@ package gpu
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
+)
+
+var (
+	ErrGPUPending = errors.New("placement decision pending reconciliation")
+	ErrGPUNoMatch = errors.New("no GPU cluster matches the requested type")
 )
 
 type PlacementResult struct {
@@ -62,9 +71,17 @@ func (m *Manager) MarkSaturated(ctx context.Context, cluster string, saturated b
 }
 
 func (m *Manager) BestCluster(ctx context.Context, gpuType string) (string, error) {
+	return m.BestClusterWithTimeout(ctx, gpuType, 30*time.Second)
+}
+
+func (m *Manager) BestClusterWithTimeout(ctx context.Context, gpuType string, timeout time.Duration) (string, error) {
 	m.logger.Info("gpu.BestCluster", "gpuType", gpuType)
 
-	tempName := fmt.Sprintf("gpu-best-%s-tmp", gpuType)
+	suffix, err := randomSuffix()
+	if err != nil {
+		return "", fmt.Errorf("generating unique placement name: %w", err)
+	}
+	tempName := fmt.Sprintf("gpu-best-%s-%s", gpuType, suffix)
 
 	if err := m.CreateGPUPlacement(ctx, tempName, gpuType, ""); err != nil {
 		return "", fmt.Errorf("creating temporary placement: %w", err)
@@ -73,13 +90,51 @@ func (m *Manager) BestCluster(ctx context.Context, gpuType string) (string, erro
 		_ = m.client.DeleteIfExists(ctx, client.GVRPlacement, DefaultNamespace, tempName)
 	}()
 
-	results, err := m.GetPlacementDecision(ctx, tempName)
-	if err != nil {
-		return "", fmt.Errorf("reading placement decision: %w", err)
-	}
-	if len(results) == 0 {
-		return "", fmt.Errorf("no GPU cluster available for type %s", gpuType)
-	}
+	deadline := time.After(timeout)
+	interval := 500 * time.Millisecond
+	for {
+		results, err := m.GetPlacementDecision(ctx, tempName)
+		if err != nil {
+			return "", fmt.Errorf("reading placement decision: %w", err)
+		}
+		if results != nil && len(results) > 0 {
+			return results[0].ClusterName, nil
+		}
 
-	return results[0].ClusterName, nil
+		hasDecisionObj, err := m.hasPlacementDecisionObject(ctx, tempName)
+		if err != nil {
+			return "", fmt.Errorf("checking placement decision existence: %w", err)
+		}
+		if hasDecisionObj {
+			return "", ErrGPUNoMatch
+		}
+
+		select {
+		case <-deadline:
+			return "", ErrGPUPending
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(interval):
+			if interval < 4*time.Second {
+				interval *= 2
+			}
+		}
+	}
+}
+
+func (m *Manager) hasPlacementDecisionObject(ctx context.Context, placementName string) (bool, error) {
+	selector := fmt.Sprintf("cluster.open-cluster-management.io/placement=%s", placementName)
+	list, err := m.client.List(ctx, client.GVRPlacementDecision, DefaultNamespace, selector)
+	if err != nil {
+		return false, err
+	}
+	return len(list.Items) > 0, nil
+}
+
+func randomSuffix() (string, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
