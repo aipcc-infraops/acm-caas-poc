@@ -1,3 +1,4 @@
+@core
 Feature: Cluster resource monitoring from the hub
   As a platform operator
   I want to query cluster resource usage and node status

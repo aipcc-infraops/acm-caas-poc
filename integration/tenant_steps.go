@@ -46,10 +46,38 @@ func (s *suiteContext) manifestWorkExists(ctx context.Context, name, namespace s
 	if err != nil {
 		return fmt.Errorf("ManifestWork %s/%s not found: %w", namespace, name, err)
 	}
+	s.lastManifestWorkName = name
+	s.lastManifestWorkNS = namespace
 	return nil
 }
 
-func (s *suiteContext) manifestWorkContainsResources() error {
+func (s *suiteContext) manifestWorkContainsResources(ctx context.Context) error {
+	name := s.lastManifestWorkName
+	ns := s.lastManifestWorkNS
+	if name == "" {
+		return fmt.Errorf("no ManifestWork name in context — call manifestWorkExists first")
+	}
+	obj, err := s.client.Get(ctx, client.GVRManifestWork, ns, name)
+	if err != nil {
+		return fmt.Errorf("ManifestWork %s/%s not found: %w", ns, name, err)
+	}
+	spec, _ := obj.Object["spec"].(map[string]interface{})
+	workload, _ := spec["workload"].(map[string]interface{})
+	manifests, _ := workload["manifests"].([]interface{})
+
+	required := map[string]bool{"Namespace": false, "RoleBinding": false, "NetworkPolicy": false, "ResourceQuota": false}
+	for _, m := range manifests {
+		entry, _ := m.(map[string]interface{})
+		kind, _ := entry["kind"].(string)
+		if _, ok := required[kind]; ok {
+			required[kind] = true
+		}
+	}
+	for kind, found := range required {
+		if !found {
+			return fmt.Errorf("ManifestWork missing %s", kind)
+		}
+	}
 	return nil
 }
 

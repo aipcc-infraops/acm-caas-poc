@@ -54,18 +54,29 @@ type suiteContext struct {
 	images         []registry.RequiredImage
 	mirrorStatus   *registry.MirrorStatus
 	mirrorScript   string
-	powerState     lifecycle.PowerState
-	provisionList  []provisioning.ClusterInfo
+	powerState         lifecycle.PowerState
+	provisionList      []provisioning.ClusterInfo
+	lifecycleCluster       string
+	lifecycleNamespace     string
+	lastManifestWorkName   string
+	lastManifestWorkNS     string
 }
 
 func TestFeatures(t *testing.T) {
 	_ = godotenv.Load("../.env")
+
+	tags := os.Getenv("GODOG_TAGS")
+	if tags == "" {
+		tags = "@core"
+	}
 
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeScenario,
 		Options: &godog.Options{
 			Format:   "pretty",
 			Paths:    []string{"../features"},
+			Tags:     tags,
+			Strict:   true,
 			Output:   colors.Colored(os.Stdout),
 			TestingT: t,
 		},
