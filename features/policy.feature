@@ -16,7 +16,7 @@ Feature: Governance policy management
   Scenario: List governance policies
     Given policy "test-registry-policy" exists
     When I list all policies
-    Then the list includes "test-registry-policy"
+    Then the policy list includes "test-registry-policy"
 
   Scenario: Check policy compliance status
     Given policy "test-registry-policy" exists
