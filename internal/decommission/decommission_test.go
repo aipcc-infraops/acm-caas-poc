@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,7 +249,7 @@ func TestCancel(t *testing.T) {
 	}
 }
 
-func TestAdvanceFromAuditedToNotified(t *testing.T) {
+func TestAdvanceBlocksAtNotify(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 
@@ -257,143 +258,150 @@ func TestAdvanceFromAuditedToNotified(t *testing.T) {
 		Deadline: "2026-09-28T00:00:00Z",
 	})
 
-	state, err := m.Advance(context.Background(), "spoke1")
-	if err != nil {
-		t.Fatalf("Advance: %v", err)
+	_, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should block at notify until notification is implemented")
 	}
-	if state.Phase != PhaseNotified {
-		t.Errorf("phase = %s, want notified", state.Phase)
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	if state.Phase != PhaseAudited {
+		t.Errorf("phase = %s, want audited (should not advance past unimplemented step)", state.Phase)
 	}
 }
 
-func TestAdvanceFullCycle(t *testing.T) {
+func TestAdvanceBlocksAtBackup(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
-
 	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
 
-	expected := []Phase{PhaseNotified, PhaseBackedUp, PhaseDrained, PhaseDeleted, PhaseCleaned}
-	for _, exp := range expected {
-		state, err := m.Advance(context.Background(), "spoke1")
-		if err != nil {
-			t.Fatalf("Advance to %s: %v", exp, err)
-		}
-		if state.Phase != exp {
-			t.Errorf("phase = %s, want %s", state.Phase, exp)
-		}
+	// Manually advance past notify
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseNotified
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	setState(context.Background(), m.client, state)
+
+	_, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should block at backup until real export is implemented")
 	}
 
-	state, err := m.Advance(context.Background(), "spoke1")
-	if err != nil {
-		t.Fatalf("Advance past cleaned: %v", err)
+	state, _ = m.GetState(context.Background(), "spoke1")
+	if state.Phase != PhaseNotified {
+		t.Errorf("phase = %s, want notified (should not advance past unimplemented step)", state.Phase)
 	}
-	if state.Phase != PhaseCleaned {
-		t.Errorf("phase = %s, want cleaned (should not advance further)", state.Phase)
+}
+
+func TestAdvanceBlocksAtDrain(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	// Manually advance past notify and backup
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseBackedUp
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	state.BackupPath = "/tmp/backup/spoke1"
+	setState(context.Background(), m.client, state)
+
+	_, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should block at drain until real drain is implemented")
+	}
+
+	state, _ = m.GetState(context.Background(), "spoke1")
+	if state.Phase != PhaseBackedUp {
+		t.Errorf("phase = %s, want backed-up (should not advance past unimplemented step)", state.Phase)
 	}
 }
 
 // --- Notify tests ---
 
-func TestNotifyRecordsTimestamp(t *testing.T) {
+func TestNotifyBlocksUntilImplemented(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
 
 	err := m.Notify(context.Background(), "spoke1", "team@example.com", "2026-09-28T00:00:00Z")
-	if err != nil {
-		t.Fatalf("Notify: %v", err)
+	if err == nil {
+		t.Fatal("Notify should return error until real notification is implemented")
 	}
-
-	state, _ := m.GetState(context.Background(), "spoke1")
-	if state.NotifiedAt == "" {
-		t.Error("NotifiedAt is empty after Notify")
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("expected 'not implemented' error, got: %v", err)
 	}
 }
 
-func TestNotifyIdempotent(t *testing.T) {
+func TestNotifyIdempotentWhenAlreadyNotified(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
 
-	m.Notify(context.Background(), "spoke1", "team@example.com", "2026-09-28T00:00:00Z")
-	state1, _ := m.GetState(context.Background(), "spoke1")
-	firstNotify := state1.NotifiedAt
+	// Manually set NotifiedAt to simulate a completed notification
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	setState(context.Background(), m.client, state)
 
-	m.Notify(context.Background(), "spoke1", "team@example.com", "2026-10-01T00:00:00Z")
-	state2, _ := m.GetState(context.Background(), "spoke1")
-
-	if state2.NotifiedAt != firstNotify {
-		t.Errorf("second Notify changed NotifiedAt: %s -> %s", firstNotify, state2.NotifiedAt)
+	err := m.Notify(context.Background(), "spoke1", "team@example.com", "2026-10-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("Notify with existing NotifiedAt should be idempotent: %v", err)
 	}
 }
 
 // --- Backup tests ---
 
-func TestBackupRecordsPath(t *testing.T) {
+func TestBackupBlocksUntilImplemented(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{})
 
 	err := m.Backup(context.Background(), "spoke1", "/tmp/backup/spoke1")
-	if err != nil {
-		t.Fatalf("Backup: %v", err)
+	if err == nil {
+		t.Fatal("Backup should return error until real export is implemented")
 	}
-
-	state, _ := m.GetState(context.Background(), "spoke1")
-	if state.BackupPath != "/tmp/backup/spoke1" {
-		t.Errorf("BackupPath = %s, want /tmp/backup/spoke1", state.BackupPath)
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("expected 'not implemented' error, got: %v", err)
 	}
 }
 
-func TestBackupDefaultPath(t *testing.T) {
+func TestBackupIdempotentWhenAlreadyBackedUp(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{})
 
-	err := m.Backup(context.Background(), "spoke1", "")
+	// Manually set BackupPath to simulate a completed backup
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.BackupPath = "/completed/backup"
+	setState(context.Background(), m.client, state)
+
+	err := m.Backup(context.Background(), "spoke1", "/another/path")
 	if err != nil {
-		t.Fatalf("Backup: %v", err)
-	}
-
-	state, _ := m.GetState(context.Background(), "spoke1")
-	if state.BackupPath != "./decommission-backups/spoke1" {
-		t.Errorf("BackupPath = %s, want ./decommission-backups/spoke1", state.BackupPath)
-	}
-}
-
-func TestBackupIdempotent(t *testing.T) {
-	objs := setupCluster("spoke1")
-	m := newTestManager(objs...)
-	m.Start(context.Background(), "spoke1", StartOpts{})
-
-	m.Backup(context.Background(), "spoke1", "/first/path")
-	m.Backup(context.Background(), "spoke1", "/second/path")
-
-	state, _ := m.GetState(context.Background(), "spoke1")
-	if state.BackupPath != "/first/path" {
-		t.Errorf("BackupPath = %s, want /first/path (idempotent)", state.BackupPath)
+		t.Fatalf("Backup with existing BackupPath should be idempotent: %v", err)
 	}
 }
 
 // --- Drain tests ---
 
-func TestDrainSuccess(t *testing.T) {
+func TestDrainBlocksUntilImplemented(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{})
 
-	if err := m.Drain(context.Background(), "spoke1", 5*time.Minute); err != nil {
-		t.Fatalf("Drain: %v", err)
+	err := m.Drain(context.Background(), "spoke1", 5*time.Minute)
+	if err == nil {
+		t.Fatal("Drain should return error until real drain is implemented")
+	}
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("expected 'not implemented' error, got: %v", err)
 	}
 }
 
-func TestDrainDefaultTimeout(t *testing.T) {
+func TestDrainBlocksWithDefaultTimeout(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{})
 
-	if err := m.Drain(context.Background(), "spoke1", 0); err != nil {
-		t.Fatalf("Drain default timeout: %v", err)
+	err := m.Drain(context.Background(), "spoke1", 0)
+	if err == nil {
+		t.Fatal("Drain should return error until real drain is implemented")
 	}
 }
 
@@ -513,9 +521,10 @@ func TestAdvanceAtCleanedNoOp(t *testing.T) {
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
 
-	for i := 0; i < 5; i++ {
-		m.Advance(context.Background(), "spoke1")
-	}
+	// Manually set phase to cleaned to test no-op behavior
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseCleaned
+	setState(context.Background(), m.client, state)
 
 	state, err := m.Advance(context.Background(), "spoke1")
 	if err != nil {
@@ -646,5 +655,182 @@ func TestCleanupLogsWarnOnDeleteErrors(t *testing.T) {
 	err := m.Cleanup(context.Background(), "spoke1")
 	if err != nil {
 		t.Fatalf("Cleanup should not return error on delete failures: %v", err)
+	}
+}
+
+func TestDeleteRejectsNonNotFoundError(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+
+	fc := m.client.Dynamic.(k8stesting.FakeClient)
+	fc.PrependReactor("get", "clusterdeployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("forbidden: insufficient permissions")
+	})
+
+	_, err := m.Delete(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Delete should fail when ClusterDeployment lookup returns non-NotFound error")
+	}
+	if !strings.Contains(err.Error(), "cannot determine cluster type") {
+		t.Errorf("expected 'cannot determine cluster type' error, got: %v", err)
+	}
+}
+
+func TestAdvanceDeletePhaseWithEvidence(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseDrained
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	state.BackupPath = "/tmp/backup/spoke1"
+	setState(context.Background(), m.client, state)
+
+	state, err := m.Advance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("Advance to deleted: %v", err)
+	}
+	if state.Phase != PhaseDeleted {
+		t.Errorf("phase = %s, want deleted", state.Phase)
+	}
+}
+
+func TestAdvanceDeleteBlocksOldWorkflowWithoutEvidence(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	// Simulate a workflow persisted by the previous version: phase=drained
+	// but no NotifiedAt or BackupPath (the old no-op stubs didn't set them)
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseDrained
+	setState(context.Background(), m.client, state)
+
+	_, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should block deletion when prior safeguards have no evidence")
+	}
+	if !strings.Contains(err.Error(), "cannot delete") {
+		t.Errorf("expected 'cannot delete' error, got: %v", err)
+	}
+
+	state, _ = m.GetState(context.Background(), "spoke1")
+	if state.Phase != PhaseDrained {
+		t.Errorf("phase = %s, want drained (should remain unchanged)", state.Phase)
+	}
+}
+
+func TestAdvanceDeleteBlocksWithoutBackup(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseDrained
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	// BackupPath deliberately empty
+	setState(context.Background(), m.client, state)
+
+	_, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should block deletion when backup was never completed")
+	}
+	if !strings.Contains(err.Error(), "backup") {
+		t.Errorf("expected backup-related error, got: %v", err)
+	}
+}
+
+func TestAdvanceDeleteToCleanedPhase(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseDeleted
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	state.BackupPath = "/tmp/backup/spoke1"
+	setState(context.Background(), m.client, state)
+
+	state, err := m.Advance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("Advance to cleaned: %v", err)
+	}
+	if state.Phase != PhaseCleaned {
+		t.Errorf("phase = %s, want cleaned", state.Phase)
+	}
+}
+
+func TestAdvanceDeleteHiveCluster(t *testing.T) {
+	objs := setupCluster("spoke1")
+	cd := clusterDeployment("spoke1")
+	objs = append(objs, cd)
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseDrained
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	state.BackupPath = "/tmp/backup/spoke1"
+	setState(context.Background(), m.client, state)
+
+	state, err := m.Advance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("Advance to deleted (Hive): %v", err)
+	}
+	if state.Phase != PhaseDeleted {
+		t.Errorf("phase = %s, want deleted", state.Phase)
+	}
+}
+
+func TestAdvanceNotifyError(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should fail at unimplemented notify")
+	}
+	if state.Phase != PhaseAudited {
+		t.Errorf("phase = %s, want audited (should remain unchanged)", state.Phase)
+	}
+}
+
+func TestAdvanceBackupError(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseNotified
+	state.NotifiedAt = "2026-09-18T12:00:00Z"
+	setState(context.Background(), m.client, state)
+
+	state, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should fail at unimplemented backup")
+	}
+	if state.Phase != PhaseNotified {
+		t.Errorf("phase = %s, want notified (should remain unchanged)", state.Phase)
+	}
+}
+
+func TestAdvanceDrainError(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseBackedUp
+	state.BackupPath = "/tmp/backup"
+	setState(context.Background(), m.client, state)
+
+	state, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should fail at unimplemented drain")
+	}
+	if state.Phase != PhaseBackedUp {
+		t.Errorf("phase = %s, want backed-up (should remain unchanged)", state.Phase)
 	}
 }
