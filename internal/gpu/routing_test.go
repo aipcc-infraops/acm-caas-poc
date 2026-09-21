@@ -2,7 +2,9 @@ package gpu
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -210,11 +212,21 @@ func TestMarkSaturatedClearsLabel(t *testing.T) {
 	}
 }
 
-func TestBestClusterReturnsFirst(t *testing.T) {
-	pd := placementDecisionObj("gpu-best-H100-tmp", "gpu-cluster-best", "gpu-cluster-2")
-	mgr := newTestManager(pd)
+func TestBestClusterUsesUniqueName(t *testing.T) {
+	mgr := newTestManager()
+	ctx := context.Background()
 
-	best, err := mgr.BestCluster(context.Background(), "H100")
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		placements, _ := mgr.client.List(ctx, client.GVRPlacement, DefaultNamespace, "")
+		for _, p := range placements.Items {
+			name := p.GetName()
+			pd := placementDecisionObj(name, "gpu-cluster-best")
+			_ = mgr.client.CreateIfNotExists(ctx, client.GVRPlacementDecision, DefaultNamespace, pd)
+		}
+	}()
+
+	best, err := mgr.BestClusterWithTimeout(ctx, "H100", 2*time.Second)
 	if err != nil {
 		t.Fatalf("BestCluster failed: %v", err)
 	}
@@ -223,12 +235,63 @@ func TestBestClusterReturnsFirst(t *testing.T) {
 	}
 }
 
-func TestBestClusterErrorsWhenNone(t *testing.T) {
+func TestBestClusterConcurrentCallsUseDifferentNames(t *testing.T) {
+	mgr := newTestManager()
+	ctx := context.Background()
+
+	go func() {
+		for i := 0; i < 20; i++ {
+			time.Sleep(5 * time.Millisecond)
+			placements, _ := mgr.client.List(ctx, client.GVRPlacement, DefaultNamespace, "")
+			for _, p := range placements.Items {
+				name := p.GetName()
+				pd := placementDecisionObj(name, "gpu-cluster-1")
+				_ = mgr.client.CreateIfNotExists(ctx, client.GVRPlacementDecision, DefaultNamespace, pd)
+			}
+		}
+	}()
+
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := mgr.BestClusterWithTimeout(ctx, "H100", 2*time.Second)
+			errs <- err
+		}()
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent BestCluster call %d failed: %v", i, err)
+		}
+	}
+}
+
+func TestBestClusterTimeoutReturnsPending(t *testing.T) {
 	mgr := newTestManager()
 
-	_, err := mgr.BestCluster(context.Background(), "H100")
-	if err == nil {
-		t.Fatal("expected error when no clusters available")
+	_, err := mgr.BestClusterWithTimeout(context.Background(), "H100", 100*time.Millisecond)
+	if !errors.Is(err, ErrGPUPending) {
+		t.Fatalf("expected ErrGPUPending, got %v", err)
+	}
+}
+
+func TestBestClusterEmptyDecisionReturnsNoMatch(t *testing.T) {
+	mgr := newTestManager()
+	ctx := context.Background()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		placements, _ := mgr.client.List(ctx, client.GVRPlacement, DefaultNamespace, "")
+		for _, p := range placements.Items {
+			name := p.GetName()
+			emptyPD := placementDecisionObj(name)
+			_ = mgr.client.CreateIfNotExists(ctx, client.GVRPlacementDecision, DefaultNamespace, emptyPD)
+		}
+	}()
+
+	_, err := mgr.BestClusterWithTimeout(ctx, "A100", 2*time.Second)
+	if !errors.Is(err, ErrGPUNoMatch) {
+		t.Fatalf("expected ErrGPUNoMatch, got %v", err)
 	}
 }
 
