@@ -34,16 +34,19 @@ func curatorObj(name, namespace string) *unstructured.Unstructured {
 	obj.SetName(name)
 	obj.SetNamespace(namespace)
 	obj.Object["spec"] = map[string]interface{}{
-		"prehook": []interface{}{
-			map[string]interface{}{
-				"name": "backup-etcd",
-				"type": "Job",
+		"desiredCuration": "install",
+		"install": map[string]interface{}{
+			"prehook": []interface{}{
+				map[string]interface{}{
+					"name": "backup-etcd",
+					"type": "Job",
+				},
 			},
-		},
-		"posthook": []interface{}{
-			map[string]interface{}{
-				"name": "verify-health",
-				"type": "Job",
+			"posthook": []interface{}{
+				map[string]interface{}{
+					"name": "verify-health",
+					"type": "Job",
+				},
 			},
 		},
 	}
@@ -177,7 +180,14 @@ func TestBuildClusterCurator(t *testing.T) {
 		t.Error("missing curator label")
 	}
 	spec, _ := obj.Object["spec"].(map[string]interface{})
-	pre, _ := spec["prehook"].([]interface{})
+	if spec["desiredCuration"] != "install" {
+		t.Errorf("desiredCuration = %v, want install", spec["desiredCuration"])
+	}
+	installSpec, _ := spec["install"].(map[string]interface{})
+	if installSpec == nil {
+		t.Fatal("expected install operation spec")
+	}
+	pre, _ := installSpec["prehook"].([]interface{})
 	if len(pre) != 1 {
 		t.Errorf("got %d prehooks, want 1", len(pre))
 	}

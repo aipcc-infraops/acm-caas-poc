@@ -676,7 +676,7 @@ func TestDeleteRejectsNonNotFoundError(t *testing.T) {
 	}
 }
 
-func TestAdvanceDeletePhaseWithEvidence(t *testing.T) {
+func TestAdvanceDeleteBlocksUnconditionally(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
@@ -687,12 +687,17 @@ func TestAdvanceDeletePhaseWithEvidence(t *testing.T) {
 	state.BackupPath = "/tmp/backup/spoke1"
 	setState(context.Background(), m.client, state)
 
-	state, err := m.Advance(context.Background(), "spoke1")
-	if err != nil {
-		t.Fatalf("Advance to deleted: %v", err)
+	_, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should block deletion unconditionally while safeguards are not implemented")
 	}
-	if state.Phase != PhaseDeleted {
-		t.Errorf("phase = %s, want deleted", state.Phase)
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("expected 'not yet implemented' error, got: %v", err)
+	}
+
+	state, _ = m.GetState(context.Background(), "spoke1")
+	if state.Phase != PhaseDrained {
+		t.Errorf("phase = %s, want drained (should remain unchanged)", state.Phase)
 	}
 }
 
@@ -721,7 +726,7 @@ func TestAdvanceDeleteBlocksOldWorkflowWithoutEvidence(t *testing.T) {
 	}
 }
 
-func TestAdvanceDeleteBlocksWithoutBackup(t *testing.T) {
+func TestAdvanceDeleteBlocksWithPartialEvidence(t *testing.T) {
 	objs := setupCluster("spoke1")
 	m := newTestManager(objs...)
 	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
@@ -729,15 +734,14 @@ func TestAdvanceDeleteBlocksWithoutBackup(t *testing.T) {
 	state, _ := m.GetState(context.Background(), "spoke1")
 	state.Phase = PhaseDrained
 	state.NotifiedAt = "2026-09-18T12:00:00Z"
-	// BackupPath deliberately empty
 	setState(context.Background(), m.client, state)
 
 	_, err := m.Advance(context.Background(), "spoke1")
 	if err == nil {
-		t.Fatal("Advance should block deletion when backup was never completed")
+		t.Fatal("Advance should block deletion unconditionally while safeguards are not implemented")
 	}
-	if !strings.Contains(err.Error(), "backup") {
-		t.Errorf("expected backup-related error, got: %v", err)
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("expected 'not yet implemented' error, got: %v", err)
 	}
 }
 
@@ -761,7 +765,7 @@ func TestAdvanceDeleteToCleanedPhase(t *testing.T) {
 	}
 }
 
-func TestAdvanceDeleteHiveCluster(t *testing.T) {
+func TestAdvanceDeleteBlocksHiveClusterToo(t *testing.T) {
 	objs := setupCluster("spoke1")
 	cd := clusterDeployment("spoke1")
 	objs = append(objs, cd)
@@ -774,12 +778,12 @@ func TestAdvanceDeleteHiveCluster(t *testing.T) {
 	state.BackupPath = "/tmp/backup/spoke1"
 	setState(context.Background(), m.client, state)
 
-	state, err := m.Advance(context.Background(), "spoke1")
-	if err != nil {
-		t.Fatalf("Advance to deleted (Hive): %v", err)
+	_, err := m.Advance(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Advance should block deletion for Hive clusters too while safeguards are not implemented")
 	}
-	if state.Phase != PhaseDeleted {
-		t.Errorf("phase = %s, want deleted", state.Phase)
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("expected 'not yet implemented' error, got: %v", err)
 	}
 }
 
@@ -832,5 +836,102 @@ func TestAdvanceDrainError(t *testing.T) {
 	}
 	if state.Phase != PhaseBackedUp {
 		t.Errorf("phase = %s, want backed-up (should remain unchanged)", state.Phase)
+	}
+}
+
+func TestStartAuditFailure(t *testing.T) {
+	m := newTestManager(makeNamespace("spoke1"))
+
+	state, err := m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+	if err == nil {
+		t.Fatal("Start should fail when audit cannot find cluster data")
+	}
+	if state == nil {
+		t.Fatal("state should be non-nil even on audit failure")
+	}
+	if state.Phase != PhaseImported {
+		t.Errorf("phase = %s, want imported", state.Phase)
+	}
+}
+
+func TestStartCreateStateError(t *testing.T) {
+	m := newTestManager()
+
+	fc := m.client.Dynamic.(k8stesting.FakeClient)
+	fc.PrependReactor("create", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("quota exceeded")
+	})
+
+	_, err := m.Start(context.Background(), "spoke1", StartOpts{})
+	if err == nil {
+		t.Fatal("Start should fail when state cannot be created")
+	}
+}
+
+func TestAdvanceCleanupError(t *testing.T) {
+	objs := setupCluster("spoke1")
+	m := newTestManager(objs...)
+	m.Start(context.Background(), "spoke1", StartOpts{Owner: "team@example.com"})
+
+	state, _ := m.GetState(context.Background(), "spoke1")
+	state.Phase = PhaseDeleted
+	setState(context.Background(), m.client, state)
+
+	fc := m.client.Dynamic.(k8stesting.FakeClient)
+	fc.PrependReactor("list", "manifestworks", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("connection refused")
+	})
+	fc.PrependReactor("delete", "managedclusters", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("connection refused")
+	})
+	fc.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("connection refused")
+	})
+
+	state, err := m.Advance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("Advance to cleaned should succeed even with cleanup errors: %v", err)
+	}
+	if state.Phase != PhaseCleaned {
+		t.Errorf("phase = %s, want cleaned", state.Phase)
+	}
+}
+
+func TestListStatesWithBadConfigMap(t *testing.T) {
+	cm := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "decommission-bad",
+				"namespace": "bad",
+				"labels":    map[string]interface{}{"caas-poc/workflow": "decommission"},
+			},
+		},
+	}
+	m := newTestManager(cm)
+	states, err := m.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(states) != 0 {
+		t.Errorf("expected 0 valid states from bad configmap, got %d", len(states))
+	}
+}
+
+func TestDeleteClusterDeploymentDeleteError(t *testing.T) {
+	objs := setupCluster("spoke1")
+	cd := clusterDeployment("spoke1")
+	objs = append(objs, cd)
+	m := newTestManager(objs...)
+
+	fc := m.client.Dynamic.(k8stesting.FakeClient)
+	fc.PrependReactor("delete", "clusterdeployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("permission denied")
+	})
+
+	_, err := m.Delete(context.Background(), "spoke1")
+	if err == nil {
+		t.Fatal("Delete should fail when ClusterDeployment deletion returns error")
 	}
 }
