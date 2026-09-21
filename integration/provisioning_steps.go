@@ -31,7 +31,7 @@ func registerProvisioningSteps(sc *godog.ScenarioContext, s *suiteContext) {
 func (s *suiteContext) cloudCredentialsExist(ctx context.Context, ns string) error {
 	credentialKeys := []string{
 		"aws_access_key_id", "credentials", "osServicePrincipal.json",
-		"ibmcloud_api_key", "install-config.yaml",
+		"ibmcloud_api_key",
 	}
 	list, err := s.client.List(ctx, client.GVRSecret, ns, "")
 	if err != nil {
