@@ -113,7 +113,8 @@ func (s *suiteContext) policyRemediationIs(ctx context.Context, action string) e
 }
 
 func (s *suiteContext) iRemovePolicy(ctx context.Context, name string) error {
-	return s.policy.Remove(ctx, name, "default")
+	_, err := s.policy.Remove(ctx, name, "default")
+	return err
 }
 
 func (s *suiteContext) policyNoLongerExists(ctx context.Context, name string) error {
