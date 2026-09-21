@@ -12,6 +12,7 @@ import (
 type CuratorOpts struct {
 	Cluster   string
 	Namespace string
+	Operation string
 	PreHook   *CuratorHook
 	PostHook  *CuratorHook
 }
@@ -112,12 +113,18 @@ func parseCuratorInfo(obj map[string]interface{}) *CuratorInfo {
 
 	spec, _ := obj["spec"].(map[string]interface{})
 	if spec != nil {
-		if pre, ok := spec["prehook"].([]interface{}); ok && len(pre) > 0 {
+		hookSource := spec
+		if curation, ok := spec["desiredCuration"].(string); ok && curation != "" {
+			if opSpec, ok := spec[curation].(map[string]interface{}); ok {
+				hookSource = opSpec
+			}
+		}
+		if pre, ok := hookSource["prehook"].([]interface{}); ok && len(pre) > 0 {
 			if hook, ok := pre[0].(map[string]interface{}); ok {
 				info.PreHook = parseHookInfo(hook)
 			}
 		}
-		if post, ok := spec["posthook"].([]interface{}); ok && len(post) > 0 {
+		if post, ok := hookSource["posthook"].([]interface{}); ok && len(post) > 0 {
 			if hook, ok := post[0].(map[string]interface{}); ok {
 				info.PostHook = parseHookInfo(hook)
 			}

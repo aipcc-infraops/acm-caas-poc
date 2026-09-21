@@ -79,18 +79,7 @@ func (m *Manager) Advance(ctx context.Context, clusterName string) (*Decommissio
 		}
 		msg = "Worker nodes drained"
 	case PhaseDeleted:
-		if err := validateSafeguards(state); err != nil {
-			return state, err
-		}
-		hive, err := m.Delete(ctx, clusterName)
-		if err != nil {
-			return state, err
-		}
-		if hive {
-			msg = "Cluster infrastructure deleted"
-		} else {
-			msg = "Cluster detached from ACM (external infrastructure not managed)"
-		}
+		return state, validateSafeguards(state)
 	case PhaseCleaned:
 		if err := m.Cleanup(ctx, clusterName); err != nil {
 			return state, err
@@ -114,18 +103,12 @@ func (m *Manager) Advance(ctx context.Context, clusterName string) (*Decommissio
 	return state, nil
 }
 
-// validateSafeguards blocks destructive advancement unless prior safeguard
-// phases left verifiable evidence. A workflow persisted by a previous version
-// (where Notify/Backup/Drain were no-ops) will have phase=drained but no
-// real evidence; this prevents that state from reaching deletion.
-func validateSafeguards(state *DecommissionState) error {
-	if state.NotifiedAt == "" {
-		return fmt.Errorf("cannot delete: owner notification was never completed (phase may have been set by a previous version)")
-	}
-	if state.BackupPath == "" {
-		return fmt.Errorf("cannot delete: cluster backup was never completed (phase may have been set by a previous version)")
-	}
-	return nil
+// validateSafeguards unconditionally blocks destructive advancement while
+// Notify, Backup and Drain are not implemented with verifiable evidence.
+// Field presence alone (NotifiedAt, BackupPath) is insufficient because
+// previous versions wrote those fields without performing real operations.
+func validateSafeguards(_ *DecommissionState) error {
+	return fmt.Errorf("cannot delete: safeguard operations (notify, backup, drain) are not yet implemented with verifiable evidence")
 }
 
 func (m *Manager) GetState(ctx context.Context, clusterName string) (*DecommissionState, error) {
