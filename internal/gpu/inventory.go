@@ -12,10 +12,11 @@ import (
 type FitnessReason string
 
 const (
-	FitnessReasonFit          FitnessReason = "Fit"
-	FitnessReasonNoGPUType    FitnessReason = "NoGPUType"
-	FitnessReasonNotAvailable FitnessReason = "NotAvailable"
-	FitnessReasonSaturated    FitnessReason = "Saturated"
+	FitnessReasonFit                FitnessReason = "Fit"
+	FitnessReasonNoGPUType          FitnessReason = "NoGPUType"
+	FitnessReasonNotAvailable       FitnessReason = "NotAvailable"
+	FitnessReasonSaturated          FitnessReason = "Saturated"
+	FitnessReasonAvailabilityUnknown FitnessReason = "AvailabilityUnknown"
 )
 
 type GPUClusterInfo struct {
@@ -79,7 +80,8 @@ func (m *Manager) GetGPUFitness(ctx context.Context, cluster string) (*FitnessRe
 
 func evaluateCluster(name string, labels map[string]string, obj map[string]interface{}) GPUClusterInfo {
 	gpuType := labels["gpu-type"]
-	gpuAvailable := labels["gpu-available"] != "false"
+	gpuAvailLabel, gpuAvailSet := labels["gpu-available"]
+	gpuAvailable := gpuAvailSet && gpuAvailLabel == "true"
 	available := clusterAvailable(obj)
 
 	var reasons []FitnessReason
@@ -89,7 +91,9 @@ func evaluateCluster(name string, labels map[string]string, obj map[string]inter
 	if !available {
 		reasons = append(reasons, FitnessReasonNotAvailable)
 	}
-	if !gpuAvailable {
+	if !gpuAvailSet {
+		reasons = append(reasons, FitnessReasonAvailabilityUnknown)
+	} else if gpuAvailLabel == "false" {
 		reasons = append(reasons, FitnessReasonSaturated)
 	}
 

@@ -138,6 +138,31 @@ func TestSubmitRequestPendingNoDecision(t *testing.T) {
 	}
 }
 
+func TestSubmitRequestCancelledDuringRouting(t *testing.T) {
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
+	mgr.reqTimeout = 500 * time.Millisecond
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		time.Sleep(50 * time.Millisecond)
+		_ = mgr.CancelRequest(ctx, "req-001")
+	}()
+
+	result, err := mgr.SubmitRequest(ctx, validRequest())
+	<-done
+	if err != nil {
+		t.Fatalf("SubmitRequest failed: %v", err)
+	}
+	if result.State != RequestStateCancelled {
+		status, _ := mgr.GetRequestStatus(ctx, "req-001")
+		if status.State == RequestStateAdmitted {
+			t.Error("cancelled request must not transition to Admitted")
+		}
+	}
+}
+
 func TestGetRequestStatusFound(t *testing.T) {
 	mgr := newRequestTestManager()
 	seedRequest(mgr, validRequest())
@@ -206,9 +231,46 @@ func TestCancelRequestNotFound(t *testing.T) {
 	}
 }
 
-func TestCompleteRequestSuccess(t *testing.T) {
+func TestStartRequestSuccess(t *testing.T) {
+	mgr := newRequestTestManager()
+	req := validRequest()
+	req.State = RequestStateAdmitted
+	seedRequest(mgr, req)
+
+	err := mgr.StartRequest(context.Background(), "req-001")
+	if err != nil {
+		t.Fatalf("StartRequest failed: %v", err)
+	}
+
+	status, _ := mgr.GetRequestStatus(context.Background(), "req-001")
+	if status.State != RequestStateRunning {
+		t.Errorf("state = %q, want Running", status.State)
+	}
+}
+
+func TestStartRequestNotAdmitted(t *testing.T) {
 	mgr := newRequestTestManager()
 	seedRequest(mgr, validRequest())
+
+	err := mgr.StartRequest(context.Background(), "req-001")
+	if !errors.Is(err, ErrRequestNotAdmitted) {
+		t.Fatalf("expected ErrRequestNotAdmitted, got: %v", err)
+	}
+}
+
+func TestStartRequestNotFound(t *testing.T) {
+	mgr := newRequestTestManager()
+	err := mgr.StartRequest(context.Background(), "nonexistent")
+	if !errors.Is(err, ErrRequestNotFound) {
+		t.Fatalf("expected ErrRequestNotFound, got: %v", err)
+	}
+}
+
+func TestCompleteRequestFromRunning(t *testing.T) {
+	mgr := newRequestTestManager()
+	req := validRequest()
+	req.State = RequestStateRunning
+	seedRequest(mgr, req)
 
 	err := mgr.CompleteRequest(context.Background(), "req-001")
 	if err != nil {
@@ -218,6 +280,33 @@ func TestCompleteRequestSuccess(t *testing.T) {
 	status, _ := mgr.GetRequestStatus(context.Background(), "req-001")
 	if status.State != RequestStateCompleted {
 		t.Errorf("state = %q, want Completed", status.State)
+	}
+}
+
+func TestCompleteRequestFromAdmitted(t *testing.T) {
+	mgr := newRequestTestManager()
+	req := validRequest()
+	req.State = RequestStateAdmitted
+	seedRequest(mgr, req)
+
+	err := mgr.CompleteRequest(context.Background(), "req-001")
+	if err != nil {
+		t.Fatalf("CompleteRequest failed: %v", err)
+	}
+
+	status, _ := mgr.GetRequestStatus(context.Background(), "req-001")
+	if status.State != RequestStateCompleted {
+		t.Errorf("state = %q, want Completed", status.State)
+	}
+}
+
+func TestCompleteRequestFromPendingRejected(t *testing.T) {
+	mgr := newRequestTestManager()
+	seedRequest(mgr, validRequest())
+
+	err := mgr.CompleteRequest(context.Background(), "req-001")
+	if err == nil {
+		t.Fatal("expected error when completing from Pending")
 	}
 }
 
@@ -236,6 +325,47 @@ func TestCompleteRequestCancelled(t *testing.T) {
 func TestCompleteRequestNotFound(t *testing.T) {
 	mgr := newRequestTestManager()
 	err := mgr.CompleteRequest(context.Background(), "nonexistent")
+	if !errors.Is(err, ErrRequestNotFound) {
+		t.Fatalf("expected ErrRequestNotFound, got: %v", err)
+	}
+}
+
+func TestRetryRequestSuccess(t *testing.T) {
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
+	mgr.reqTimeout = 2 * time.Second
+	ctx := context.Background()
+
+	seedRequest(mgr, validRequest())
+
+	go simulatePlacementDecisions(ctx, mgr, "gpu1")
+
+	result, err := mgr.RetryRequest(ctx, "req-001")
+	if err != nil {
+		t.Fatalf("RetryRequest failed: %v", err)
+	}
+	if !result.Admitted {
+		t.Errorf("expected Admitted=true, got reason: %s", result.Reason)
+	}
+	if result.Cluster != "gpu1" {
+		t.Errorf("cluster = %q, want gpu1", result.Cluster)
+	}
+}
+
+func TestRetryRequestNotPending(t *testing.T) {
+	mgr := newRequestTestManager()
+	req := validRequest()
+	req.State = RequestStateAdmitted
+	seedRequest(mgr, req)
+
+	_, err := mgr.RetryRequest(context.Background(), "req-001")
+	if !errors.Is(err, ErrRequestNotPending) {
+		t.Fatalf("expected ErrRequestNotPending, got: %v", err)
+	}
+}
+
+func TestRetryRequestNotFound(t *testing.T) {
+	mgr := newRequestTestManager()
+	_, err := mgr.RetryRequest(context.Background(), "nonexistent")
 	if !errors.Is(err, ErrRequestNotFound) {
 		t.Fatalf("expected ErrRequestNotFound, got: %v", err)
 	}
@@ -272,5 +402,34 @@ func TestSubmitRequestAdmittedStatusPersisted(t *testing.T) {
 	}
 	if status.Cluster != "gpu1" {
 		t.Errorf("cluster = %q, want gpu1", status.Cluster)
+	}
+}
+
+func TestFullLifecycleAdmitStartComplete(t *testing.T) {
+	mgr := newTestManager(gpuReadyCluster("gpu1", "H100"))
+	mgr.reqTimeout = 2 * time.Second
+	ctx := context.Background()
+
+	go simulatePlacementDecisions(ctx, mgr, "gpu1")
+
+	result, err := mgr.SubmitRequest(ctx, validRequest())
+	if err != nil {
+		t.Fatalf("SubmitRequest failed: %v", err)
+	}
+	if result.State != RequestStateAdmitted {
+		t.Fatalf("state = %q, want Admitted", result.State)
+	}
+
+	if err := mgr.StartRequest(ctx, "req-001"); err != nil {
+		t.Fatalf("StartRequest failed: %v", err)
+	}
+
+	if err := mgr.CompleteRequest(ctx, "req-001"); err != nil {
+		t.Fatalf("CompleteRequest failed: %v", err)
+	}
+
+	status, _ := mgr.GetRequestStatus(ctx, "req-001")
+	if status.State != RequestStateCompleted {
+		t.Errorf("state = %q, want Completed", status.State)
 	}
 }

@@ -36,11 +36,13 @@ This document records what has been verified without GPU hardware and what requi
 ### Request Lifecycle Contract (internal/gpu/request.go)
 
 - SubmitRequest validates input, detects duplicates, routes via BestCluster, stores state
-- Pending requests carry a reason ("placement pending" or "no matching cluster")
+- Pending requests carry a reason ("placement pending" or "no matching cluster"); RetryRequest re-attempts routing
+- Cancellation during routing is detected: routing result does not overwrite a Cancelled request
+- StartRequest transitions Admitted to Running; CompleteRequest requires Running or Admitted state
 - GetRequestStatus returns a copy to prevent external mutation
-- CancelRequest and CompleteRequest enforce terminal state transitions
 - State machine: Pending -> Admitted -> Running -> Completed; Pending/Admitted/Running -> Cancelled
-- Tests: validation, duplicate detection, admitted path with simulated PlacementDecision, pending path, cancel/complete transitions, copy semantics
+- Tests: validation, duplicate detection, admitted path with simulated PlacementDecision, pending path, cancel/complete transitions, retry, start, race protection, copy semantics
+- **Limitation**: cluster selection via BestCluster does not demonstrate quota admission or GPU workload execution. Admitted state means a cluster was selected, not that Kueue has reserved capacity or that a GPU workload can run
 
 ### Integration Steps (integration/)
 
