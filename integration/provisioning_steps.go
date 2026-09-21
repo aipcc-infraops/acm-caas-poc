@@ -29,17 +29,29 @@ func registerProvisioningSteps(sc *godog.ScenarioContext, s *suiteContext) {
 }
 
 func (s *suiteContext) cloudCredentialsExist(ctx context.Context, ns string) error {
+	credentialKeys := []string{
+		"aws_access_key_id", "credentials", "osServicePrincipal.json",
+		"ibmcloud_api_key",
+	}
 	list, err := s.client.List(ctx, client.GVRSecret, ns, "")
 	if err != nil {
 		return fmt.Errorf("listing secrets in %s: %w", ns, err)
 	}
 	for _, secret := range list.Items {
 		data, _, _ := unstructured.NestedMap(secret.Object, "data")
-		if len(data) > 0 {
+		for _, key := range credentialKeys {
+			val, ok := data[key]
+			if !ok {
+				continue
+			}
+			str, isStr := val.(string)
+			if isStr && str == "" {
+				continue
+			}
 			return nil
 		}
 	}
-	return fmt.Errorf("no cloud credential secrets with data found in namespace %s", ns)
+	return fmt.Errorf("no cloud credential secret with non-empty data found in namespace %s (checked keys: %v)", ns, credentialKeys)
 }
 
 func (s *suiteContext) clusterImageSetExists(ctx context.Context) error {
