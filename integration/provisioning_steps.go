@@ -40,12 +40,18 @@ func (s *suiteContext) cloudCredentialsExist(ctx context.Context, ns string) err
 	for _, secret := range list.Items {
 		data, _, _ := unstructured.NestedMap(secret.Object, "data")
 		for _, key := range credentialKeys {
-			if _, ok := data[key]; ok {
-				return nil
+			val, ok := data[key]
+			if !ok {
+				continue
 			}
+			str, isStr := val.(string)
+			if isStr && str == "" {
+				continue
+			}
+			return nil
 		}
 	}
-	return fmt.Errorf("no cloud credential secret found in namespace %s (checked keys: %v)", ns, credentialKeys)
+	return fmt.Errorf("no cloud credential secret with non-empty data found in namespace %s (checked keys: %v)", ns, credentialKeys)
 }
 
 func (s *suiteContext) clusterImageSetExists(ctx context.Context) error {

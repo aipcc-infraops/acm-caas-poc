@@ -99,6 +99,12 @@ func (m *Manager) BestClusterWithTimeout(ctx context.Context, gpuType string, ti
 	for {
 		results, hasObj, err := m.queryPlacementDecision(opCtx, tempName)
 		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			if opCtx.Err() != nil {
+				return "", ErrGPUPending
+			}
 			return "", fmt.Errorf("reading placement decision: %w", err)
 		}
 		if len(results) > 0 {
