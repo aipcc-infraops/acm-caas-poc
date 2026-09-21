@@ -81,11 +81,11 @@ func (m *Manager) SubmitRequest(ctx context.Context, req GPURequest) (*Admission
 	defer m.mu.Unlock()
 
 	stored := m.reqs[req.ID]
-	if stored.State == RequestStateCancelled {
+	if stored.State != RequestStatePending {
 		return &AdmissionResult{
 			Admitted: false,
-			Reason:   "request cancelled during routing",
-			State:    RequestStateCancelled,
+			Reason:   fmt.Sprintf("request moved to %s during routing", stored.State),
+			State:    stored.State,
 		}, nil
 	}
 
@@ -170,11 +170,11 @@ func (m *Manager) RetryRequest(ctx context.Context, requestID string) (*Admissio
 	defer m.mu.Unlock()
 
 	stored := m.reqs[requestID]
-	if stored.State == RequestStateCancelled {
+	if stored.State != RequestStatePending {
 		return &AdmissionResult{
 			Admitted: false,
-			Reason:   "request cancelled during routing",
-			State:    RequestStateCancelled,
+			Reason:   fmt.Sprintf("request moved to %s during routing", stored.State),
+			State:    stored.State,
 		}, nil
 	}
 

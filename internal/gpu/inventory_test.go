@@ -267,6 +267,42 @@ func TestGetGPUFitnessAvailabilityUnknown(t *testing.T) {
 	}
 }
 
+func TestGetGPUFitnessUnknownLabelValue(t *testing.T) {
+	mc := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cluster.open-cluster-management.io/v1",
+			"kind":       "ManagedCluster",
+			"metadata": map[string]interface{}{
+				"name": "gpu1",
+				"labels": map[string]interface{}{
+					"gpu-type":      "H100",
+					"gpu-available": "unknown",
+				},
+			},
+			"status": map[string]interface{}{
+				"conditions": []interface{}{
+					map[string]interface{}{
+						"type":   "ManagedClusterConditionAvailable",
+						"status": "True",
+					},
+				},
+			},
+		},
+	}
+	mgr := newTestManager(mc)
+
+	result, err := mgr.GetGPUFitness(context.Background(), "gpu1")
+	if err != nil {
+		t.Fatalf("GetGPUFitness failed: %v", err)
+	}
+	if result.Fit {
+		t.Error("expected Fit=false when gpu-available has unrecognised value")
+	}
+	if !containsReason(result.Reasons, FitnessReasonAvailabilityUnknown) {
+		t.Errorf("expected AvailabilityUnknown reason, got %v", result.Reasons)
+	}
+}
+
 func containsReason(reasons []FitnessReason, target FitnessReason) bool {
 	for _, r := range reasons {
 		if r == target {

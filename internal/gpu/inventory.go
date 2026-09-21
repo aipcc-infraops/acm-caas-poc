@@ -95,6 +95,8 @@ func evaluateCluster(name string, labels map[string]string, obj map[string]inter
 		reasons = append(reasons, FitnessReasonAvailabilityUnknown)
 	} else if gpuAvailLabel == "false" {
 		reasons = append(reasons, FitnessReasonSaturated)
+	} else if gpuAvailLabel != "true" {
+		reasons = append(reasons, FitnessReasonAvailabilityUnknown)
 	}
 
 	return GPUClusterInfo{
