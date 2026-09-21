@@ -96,7 +96,8 @@ func (s *suiteContext) receiveManifestWorkStatus() error {
 }
 
 func (s *suiteContext) iRemoveTenant(ctx context.Context, tenantName, cluster string) error {
-	return s.tenant.Remove(ctx, tenantName, cluster)
+	_, err := s.tenant.Remove(ctx, tenantName, cluster)
+	return err
 }
 
 func (s *suiteContext) manifestWorkNoLongerExists(ctx context.Context, name, namespace string) error {
