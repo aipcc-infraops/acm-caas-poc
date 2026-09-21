@@ -60,20 +60,19 @@ func (s *suiteContext) clusterDeploymentHasPowerState(ctx context.Context, state
 	if err != nil {
 		return fmt.Errorf("getting power state: %w", err)
 	}
-	if string(current) == state {
-		return nil
-	}
-	switch lifecycle.PowerState(state) {
-	case lifecycle.PowerStateRunning:
-		if err := s.lifecycle.Resume(ctx, s.lifecycleNamespace, s.lifecycleCluster); err != nil {
-			return fmt.Errorf("preparing Running state: %w", err)
+	if string(current) != state {
+		switch lifecycle.PowerState(state) {
+		case lifecycle.PowerStateRunning:
+			if err := s.lifecycle.Resume(ctx, s.lifecycleNamespace, s.lifecycleCluster); err != nil {
+				return fmt.Errorf("preparing Running state: %w", err)
+			}
+		case lifecycle.PowerStateHibernating:
+			if err := s.lifecycle.Hibernate(ctx, s.lifecycleNamespace, s.lifecycleCluster); err != nil {
+				return fmt.Errorf("preparing Hibernating state: %w", err)
+			}
+		default:
+			return fmt.Errorf("power state = %s, want %s", current, state)
 		}
-	case lifecycle.PowerStateHibernating:
-		if err := s.lifecycle.Hibernate(ctx, s.lifecycleNamespace, s.lifecycleCluster); err != nil {
-			return fmt.Errorf("preparing Hibernating state: %w", err)
-		}
-	default:
-		return fmt.Errorf("power state = %s, want %s", current, state)
 	}
 	return s.lifecycle.WaitForPowerState(ctx, s.lifecycleNamespace, s.lifecycleCluster, lifecycle.PowerState(state), 5*time.Minute)
 }
