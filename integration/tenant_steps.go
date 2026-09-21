@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/cucumber/godog"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
@@ -130,8 +131,11 @@ func (s *suiteContext) iRemoveTenant(ctx context.Context, tenantName, cluster st
 
 func (s *suiteContext) manifestWorkNoLongerExists(ctx context.Context, name, namespace string) error {
 	_, err := s.client.Get(ctx, client.GVRManifestWork, namespace, name)
-	if err != nil {
-		return nil
+	if err == nil {
+		return fmt.Errorf("ManifestWork %s/%s still exists", namespace, name)
 	}
-	return fmt.Errorf("ManifestWork %s/%s still exists", namespace, name)
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("unexpected error checking ManifestWork %s/%s: %w", namespace, name, err)
+	}
+	return nil
 }

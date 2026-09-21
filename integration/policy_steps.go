@@ -5,8 +5,10 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cucumber/godog"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/policy"
@@ -18,7 +20,7 @@ func registerPolicySteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^the policy has a Placement and PlacementBinding$`, s.policyHasBindings)
 	sc.Step(`^policy "([^"]*)" exists$`, s.policyExists)
 	sc.Step(`^I list all policies$`, s.iListAllPolicies)
-	sc.Step(`^the list includes "([^"]*)"$`, s.listIncludesPolicy)
+	sc.Step(`^the policy list includes "([^"]*)"$`, s.listIncludesPolicy)
 	sc.Step(`^I get the status of policy "([^"]*)"$`, s.iGetPolicyStatus)
 	sc.Step(`^I receive compliance information per cluster$`, s.receiveComplianceInfo)
 	sc.Step(`^I set remediation of "([^"]*)" to "([^"]*)"$`, s.iSetRemediation)
@@ -29,10 +31,14 @@ func registerPolicySteps(sc *godog.ScenarioContext, s *suiteContext) {
 }
 
 func (s *suiteContext) iApplyPolicy(ctx context.Context, name, registries string) error {
+	regs := strings.Split(registries, ",")
+	for i := range regs {
+		regs[i] = strings.TrimSpace(regs[i])
+	}
 	return s.policy.Apply(ctx, policy.PolicyOpts{
 		Name:              name,
 		Namespace:         "default",
-		AllowedRegistries: []string{registries},
+		AllowedRegistries: regs,
 		RemediationAction: "inform",
 	})
 }
@@ -52,20 +58,29 @@ func (s *suiteContext) policyHasBindings(ctx context.Context) error {
 	}
 	name := s.policyInfo.Name
 	ns := "default"
-	if _, err := s.client.Get(ctx, client.GVRPlacement, ns, name); err != nil {
-		return fmt.Errorf("Placement %s/%s not found: %w", ns, name, err)
+	placementName := name + "-placement"
+	bindingName := name + "-placement-binding"
+	if _, err := s.client.Get(ctx, client.GVRPlacement, ns, placementName); err != nil {
+		return fmt.Errorf("Placement %s/%s not found: %w", ns, placementName, err)
 	}
-	if _, err := s.client.Get(ctx, client.GVRPlacementBinding, ns, name); err != nil {
-		return fmt.Errorf("PlacementBinding %s/%s not found: %w", ns, name, err)
+	if _, err := s.client.Get(ctx, client.GVRPlacementBinding, ns, bindingName); err != nil {
+		return fmt.Errorf("PlacementBinding %s/%s not found: %w", ns, bindingName, err)
 	}
 	return nil
 }
 
 func (s *suiteContext) policyExists(ctx context.Context, name string) error {
-	_, err := s.policy.Get(ctx, name, "default")
+	info, err := s.policy.Get(ctx, name, "default")
 	if err != nil {
-		return s.iApplyPolicy(ctx, name, "registry.redhat.io")
+		if applyErr := s.iApplyPolicy(ctx, name, "registry.redhat.io"); applyErr != nil {
+			return applyErr
+		}
+		info, err = s.policy.Get(ctx, name, "default")
+		if err != nil {
+			return err
+		}
 	}
+	s.policyInfo = info
 	return nil
 }
 
@@ -128,10 +143,13 @@ func (s *suiteContext) iRemovePolicy(ctx context.Context, name string) error {
 
 func (s *suiteContext) policyNoLongerExists(ctx context.Context, name string) error {
 	_, err := s.policy.Get(ctx, name, "default")
-	if err != nil {
-		return nil
+	if err == nil {
+		return fmt.Errorf("policy %s still exists", name)
 	}
-	return fmt.Errorf("policy %s still exists", name)
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("unexpected error checking policy %s: %w", name, err)
+	}
+	return nil
 }
 
 func (s *suiteContext) bindingsRemoved(ctx context.Context) error {
@@ -140,11 +158,17 @@ func (s *suiteContext) bindingsRemoved(ctx context.Context) error {
 	}
 	name := s.policyInfo.Name
 	ns := "default"
-	if _, err := s.client.Get(ctx, client.GVRPlacement, ns, name); err == nil {
-		return fmt.Errorf("Placement %s/%s still exists", ns, name)
+	placementName := name + "-placement"
+	bindingName := name + "-placement-binding"
+	if _, err := s.client.Get(ctx, client.GVRPlacement, ns, placementName); err == nil {
+		return fmt.Errorf("Placement %s/%s still exists", ns, placementName)
+	} else if !errors.IsNotFound(err) {
+		return fmt.Errorf("unexpected error checking Placement %s: %w", placementName, err)
 	}
-	if _, err := s.client.Get(ctx, client.GVRPlacementBinding, ns, name); err == nil {
-		return fmt.Errorf("PlacementBinding %s/%s still exists", ns, name)
+	if _, err := s.client.Get(ctx, client.GVRPlacementBinding, ns, bindingName); err == nil {
+		return fmt.Errorf("PlacementBinding %s/%s still exists", ns, bindingName)
+	} else if !errors.IsNotFound(err) {
+		return fmt.Errorf("unexpected error checking PlacementBinding %s: %w", bindingName, err)
 	}
 	return nil
 }

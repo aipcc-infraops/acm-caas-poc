@@ -23,7 +23,7 @@ Feature: External cluster import into ACM
   Scenario: List imported clusters
     Given cluster "import-test" has been imported
     When I list all imported clusters
-    Then the list includes "import-test"
+    Then the imported list includes "import-test"
 
   Scenario: Detach an imported cluster
     Given cluster "import-test" has been imported
