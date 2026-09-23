@@ -483,6 +483,14 @@ func registerProvisioningTools(s *server.MCPServer, prov *provisioning.Manager, 
 				WorkerType: workerType,
 				PullSecret: pullSecret,
 			}
+			if platform == "aws" {
+				awsCreds, err := provisioning.LoadAWSCredentials("")
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("loading AWS credentials: %v", err)), nil
+				}
+				opts.AWSAccessKeyID = awsCreds.AccessKeyID
+				opts.AWSSecretAccessKey = awsCreds.SecretAccessKey
+			}
 			if err := prov.Create(ctx, opts); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

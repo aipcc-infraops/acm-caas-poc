@@ -156,4 +156,7 @@ var (
 	GVRDiscoveredCluster = schema.GroupVersionResource{
 		Group: "discovery.open-cluster-management.io", Version: "v1", Resource: "discoveredclusters",
 	}
+	GVRImageConfig = schema.GroupVersionResource{
+		Group: "config.openshift.io", Version: "v1", Resource: "images",
+	}
 )
