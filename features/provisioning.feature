@@ -17,12 +17,19 @@ Feature: Cluster provisioning via Hive ClusterDeployment
     And the cluster "spoke-test" eventually reaches Provisioned = True
 
   @slow @aws
-  Scenario: Create an AWS ClusterDeployment and wait for provisioning
-    Given cloud credentials exist as a Secret in namespace "spoke1"
-    And a ClusterImageSet for the target OCP version exists
-    When I provision cluster "spoke1" with default settings
+  Scenario: Provision spoke1 on AWS
+    Given a ClusterImageSet for the target OCP version exists
+    When I provision cluster "spoke1" on platform "aws"
     Then the ClusterDeployment "spoke1" is accepted by Hive
     And the cluster "spoke1" eventually reaches Provisioned = True
+
+  @slow @ibm
+  Scenario: Provision spoke2 on IBM Cloud using ACM credentials
+    Given the ACM credential "ibm-caas-creds" exists in open-cluster-management namespace
+    And a ClusterImageSet for the target OCP version exists
+    When I provision cluster "spoke2" on platform "ibmcloud"
+    Then the ClusterDeployment "spoke2" is accepted by Hive
+    And the cluster "spoke2" eventually reaches Provisioned = True
 
   Scenario: List provisioned clusters
     When I list all provisioned clusters
