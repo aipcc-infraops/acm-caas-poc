@@ -20,6 +20,8 @@ func registerProvisioningSteps(sc *godog.ScenarioContext, s *suiteContext) {
 	sc.Step(`^cloud credentials exist as a Secret in namespace "([^"]*)"$`, s.cloudCredentialsExist)
 	sc.Step(`^a ClusterImageSet for the target OCP version exists$`, s.clusterImageSetExists)
 	sc.Step(`^I provision cluster "([^"]*)" with default settings$`, s.iProvisionCluster)
+	sc.Step(`^I provision cluster "([^"]*)" on platform "([^"]*)"$`, s.iProvisionClusterOnPlatform)
+	sc.Step(`^the ACM credential "([^"]*)" exists in open-cluster-management namespace$`, s.acmCredentialExists)
 	sc.Step(`^the ClusterDeployment "([^"]*)" is accepted by Hive$`, s.clusterDeploymentAccepted)
 	sc.Step(`^the cluster "([^"]*)" eventually reaches Provisioned = True$`, s.clusterReachesProvisioned)
 	sc.Step(`^I list all provisioned clusters$`, s.iListProvisionedClusters)
@@ -110,6 +112,39 @@ func (s *suiteContext) cloudCredentialsExist(ctx context.Context, ns string) err
 	}
 
 	return fmt.Errorf("no cloud credential secret found in namespace %s and no credentials configured", ns)
+}
+
+func (s *suiteContext) acmCredentialExists(ctx context.Context, name string) error {
+	_, err := s.client.Get(ctx, client.GVRSecret, "open-cluster-management", name)
+	if err != nil {
+		return fmt.Errorf("ACM credential %q not found in open-cluster-management: %w", name, err)
+	}
+	fmt.Printf("\n  ┌─ ACM credential %q verified in open-cluster-management namespace\n", name)
+	fmt.Printf("  └─\n")
+	return nil
+}
+
+func (s *suiteContext) iProvisionClusterOnPlatform(ctx context.Context, name, platform string) error {
+	pullSecret, err := s.fetchPullSecret(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching pull secret: %w", err)
+	}
+	opts := provisioning.ClusterOpts{
+		Name:       name,
+		Platform:   platform,
+		PullSecret: pullSecret,
+	}
+	if platform == "aws" {
+		awsCreds, err := provisioning.LoadAWSCredentials("")
+		if err != nil {
+			return fmt.Errorf("loading AWS credentials: %w", err)
+		}
+		opts.AWSAccessKeyID = awsCreds.AccessKeyID
+		opts.AWSSecretAccessKey = awsCreds.SecretAccessKey
+	}
+	fmt.Printf("\n  ┌─ Provisioning cluster %q (platform=%s)\n", name, platform)
+	fmt.Printf("  └─\n")
+	return s.provisioner.Create(ctx, opts)
 }
 
 func (s *suiteContext) clusterImageSetExists(ctx context.Context) error {
