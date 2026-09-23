@@ -134,17 +134,41 @@ func (s *suiteContext) iProvisionClusterOnPlatform(ctx context.Context, name, pl
 		Platform:   platform,
 		PullSecret: pullSecret,
 	}
-	if platform == "aws" {
+	switch platform {
+	case "aws":
 		awsCreds, err := provisioning.LoadAWSCredentials("")
 		if err != nil {
 			return fmt.Errorf("loading AWS credentials: %w", err)
 		}
 		opts.AWSAccessKeyID = awsCreds.AccessKeyID
 		opts.AWSSecretAccessKey = awsCreds.SecretAccessKey
+	case "ibmcloud":
+		apiKey, err := s.fetchACMCredentialKey("ibm-caas-creds", "ibmcloud_api_key")
+		if err != nil {
+			return fmt.Errorf("reading IBM Cloud API key from ACM credential: %w", err)
+		}
+		opts.IBMCloudAPIKey = apiKey
 	}
 	fmt.Printf("\n  ┌─ Provisioning cluster %q (platform=%s)\n", name, platform)
 	fmt.Printf("  └─\n")
 	return s.provisioner.Create(ctx, opts)
+}
+
+func (s *suiteContext) fetchACMCredentialKey(secretName, key string) (string, error) {
+	obj, err := s.client.Get(context.Background(), client.GVRSecret, "open-cluster-management", secretName)
+	if err != nil {
+		return "", fmt.Errorf("getting ACM credential %q: %w", secretName, err)
+	}
+	data, _, _ := unstructured.NestedMap(obj.Object, "data")
+	encoded, ok := data[key].(string)
+	if !ok || encoded == "" {
+		return "", fmt.Errorf("key %q not found in ACM credential %q", key, secretName)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return encoded, nil
+	}
+	return string(decoded), nil
 }
 
 func (s *suiteContext) clusterImageSetExists(ctx context.Context) error {
