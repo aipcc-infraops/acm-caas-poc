@@ -169,6 +169,10 @@ func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
 	return nil
 }
 
+func (s *suiteContext) resolveCluster(name string) string {
+	return s.cfg.ResolveCluster(name)
+}
+
 func (s *suiteContext) iHaveADynamicClient(ctx context.Context) error {
 	if s.client == nil {
 		return s.theACMHubIsReachable(ctx)

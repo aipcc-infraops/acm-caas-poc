@@ -24,11 +24,13 @@ type ClusterOpts struct {
 	MasterType     string
 	WorkerReplicas int64
 	MasterReplicas int64
-	SSHKey         string
-	SSHPrivateKey  string
-	IBMCloudAPIKey string
-	PullSecret     string
-	ManifestsDir   string
+	SSHKey             string
+	SSHPrivateKey      string
+	IBMCloudAPIKey     string
+	AWSAccessKeyID     string
+	AWSSecretAccessKey string
+	PullSecret         string
+	ManifestsDir       string
 }
 
 type ClusterInfo struct {
@@ -65,7 +67,11 @@ func (m *Manager) applyDefaults(opts *ClusterOpts) {
 		opts.Platform = m.cfg.Platform
 	}
 	if opts.Region == "" {
-		opts.Region = m.cfg.IBMCloudRegion
+		if opts.Platform == "aws" {
+			opts.Region = m.cfg.AWSRegion
+		} else {
+			opts.Region = m.cfg.IBMCloudRegion
+		}
 	}
 	if opts.BaseDomain == "" {
 		opts.BaseDomain = m.cfg.BaseDomain
@@ -74,10 +80,18 @@ func (m *Manager) applyDefaults(opts *ClusterOpts) {
 		opts.ImageSet = m.cfg.ClusterImageSet
 	}
 	if opts.WorkerType == "" {
-		opts.WorkerType = m.cfg.DefaultWorkerType
+		if opts.Platform == "aws" {
+			opts.WorkerType = "m5.large"
+		} else {
+			opts.WorkerType = m.cfg.DefaultWorkerType
+		}
 	}
 	if opts.MasterType == "" {
-		opts.MasterType = m.cfg.DefaultMasterType
+		if opts.Platform == "aws" {
+			opts.MasterType = "m5.xlarge"
+		} else {
+			opts.MasterType = m.cfg.DefaultMasterType
+		}
 	}
 	if opts.WorkerReplicas == 0 {
 		opts.WorkerReplicas = int64(m.cfg.DefaultWorkerReplicas)
@@ -100,6 +114,9 @@ func (m *Manager) Create(ctx context.Context, opts ClusterOpts) error {
 	if opts.Platform == "ibmcloud" && opts.IBMCloudAPIKey == "" {
 		return fmt.Errorf("IBM Cloud API key is required (set IBMCLOUD_API_KEY or pass --api-key)")
 	}
+	if opts.Platform == "aws" && (opts.AWSAccessKeyID == "" || opts.AWSSecretAccessKey == "") {
+		return fmt.Errorf("AWS credentials are required (set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or place in ~/.aws/credentials)")
+	}
 	if opts.PullSecret == "" {
 		return fmt.Errorf("pull secret is required (set ACM_PULL_SECRET_PATH or pass --pull-secret)")
 	}
@@ -109,7 +126,7 @@ func (m *Manager) Create(ctx context.Context, opts ClusterOpts) error {
 		return fmt.Errorf("creating namespace %s: %w", opts.Name, err)
 	}
 
-	creds := buildCredentialsSecret(opts.Name, opts.IBMCloudAPIKey)
+	creds := buildCredentialsSecret(opts.Name, opts)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRSecret, opts.Name, creds); err != nil {
 		return fmt.Errorf("creating credentials secret: %w", err)
 	}
@@ -193,6 +210,21 @@ func (m *Manager) Destroy(ctx context.Context, name string) error {
 		cleanupIBMCloudCredentials(m.cfg.IBMCloudAPIKey, name)
 	}
 	return nil
+}
+
+func (m *Manager) DestroyIfFailed(ctx context.Context, name string) (bool, error) {
+	info, err := m.Status(ctx, name)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if info.FailureReason != "" || (!info.Provisioned && !info.Installed) {
+		m.logger.Info("provisioning.DestroyIfFailed: cleaning up failed cluster", "cluster", name, "reason", info.FailureReason)
+		return true, m.Destroy(ctx, name)
+	}
+	return false, nil
 }
 
 func (m *Manager) Status(ctx context.Context, name string) (*ClusterInfo, error) {
