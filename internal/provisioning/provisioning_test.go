@@ -582,10 +582,12 @@ func TestCreateAWSPlatform(t *testing.T) {
 	m := New(c, cfg, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
-		Name:       "aws1",
-		Platform:   "aws",
-		PullSecret: `{"auths":{}}`,
-		Region:     "us-east-1",
+		Name:               "aws1",
+		Platform:           "aws",
+		PullSecret:         `{"auths":{}}`,
+		Region:             "us-east-1",
+		AWSAccessKeyID:     "test-access-key-id",
+		AWSSecretAccessKey: "test-secret-access-key",
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
