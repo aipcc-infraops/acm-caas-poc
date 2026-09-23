@@ -183,6 +183,61 @@ func TestCreateAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestCreateAWSUsesAWSBaseDomainAndRegion(t *testing.T) {
+	c := fakeClient()
+	cfg := testConfig()
+	cfg.AWSRegion = "us-east-1"
+	cfg.AWSBaseDomain = "aws-zone.example.com"
+	m := New(c, cfg, discardLogger)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:               "aws-spoke",
+		Platform:           "aws",
+		PullSecret:         `{"auths":{}}`,
+		AWSAccessKeyID:     "test-access-key-id",
+		AWSSecretAccessKey: "test-secret-access-key",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	cd, _ := c.Get(context.Background(), client.GVRClusterDeployment, "aws-spoke", "aws-spoke")
+	spec, _ := cd.Object["spec"].(map[string]interface{})
+	if spec["baseDomain"] != "aws-zone.example.com" {
+		t.Errorf("baseDomain = %v, want aws-zone.example.com", spec["baseDomain"])
+	}
+	platform, _ := spec["platform"].(map[string]interface{})
+	aws, _ := platform["aws"].(map[string]interface{})
+	if aws["region"] != "us-east-1" {
+		t.Errorf("region = %v, want us-east-1", aws["region"])
+	}
+}
+
+func TestCreateAWSFallsBackToBaseDomain(t *testing.T) {
+	c := fakeClient()
+	cfg := testConfig()
+	cfg.AWSRegion = "us-east-1"
+	cfg.AWSBaseDomain = ""
+	m := New(c, cfg, discardLogger)
+
+	err := m.Create(context.Background(), ClusterOpts{
+		Name:               "aws-spoke",
+		Platform:           "aws",
+		PullSecret:         `{"auths":{}}`,
+		AWSAccessKeyID:     "test-access-key-id",
+		AWSSecretAccessKey: "test-secret-access-key",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	cd, _ := c.Get(context.Background(), client.GVRClusterDeployment, "aws-spoke", "aws-spoke")
+	spec, _ := cd.Object["spec"].(map[string]interface{})
+	if spec["baseDomain"] != "example.com" {
+		t.Errorf("baseDomain = %v, want example.com (fallback)", spec["baseDomain"])
+	}
+}
+
 func TestDestroyDeletesClusterDeployment(t *testing.T) {
 	cd := &unstructured.Unstructured{}
 	cd.SetGroupVersionKind(schema.GroupVersionKind{
