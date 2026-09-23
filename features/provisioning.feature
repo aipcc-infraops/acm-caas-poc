@@ -16,6 +16,14 @@ Feature: Cluster provisioning via Hive ClusterDeployment
     Then the ClusterDeployment "spoke-test" is accepted by Hive
     And the cluster "spoke-test" eventually reaches Provisioned = True
 
+  @slow @aws
+  Scenario: Create an AWS ClusterDeployment and wait for provisioning
+    Given cloud credentials exist as a Secret in namespace "spoke1"
+    And a ClusterImageSet for the target OCP version exists
+    When I provision cluster "spoke1" with default settings
+    Then the ClusterDeployment "spoke1" is accepted by Hive
+    And the cluster "spoke1" eventually reaches Provisioned = True
+
   Scenario: List provisioned clusters
     When I list all provisioned clusters
     Then I receive a list of ClusterDeployments with status
