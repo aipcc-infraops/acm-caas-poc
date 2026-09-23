@@ -74,7 +74,11 @@ func (m *Manager) applyDefaults(opts *ClusterOpts) {
 		}
 	}
 	if opts.BaseDomain == "" {
-		opts.BaseDomain = m.cfg.BaseDomain
+		if opts.Platform == "aws" && m.cfg.AWSBaseDomain != "" {
+			opts.BaseDomain = m.cfg.AWSBaseDomain
+		} else {
+			opts.BaseDomain = m.cfg.BaseDomain
+		}
 	}
 	if opts.ImageSet == "" {
 		opts.ImageSet = m.cfg.ClusterImageSet
