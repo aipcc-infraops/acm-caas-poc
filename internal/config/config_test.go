@@ -86,3 +86,60 @@ func TestLoadFromEnvReturnsErrorForInvalidDuration(t *testing.T) {
 		t.Error("expected error for invalid duration, got nil")
 	}
 }
+
+func TestResolveCluster(t *testing.T) {
+	cfg := Config{
+		ClusterSpoke1: "my-spoke1",
+		ClusterSpoke2: "my-spoke2",
+		ClusterHub:    "my-hub",
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"spoke1", "my-spoke1"},
+		{"spoke2", "my-spoke2"},
+		{"infraops1", "my-hub"},
+		{"other-cluster", "other-cluster"},
+	}
+
+	for _, tt := range tests {
+		got := cfg.ResolveCluster(tt.input)
+		if got != tt.want {
+			t.Errorf("ResolveCluster(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestLoadFromEnvReadsClusterMapping(t *testing.T) {
+	t.Setenv("ACM_CLUSTER_SPOKE1", "custom-spoke1")
+	t.Setenv("ACM_CLUSTER_SPOKE2", "custom-spoke2")
+	t.Setenv("ACM_CLUSTER_HUB", "custom-hub")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ClusterSpoke1 != "custom-spoke1" {
+		t.Errorf("ClusterSpoke1 = %q, want %q", cfg.ClusterSpoke1, "custom-spoke1")
+	}
+	if cfg.ClusterSpoke2 != "custom-spoke2" {
+		t.Errorf("ClusterSpoke2 = %q, want %q", cfg.ClusterSpoke2, "custom-spoke2")
+	}
+	if cfg.ClusterHub != "custom-hub" {
+		t.Errorf("ClusterHub = %q, want %q", cfg.ClusterHub, "custom-hub")
+	}
+}
+
+func TestLoadFromEnvReadsAWSRegion(t *testing.T) {
+	t.Setenv("AWS_REGION", "eu-west-1")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AWSRegion != "eu-west-1" {
+		t.Errorf("AWSRegion = %q, want %q", cfg.AWSRegion, "eu-west-1")
+	}
+}
