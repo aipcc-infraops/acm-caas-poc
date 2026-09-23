@@ -582,10 +582,12 @@ func TestCreateAWSPlatform(t *testing.T) {
 	m := New(c, cfg, discardLogger)
 
 	err := m.Create(context.Background(), ClusterOpts{
-		Name:       "aws1",
-		Platform:   "aws",
-		PullSecret: `{"auths":{}}`,
-		Region:     "us-east-1",
+		Name:               "aws1",
+		Platform:           "aws",
+		PullSecret:         `{"auths":{}}`,
+		Region:             "us-east-1",
+		AWSAccessKeyID:     "test-access-key-id",
+		AWSSecretAccessKey: "test-secret-access-key",
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -827,4 +829,73 @@ func TestListMultipleImageSets(t *testing.T) {
 	}
 }
 
+func TestDestroyIfFailedCleansFailedCluster(t *testing.T) {
+	cd := &unstructured.Unstructured{}
+	cd.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+	})
+	cd.SetName("broken")
+	cd.SetNamespace("broken")
+	cd.Object["status"] = map[string]interface{}{
+		"conditions": []interface{}{
+			map[string]interface{}{
+				"type":   "ProvisionFailed",
+				"status": "True",
+				"reason": "InfraError",
+			},
+		},
+	}
 
+	c := fakeClient(cd)
+	m := New(c, testConfig(), discardLogger)
+
+	destroyed, err := m.DestroyIfFailed(context.Background(), "broken")
+	if err != nil {
+		t.Fatalf("DestroyIfFailed returned error: %v", err)
+	}
+	if !destroyed {
+		t.Error("expected destroyed=true for failed cluster")
+	}
+}
+
+func TestDestroyIfFailedSkipsHealthyCluster(t *testing.T) {
+	cd := &unstructured.Unstructured{}
+	cd.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "hive.openshift.io", Version: "v1", Kind: "ClusterDeployment",
+	})
+	cd.SetName("healthy")
+	cd.SetNamespace("healthy")
+	cd.Object["status"] = map[string]interface{}{
+		"installed": true,
+		"conditions": []interface{}{
+			map[string]interface{}{
+				"type":   "Provisioned",
+				"status": "True",
+			},
+		},
+	}
+
+	c := fakeClient(cd)
+	m := New(c, testConfig(), discardLogger)
+
+	destroyed, err := m.DestroyIfFailed(context.Background(), "healthy")
+	if err != nil {
+		t.Fatalf("DestroyIfFailed returned error: %v", err)
+	}
+	if destroyed {
+		t.Error("expected destroyed=false for healthy cluster")
+	}
+}
+
+func TestDestroyIfFailedNonexistentReturnsNoError(t *testing.T) {
+	c := fakeClient()
+	m := New(c, testConfig(), discardLogger)
+
+	destroyed, err := m.DestroyIfFailed(context.Background(), "nonexistent")
+	if err != nil {
+		t.Fatalf("DestroyIfFailed returned error: %v", err)
+	}
+	if destroyed {
+		t.Error("expected destroyed=false for nonexistent cluster")
+	}
+}
