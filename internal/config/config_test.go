@@ -77,6 +77,34 @@ func TestLoadFromEnvReturnsErrorForInvalidInt(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvReadsAWSFields(t *testing.T) {
+	t.Setenv("AWS_REGION", "eu-west-1")
+	t.Setenv("ACM_AWS_BASE_DOMAIN", "my-zone.example.com")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AWSRegion != "eu-west-1" {
+		t.Errorf("AWSRegion = %q, want %q", cfg.AWSRegion, "eu-west-1")
+	}
+	if cfg.AWSBaseDomain != "my-zone.example.com" {
+		t.Errorf("AWSBaseDomain = %q, want %q", cfg.AWSBaseDomain, "my-zone.example.com")
+	}
+}
+
+func TestLoadFromEnvAWSRegionDefault(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AWSRegion != "us-east-1" {
+		t.Errorf("default AWSRegion = %q, want %q", cfg.AWSRegion, "us-east-1")
+	}
+}
+
 func TestLoadFromEnvReturnsErrorForInvalidDuration(t *testing.T) {
 	os.Setenv("ACM_PROVISION_TIMEOUT", "not-a-duration")
 	defer os.Unsetenv("ACM_PROVISION_TIMEOUT")
@@ -132,14 +160,3 @@ func TestLoadFromEnvReadsClusterMapping(t *testing.T) {
 	}
 }
 
-func TestLoadFromEnvReadsAWSRegion(t *testing.T) {
-	t.Setenv("AWS_REGION", "eu-west-1")
-
-	cfg, err := LoadFromEnv()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.AWSRegion != "eu-west-1" {
-		t.Errorf("AWSRegion = %q, want %q", cfg.AWSRegion, "eu-west-1")
-	}
-}

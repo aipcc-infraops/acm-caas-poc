@@ -14,7 +14,8 @@ type Config struct {
 	Platform       string
 	IBMCloudAPIKey string
 	IBMCloudRegion string
-	AWSRegion      string
+	AWSRegion     string
+	AWSBaseDomain string
 
 	BaseDomain          string
 	ClusterImageSet     string
@@ -41,6 +42,7 @@ func LoadFromEnv() (Config, error) {
 		IBMCloudAPIKey: envOr("IBMCLOUD_API_KEY", ""),
 		IBMCloudRegion: envOr("IBMCLOUD_REGION", "us-south"),
 		AWSRegion:      envOr("AWS_REGION", "us-east-1"),
+		AWSBaseDomain:  envOr("ACM_AWS_BASE_DOMAIN", ""),
 		BaseDomain:     envOr("ACM_BASE_DOMAIN", ""),
 		ClusterImageSet: envOr("ACM_CLUSTER_IMAGE_SET", "img4.22.9-multi-appsub"),
 		DefaultWorkerType: envOr("ACM_DEFAULT_WORKER_TYPE", "bx2-4x16"),
