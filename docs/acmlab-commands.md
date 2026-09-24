@@ -50,6 +50,31 @@ Conditions:
 
 ### Provisioning
 
+#### `acmlab provision preflight <name>`
+
+Runs preflight checks before provisioning — validates credentials, cloud quota, ClusterImageSet availability, pull secret format, and name conflicts. Catches problems in seconds instead of failing after 40 minutes of provisioning. Automatically runs before `acmlab provision create`.
+
+Options:
+- `--platform`: cloud platform: ibmcloud, aws (default: from `ACM_PLATFORM` env)
+- `--region`: cloud region (default: from config)
+- `--pull-secret`: path to pull secret file
+
+```
+$ acmlab provision preflight my-cluster --platform aws --pull-secret ~/pull-secret.json
+Running preflight checks...
+
+  ┌─ Preflight checks
+  │  ✓ aws-credentials
+  │  ✓ cluster-image-set          img4.22.9-multi-appsub
+  │  ✓ pull-secret
+  │  ✓ name-conflict
+  │  ✓ aws-auth                   arn:aws:iam::123456789012:user/example
+  │  ✓ aws-vcpu-quota             512 vCPUs available (need ~28)
+  └─ 6 passed, 0 failed, 0 warnings
+
+All preflight checks passed — safe to provision.
+```
+
 #### `acmlab provision create <name>`
 
 Provisions a spoke cluster via Hive ClusterDeployment and auto-imports it as a ManagedCluster in ACM. For IBM Cloud, IAM credentials (Service IDs + API keys) are auto-generated via the IBM Cloud IAM API: no external `ccoctl` tooling needed. Idempotent.
@@ -2170,6 +2195,7 @@ Starts the MCP server on stdio. Register as `acmlab` in Claude Code's MCP config
 | `acm_apply_policy` | UC-02 | Creates/updates image registry policy |
 | `acm_remove_policy` | UC-02 | Removes a policy |
 | `acm_set_policy_remediation` | UC-02 | Changes policy remediation mode |
+| `acm_provision_preflight` | UC-01 | Preflight checks: credentials, quota, image sets, name conflicts |
 | `acm_provision_create` | UC-01 | Creates ClusterDeployment + ManagedCluster (auto-generates IBM Cloud IAM creds) |
 | `acm_provision_destroy` | UC-01 | Deletes ClusterDeployment, cleans up IAM |
 | `acm_provision_status` | UC-01 | ClusterDeployment provisioning status |

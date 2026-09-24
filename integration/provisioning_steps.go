@@ -125,12 +125,13 @@ func (s *suiteContext) acmCredentialExists(ctx context.Context, name string) err
 }
 
 func (s *suiteContext) iProvisionClusterOnPlatform(ctx context.Context, name, platform string) error {
+	resolved := s.resolveCluster(name)
 	pullSecret, err := s.fetchPullSecret(ctx)
 	if err != nil {
 		return fmt.Errorf("fetching pull secret: %w", err)
 	}
 	opts := provisioning.ClusterOpts{
-		Name:       name,
+		Name:       resolved,
 		Platform:   platform,
 		PullSecret: pullSecret,
 	}
@@ -149,7 +150,7 @@ func (s *suiteContext) iProvisionClusterOnPlatform(ctx context.Context, name, pl
 		}
 		opts.IBMCloudAPIKey = apiKey
 	}
-	fmt.Printf("\n  ┌─ Provisioning cluster %q (platform=%s)\n", name, platform)
+	fmt.Printf("\n  ┌─ Provisioning cluster %q (platform=%s)\n", resolved, platform)
 	fmt.Printf("  └─\n")
 	return s.provisioner.Create(ctx, opts)
 }
