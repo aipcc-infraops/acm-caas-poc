@@ -224,7 +224,7 @@ func (m *Manager) DestroyIfFailed(ctx context.Context, name string) (bool, error
 		}
 		return false, err
 	}
-	if info.FailureReason != "" || (!info.Provisioned && !info.Installed) {
+	if info.FailureReason != "" {
 		m.logger.Info("provisioning.DestroyIfFailed: cleaning up failed cluster", "cluster", name, "reason", info.FailureReason)
 		return true, m.Destroy(ctx, name)
 	}
