@@ -49,6 +49,9 @@ type Manager struct {
 	client *client.Client
 	cfg    config.Config
 	logger *slog.Logger
+
+	iamURL string // override for testing; defaults to https://iam.cloud.ibm.com
+	vpcURL string // override for testing; defaults to https://{region}.iaas.cloud.ibm.com
 }
 
 func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {

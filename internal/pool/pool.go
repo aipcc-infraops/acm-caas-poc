@@ -10,6 +10,8 @@ import (
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 	"github.com/pablofelix/acm-caas-poc/internal/config"
+	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
+	"github.com/pablofelix/acm-caas-poc/internal/provisioning"
 )
 
 type PoolOpts struct {
@@ -46,13 +48,25 @@ type ClaimInfo struct {
 }
 
 type Manager struct {
-	client *client.Client
-	cfg    config.Config
-	logger *slog.Logger
+	client       *client.Client
+	cfg          config.Config
+	logger       *slog.Logger
+	provisioning *provisioning.Manager
+	lifecycle    *lifecycle.Manager
 }
 
 func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 	return &Manager{client: c, cfg: cfg, logger: logger}
+}
+
+func NewWithManagers(c *client.Client, cfg config.Config, logger *slog.Logger, provMgr *provisioning.Manager, lcMgr *lifecycle.Manager) *Manager {
+	return &Manager{
+		client:       c,
+		cfg:          cfg,
+		logger:       logger,
+		provisioning: provMgr,
+		lifecycle:    lcMgr,
+	}
 }
 
 func (m *Manager) CreatePool(ctx context.Context, opts PoolOpts) error {
