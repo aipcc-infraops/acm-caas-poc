@@ -49,6 +49,9 @@ type Manager struct {
 	client *client.Client
 	cfg    config.Config
 	logger *slog.Logger
+
+	iamURL string // override for testing; defaults to https://iam.cloud.ibm.com
+	vpcURL string // override for testing; defaults to https://{region}.iaas.cloud.ibm.com
 }
 
 func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
@@ -224,7 +227,7 @@ func (m *Manager) DestroyIfFailed(ctx context.Context, name string) (bool, error
 		}
 		return false, err
 	}
-	if info.FailureReason != "" || (!info.Provisioned && !info.Installed) {
+	if info.FailureReason != "" {
 		m.logger.Info("provisioning.DestroyIfFailed: cleaning up failed cluster", "cluster", name, "reason", info.FailureReason)
 		return true, m.Destroy(ctx, name)
 	}
