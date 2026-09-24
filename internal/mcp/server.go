@@ -457,6 +457,45 @@ func registerTenantTools(s *server.MCPServer, ten *tenant.Manager) {
 
 func registerProvisioningTools(s *server.MCPServer, prov *provisioning.Manager, cfg config.Config) {
 	s.AddTool(
+		mcp.NewTool("acm_provision_preflight",
+			mcp.WithDescription("Run preflight checks before provisioning — validates credentials, quota, image sets, and name conflicts. Run this before acm_provision_create to catch problems in seconds instead of failing after 40 minutes."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name to check")),
+			mcp.WithString("platform", mcp.Description("Cloud platform: ibmcloud, aws")),
+			mcp.WithString("pull_secret", mcp.Description("Pull secret JSON")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, _ := req.RequireString("name")
+			platform, _ := req.GetArguments()["platform"].(string)
+			pullSecret, _ := req.GetArguments()["pull_secret"].(string)
+
+			if platform == "" {
+				platform = cfg.Platform
+			}
+			opts := provisioning.ClusterOpts{
+				Name:       name,
+				Platform:   platform,
+				PullSecret: pullSecret,
+			}
+			if platform == "aws" {
+				awsCreds, err := provisioning.LoadAWSCredentials("")
+				if err == nil {
+					opts.AWSAccessKeyID = awsCreds.AccessKeyID
+					opts.AWSSecretAccessKey = awsCreds.SecretAccessKey
+				}
+			}
+			if platform == "ibmcloud" {
+				opts.IBMCloudAPIKey = cfg.IBMCloudAPIKey
+			}
+
+			results, err := prov.Preflight(ctx, opts)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("preflight error: %v", err)), nil
+			}
+			return mcp.NewToolResultText(provisioning.FormatPreflightResults(results)), nil
+		},
+	)
+
+	s.AddTool(
 		mcp.NewTool("acm_provision_create",
 			mcp.WithDescription("Create a spoke cluster via Hive ClusterDeployment. Requires pull secret. Idempotent. For IBM Cloud, IAM credentials are auto-generated."),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Cluster name")),
@@ -475,6 +514,9 @@ func registerProvisioningTools(s *server.MCPServer, prov *provisioning.Manager, 
 			imageSet, _ := req.GetArguments()["image_set"].(string)
 			workerType, _ := req.GetArguments()["worker_type"].(string)
 
+			if platform == "" {
+				platform = cfg.Platform
+			}
 			opts := provisioning.ClusterOpts{
 				Name:       name,
 				Platform:   platform,

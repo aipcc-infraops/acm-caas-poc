@@ -19,6 +19,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/lifecycle"
 	"github.com/pablofelix/acm-caas-poc/internal/monitoring"
 	"github.com/pablofelix/acm-caas-poc/internal/policy"
+	"github.com/pablofelix/acm-caas-poc/internal/pool"
 	"github.com/pablofelix/acm-caas-poc/internal/provisioning"
 	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
@@ -36,7 +37,8 @@ type suiteContext struct {
 	importing   *importing.Manager
 	scaling     *scaling.Manager
 	registry    *registry.Manager
-	provisioner *provisioning.Manager
+	provisioner  *provisioning.Manager
+	poolManager  *pool.Manager
 
 	err            error
 	clusters       []fleet.ClusterInfo
@@ -56,6 +58,10 @@ type suiteContext struct {
 	mirrorScript   string
 	powerState         lifecycle.PowerState
 	provisionList      []provisioning.ClusterInfo
+	poolList           []pool.PoolInfo
+	claimList          []pool.ClaimInfo
+	lastClaimInfo      *pool.ClaimInfo
+	lastPoolName       string
 	lifecycleCluster       string
 	lifecycleNamespace     string
 	lastManifestWorkName   string
@@ -140,6 +146,10 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 	// Provisioning steps
 	registerProvisioningSteps(sc, s)
+
+	// Pool steps
+	registerPoolSteps(sc, s)
+	registerManualPoolSteps(sc, s)
 }
 
 func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
@@ -165,6 +175,7 @@ func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
 	s.scaling = scaling.New(c, cfg, logger)
 	s.registry = registry.New(c, cfg, logger)
 	s.provisioner = provisioning.New(c, cfg, logger)
+	s.poolManager = pool.NewWithManagers(c, cfg, logger, s.provisioner, s.lifecycle)
 
 	return nil
 }

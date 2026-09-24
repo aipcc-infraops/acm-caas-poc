@@ -19,6 +19,8 @@ func provisionCmd() *cobra.Command {
 		Short: "Provision and manage spoke clusters (Hive, HyperShift, CAPI)",
 	}
 	cmd.AddCommand(
+		provisionPreflightCmd(),
+		provisionOrphanCheckCmd(),
 		provisionCreateCmd(),
 		provisionDestroyCmd(),
 		provisionStatusCmd(),
@@ -32,6 +34,94 @@ func provisionCmd() *cobra.Command {
 		provisionTemplateRemoveCmd(),
 		provisionTemplateApplyCmd(),
 	)
+	return cmd
+}
+
+func provisionPreflightCmd() *cobra.Command {
+	var platform, region, pullSecretFile string
+	cmd := &cobra.Command{
+		Use:   "preflight <cluster-name>",
+		Short: "Run preflight checks before provisioning (credentials, quota, image sets)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+
+			opts := provisioning.ClusterOpts{
+				Name:     args[0],
+				Platform: platform,
+				Region:   region,
+			}
+
+			if pullSecretFile != "" {
+				data, err := os.ReadFile(pullSecretFile)
+				if err != nil {
+					return fmt.Errorf("reading pull secret: %w", err)
+				}
+				opts.PullSecret = string(data)
+			}
+
+			if opts.Platform == "aws" || (opts.Platform == "" && cfg.Platform == "aws") {
+				awsCreds, err := provisioning.LoadAWSCredentials("")
+				if err != nil {
+					return fmt.Errorf("loading AWS credentials: %w", err)
+				}
+				opts.AWSAccessKeyID = awsCreds.AccessKeyID
+				opts.AWSSecretAccessKey = awsCreds.SecretAccessKey
+			}
+
+			results, err := mgr.Preflight(context.Background(), opts)
+			if err != nil {
+				return fmt.Errorf("preflight: %w", err)
+			}
+			fmt.Print(provisioning.FormatPreflightResults(results))
+			if !provisioning.PreflightPassed(results) {
+				return fmt.Errorf("preflight checks failed")
+			}
+			fmt.Println("All preflight checks passed — safe to provision.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&platform, "platform", "", "Cloud platform: ibmcloud, aws")
+	cmd.Flags().StringVar(&region, "region", "", "Cloud region")
+	cmd.Flags().StringVar(&pullSecretFile, "pull-secret", "", "Path to pull secret file")
+	return cmd
+}
+
+func provisionOrphanCheckCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "orphan-check <cluster-name>",
+		Short: "Check for orphaned cloud resources from a cluster's infrastructure",
+		Long:  "Queries the cloud provider for resources matching the cluster's infraID. Use after destroy to verify all resources were cleaned up, or proactively to find leaked resources.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := provisioning.New(c, cfg, logger)
+			ctx := context.Background()
+
+			infraID, platform, region, err := mgr.CaptureInfraID(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("reading cluster metadata: %w", err)
+			}
+
+			result, err := mgr.CheckOrphans(ctx, infraID, platform, region)
+			if err != nil {
+				return fmt.Errorf("orphan check: %w", err)
+			}
+
+			fmt.Print(provisioning.FormatOrphanCheckResult(result))
+			if !result.Clean {
+				return fmt.Errorf("%d orphaned resources found", len(result.Orphans))
+			}
+			return nil
+		},
+	}
 	return cmd
 }
 
@@ -133,6 +223,25 @@ func provisionCreateCmd() *cobra.Command {
 					return fmt.Errorf("reading SSH private key: %w", err)
 				}
 				opts.SSHPrivateKey = string(data)
+			}
+
+			if opts.Platform == "aws" || (opts.Platform == "" && cfg.Platform == "aws") {
+				awsCreds, err := provisioning.LoadAWSCredentials("")
+				if err != nil {
+					return fmt.Errorf("loading AWS credentials: %w", err)
+				}
+				opts.AWSAccessKeyID = awsCreds.AccessKeyID
+				opts.AWSSecretAccessKey = awsCreds.SecretAccessKey
+			}
+
+			fmt.Println("Running preflight checks...")
+			results, err := mgr.Preflight(context.Background(), opts)
+			if err != nil {
+				return fmt.Errorf("preflight: %w", err)
+			}
+			fmt.Print(provisioning.FormatPreflightResults(results))
+			if !provisioning.PreflightPassed(results) {
+				return fmt.Errorf("preflight checks failed — fix the issues above before provisioning")
 			}
 
 			fmt.Printf("Creating cluster %s in %s...\n", args[0], opts.Region)
