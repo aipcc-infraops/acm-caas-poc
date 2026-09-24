@@ -67,6 +67,7 @@ type suiteContext struct {
 	lastManifestWorkName   string
 	lastManifestWorkNS     string
 	importKubeconfig       []byte
+	hypershiftList         []provisioning.HyperShiftInfo
 }
 
 func TestFeatures(t *testing.T) {
@@ -113,6 +114,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		s.lifecycleNamespace = ""
 		s.lastManifestWorkName = ""
 		s.lastManifestWorkNS = ""
+		s.hypershiftList = nil
 		return ctx, nil
 	})
 
@@ -150,6 +152,9 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	// Pool steps
 	registerPoolSteps(sc, s)
 	registerManualPoolSteps(sc, s)
+
+	// HyperShift steps
+	registerHyperShiftSteps(sc, s)
 }
 
 func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
