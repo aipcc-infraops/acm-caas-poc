@@ -149,6 +149,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 	// Pool steps
 	registerPoolSteps(sc, s)
+	registerManualPoolSteps(sc, s)
 }
 
 func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
@@ -174,7 +175,7 @@ func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
 	s.scaling = scaling.New(c, cfg, logger)
 	s.registry = registry.New(c, cfg, logger)
 	s.provisioner = provisioning.New(c, cfg, logger)
-	s.poolManager = pool.New(c, cfg, logger)
+	s.poolManager = pool.NewWithManagers(c, cfg, logger, s.provisioner, s.lifecycle)
 
 	return nil
 }

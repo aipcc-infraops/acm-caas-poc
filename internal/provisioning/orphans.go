@@ -193,12 +193,11 @@ func checkAWSOrphans(infraID, region string) ([]OrphanedResource, error) {
 }
 
 func (m *Manager) checkIBMCloudOrphans(infraID, region string) ([]OrphanedResource, error) {
-	// Get IAM token
 	iamToken := ""
 	if m.cfg.IBMCloudAPIKey != "" {
 		httpClient := &http.Client{Timeout: 10 * time.Second}
 		body := strings.NewReader("grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=" + m.cfg.IBMCloudAPIKey)
-		req, _ := http.NewRequest("POST", "https://iam.cloud.ibm.com/identity/token", body)
+		req, _ := http.NewRequest("POST", m.ibmIAMURL()+"/identity/token", body)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		resp, err := httpClient.Do(req)
 		if err != nil {
@@ -216,32 +215,30 @@ func (m *Manager) checkIBMCloudOrphans(infraID, region string) ([]OrphanedResour
 		return nil, fmt.Errorf("no IBM Cloud credentials available for orphan check")
 	}
 
-	var orphans []OrphanedResource
-	httpClient := &http.Client{Timeout: 15 * time.Second}
-	baseURL := fmt.Sprintf("https://%s.iaas.cloud.ibm.com/v1", region)
-	version := "2024-06-04"
+	baseURL := fmt.Sprintf("%s/v1", m.ibmVPCURL(region))
+	return queryIBMCloudOrphans(&http.Client{Timeout: 15 * time.Second}, iamToken, baseURL, infraID)
+}
 
-	// Instances
+func queryIBMCloudOrphans(httpClient *http.Client, iamToken, baseURL, infraID string) ([]OrphanedResource, error) {
+	version := "2024-06-04"
+	var orphans []OrphanedResource
+
 	orphans = append(orphans, queryIBMCloudVPC(httpClient, iamToken,
 		fmt.Sprintf("%s/instances?version=%s&generation=2&limit=100", baseURL, version),
 		infraID, "instance")...)
 
-	// Load balancers
 	orphans = append(orphans, queryIBMCloudVPC(httpClient, iamToken,
 		fmt.Sprintf("%s/load_balancers?version=%s&generation=2", baseURL, version),
 		infraID, "load-balancer")...)
 
-	// Subnets
 	orphans = append(orphans, queryIBMCloudVPC(httpClient, iamToken,
 		fmt.Sprintf("%s/subnets?version=%s&generation=2", baseURL, version),
 		infraID, "subnet")...)
 
-	// VPCs
 	orphans = append(orphans, queryIBMCloudVPC(httpClient, iamToken,
 		fmt.Sprintf("%s/vpcs?version=%s&generation=2", baseURL, version),
 		infraID, "vpc")...)
 
-	// Floating IPs
 	orphans = append(orphans, queryIBMCloudVPC(httpClient, iamToken,
 		fmt.Sprintf("%s/floating_ips?version=%s&generation=2", baseURL, version),
 		infraID, "floating-ip")...)

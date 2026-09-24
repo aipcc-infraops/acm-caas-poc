@@ -230,10 +230,24 @@ func (m *Manager) checkIBMCloudPreflight(ctx context.Context, opts ClusterOpts) 
 	return results
 }
 
+func (m *Manager) ibmIAMURL() string {
+	if m.iamURL != "" {
+		return m.iamURL
+	}
+	return "https://iam.cloud.ibm.com"
+}
+
+func (m *Manager) ibmVPCURL(region string) string {
+	if m.vpcURL != "" {
+		return m.vpcURL
+	}
+	return fmt.Sprintf("https://%s.iaas.cloud.ibm.com", region)
+}
+
 func (m *Manager) checkIBMCloudIAM(opts ClusterOpts) (PreflightResult, string) {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	body := strings.NewReader("grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=" + opts.IBMCloudAPIKey)
-	req, _ := http.NewRequest("POST", "https://iam.cloud.ibm.com/identity/token", body)
+	req, _ := http.NewRequest("POST", m.ibmIAMURL()+"/identity/token", body)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := httpClient.Do(req)
@@ -275,7 +289,7 @@ func (m *Manager) checkIBMCloudIAM(opts ClusterOpts) (PreflightResult, string) {
 
 func (m *Manager) checkIBMCloudVCPUQuota(opts ClusterOpts, iamToken string) []PreflightResult {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
-	url := fmt.Sprintf("https://%s.iaas.cloud.ibm.com/v1/instances?version=2024-06-04&generation=2&limit=100", opts.Region)
+	url := fmt.Sprintf("%s/v1/instances?version=2024-06-04&generation=2&limit=100", m.ibmVPCURL(opts.Region))
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", "Bearer "+iamToken)
 
