@@ -291,3 +291,19 @@ func metricsToYAML(metrics []string) string {
 	}
 	return sb.String()
 }
+
+func buildWorkloadMetricsConfigMap(ns string, metrics []string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      MetricsAllowlistCM,
+				"namespace": ns,
+			},
+			"data": map[string]interface{}{
+				"uwl_metrics_list.yaml": "names:\n" + metricsToYAML(metrics),
+			},
+		},
+	}
+}
