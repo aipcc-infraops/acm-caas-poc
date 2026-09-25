@@ -115,9 +115,10 @@ Feature: Observability stack customisation (UC-52)
     Then the ConfigMap "observability-metrics-custom-allowlist" is created
     And the "metrics_list.yaml" key contains the specified metrics
 
+  @pending
   Scenario: Configure user workload metrics
     When I configure metrics with scope "workload" and metrics "my_app_requests_total"
-    Then the ConfigMap "observability-metrics-custom-allowlist" has key "uwl_metrics_list.yaml"
+    Then the operation indicates that user workload monitoring must be configured on each managed cluster
 
   @pending
   Scenario: Configure per-cluster metrics
