@@ -300,7 +300,7 @@ func TestRemoveCustomRules(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	_ = mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: "test"})
+	_ = mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: "groups:\n- name: temp\n  rules: []"})
 	if err := mgr.RemoveCustomRules(context.Background()); err != nil {
 		t.Fatalf("RemoveCustomRules failed: %v", err)
 	}
@@ -786,8 +786,10 @@ func TestVerifyWithWorkloads(t *testing.T) {
 	dep.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"})
 	dep.SetName("observability-observatorium-api")
 	dep.SetNamespace(Namespace)
+	dep.Object["spec"] = map[string]interface{}{
+		"replicas": int64(1),
+	}
 	dep.Object["status"] = map[string]interface{}{
-		"replicas":          int64(1),
 		"availableReplicas": int64(1),
 	}
 
@@ -893,8 +895,10 @@ func TestVerifyWithStatefulSets(t *testing.T) {
 	sts.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "StatefulSet"})
 	sts.SetName("observability-thanos-receive")
 	sts.SetNamespace(Namespace)
+	sts.Object["spec"] = map[string]interface{}{
+		"replicas": int64(3),
+	}
 	sts.Object["status"] = map[string]interface{}{
-		"replicas":      int64(3),
 		"readyReplicas": int64(3),
 	}
 
@@ -982,5 +986,100 @@ func TestListAddonHealthNilStatus(t *testing.T) {
 	}
 	if health[0].Available {
 		t.Error("should not be available with nil status")
+	}
+}
+
+func TestVerifyPVCWithoutStatus(t *testing.T) {
+	mco := newMCO()
+	pvc := &unstructured.Unstructured{}
+	pvc.SetGroupVersionKind(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "PersistentVolumeClaim"})
+	pvc.SetName("no-status-pvc")
+	pvc.SetNamespace(Namespace)
+
+	c := fakeClient(mco, pvc)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	result, err := mgr.Verify(context.Background())
+	if err != nil {
+		t.Fatalf("Verify failed: %v", err)
+	}
+	if result.PVCsBound {
+		t.Error("PVCsBound should be false when PVC has no status")
+	}
+}
+
+func TestMergeMetricsKeyGetError(t *testing.T) {
+	c := fakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("get", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("api error")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.ConfigureMetrics(context.Background(), MetricsConfigOpts{
+		Scope:   MetricsScopeGlobal,
+		Metrics: []string{"test_metric"},
+	})
+	if err == nil {
+		t.Fatal("expected error when get fails")
+	}
+}
+
+func TestReviewPreserveMetricsKeys(t *testing.T) {
+	c := fakeClient()
+	m := New(c, config.Config{}, discardLogger)
+	ctx := context.Background()
+	if err := m.ConfigureMetrics(ctx, MetricsConfigOpts{Scope: MetricsScopeGlobal, Metrics: []string{"platform_metric"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ConfigureMetrics(ctx, MetricsConfigOpts{Scope: MetricsScopeWorkload, Metrics: []string{"workload_metric"}}); err != nil {
+		t.Fatal(err)
+	}
+	obj, err := c.Get(ctx, client.GVRConfigMap, Namespace, MetricsAllowlistCM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := obj.Object["data"].(map[string]interface{})["metrics_list.yaml"]; !ok {
+		t.Fatal("workload update erased platform metrics_list.yaml")
+	}
+}
+
+func TestReviewVerifyReportsReadFailure(t *testing.T) {
+	c := fakeClient(newMCO())
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("list", "persistentvolumeclaims", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("forbidden")
+	})
+	r, err := New(c, config.Config{}, discardLogger).Verify(context.Background())
+	if err == nil {
+		t.Fatalf("read error swallowed: PVCsBound=%v", r.PVCsBound)
+	}
+}
+
+func TestReviewVerifyDesiredReplicas(t *testing.T) {
+	d := &unstructured.Unstructured{}
+	d.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"})
+	d.SetName("observability-test")
+	d.SetNamespace(Namespace)
+	d.Object["spec"] = map[string]interface{}{"replicas": int64(3)}
+	d.Object["status"] = map[string]interface{}{"replicas": int64(1), "availableReplicas": int64(1)}
+	r, err := New(fakeClient(newMCO(), d), config.Config{}, discardLogger).Verify(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Workloads[0].Ready {
+		t.Fatal("deployment marked ready with only 1 of 3 desired replicas")
+	}
+}
+
+func TestReviewInvalidRulesRejectedByDeploy(t *testing.T) {
+	err := New(fakeClient(), config.Config{}, discardLogger).DeployCustomRules(context.Background(), CustomRuleOpts{Rules: "groups: ["})
+	if err == nil {
+		t.Fatal("DeployCustomRules accepted syntactically invalid YAML")
+	}
+}
+
+func TestReviewInvalidDashboardRejectedByDeploy(t *testing.T) {
+	err := New(fakeClient(), config.Config{}, discardLogger).DeployDashboard(context.Background(), DashboardOpts{Name: "bad-dashboard", JSON: "not json"})
+	if err == nil {
+		t.Fatal("DeployDashboard accepted invalid JSON")
 	}
 }

@@ -165,6 +165,9 @@ func observabilityDeployRulesCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("reading rules file: %w", err)
 			}
+			if err := observability.ValidateRulesYAML(string(data)); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
@@ -214,6 +217,9 @@ func observabilityDeployDashboardCmd() *cobra.Command {
 			data, err := os.ReadFile(dashFile)
 			if err != nil {
 				return fmt.Errorf("reading dashboard file: %w", err)
+			}
+			if err := observability.ValidateDashboardJSON(string(data)); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
 			}
 			c, err := buildClient()
 			if err != nil {
@@ -491,7 +497,6 @@ func observabilityGrafanaURLCmd() *cobra.Command {
 func observabilityConfigureAdvancedCmd() *cobra.Command {
 	var receiveReplicas, collectionInterval int64
 	var downsampling bool
-	var setDownsampling bool
 
 	cmd := &cobra.Command{
 		Use:   "configure-advanced",
@@ -509,7 +514,7 @@ func observabilityConfigureAdvancedCmd() *cobra.Command {
 			if cmd.Flags().Changed("collection-interval") {
 				opts.CollectionInterval = &collectionInterval
 			}
-			if setDownsampling {
+			if cmd.Flags().Changed("downsampling") {
 				opts.Downsampling = &downsampling
 			}
 			fmt.Println("Configuring advanced MCO settings...")
@@ -523,7 +528,6 @@ func observabilityConfigureAdvancedCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&receiveReplicas, "receive-replicas", 0, "number of Thanos receive replicas")
 	cmd.Flags().Int64Var(&collectionInterval, "collection-interval", 0, "metrics collection interval in seconds")
 	cmd.Flags().BoolVar(&downsampling, "downsampling", false, "enable downsampling")
-	cmd.Flags().BoolVar(&setDownsampling, "set-downsampling", false, "explicitly set the downsampling flag")
 	return cmd
 }
 
