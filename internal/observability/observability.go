@@ -200,6 +200,9 @@ func (m *Manager) ConfigureOBCStorage(ctx context.Context, opts StorageOpts) err
 
 func (m *Manager) DeployCustomRules(ctx context.Context, opts CustomRuleOpts) error {
 	m.logger.Info("observability.DeployCustomRules")
+	if err := ValidateRulesYAML(opts.Rules); err != nil {
+		return fmt.Errorf("rules validation: %w", err)
+	}
 	cm := buildCustomRulesConfigMap(Namespace, opts.Rules)
 	return m.createOrUpdate(ctx, client.GVRConfigMap, Namespace, cm)
 }
@@ -211,6 +214,9 @@ func (m *Manager) RemoveCustomRules(ctx context.Context) error {
 
 func (m *Manager) DeployDashboard(ctx context.Context, opts DashboardOpts) error {
 	m.logger.Info("observability.DeployDashboard", "name", opts.Name)
+	if err := ValidateDashboardJSON(opts.JSON); err != nil {
+		return fmt.Errorf("dashboard validation: %w", err)
+	}
 	cm := buildDashboardConfigMap(Namespace, opts.Name, opts.JSON)
 	return m.createOrUpdate(ctx, client.GVRConfigMap, Namespace, cm)
 }
@@ -330,11 +336,43 @@ func (m *Manager) ConfigureMetrics(ctx context.Context, opts MetricsConfigOpts) 
 	case MetricsScopeCluster:
 		return fmt.Errorf("per-cluster metrics configuration requires direct access to the managed cluster %q", opts.Cluster)
 	case MetricsScopeWorkload:
-		cm := buildWorkloadMetricsConfigMap(Namespace, opts.Metrics)
-		return m.createOrUpdate(ctx, client.GVRConfigMap, Namespace, cm)
+		return m.mergeMetricsKey(ctx, "uwl_metrics_list.yaml", opts.Metrics)
 	default:
-		return m.ConfigureMetricsAllowlist(ctx, MetricsOpts{Metrics: opts.Metrics})
+		return m.mergeMetricsKey(ctx, "metrics_list.yaml", opts.Metrics)
 	}
+}
+
+func (m *Manager) mergeMetricsKey(ctx context.Context, key string, metrics []string) error {
+	value := "names:\n" + metricsToYAML(metrics)
+	existing, err := m.client.Get(ctx, client.GVRConfigMap, Namespace, MetricsAllowlistCM)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		cm := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]interface{}{
+					"name":      MetricsAllowlistCM,
+					"namespace": Namespace,
+				},
+				"data": map[string]interface{}{
+					key: value,
+				},
+			},
+		}
+		_, err = m.client.Create(ctx, client.GVRConfigMap, Namespace, cm)
+		return err
+	}
+	data, _ := existing.Object["data"].(map[string]interface{})
+	if data == nil {
+		data = map[string]interface{}{}
+	}
+	data[key] = value
+	existing.Object["data"] = data
+	_, err = m.client.Update(ctx, client.GVRConfigMap, Namespace, existing)
+	return err
 }
 
 func (m *Manager) DisableCluster(ctx context.Context, name string) error {
@@ -571,54 +609,66 @@ func (m *Manager) Verify(ctx context.Context) (*VerifyResult, error) {
 	deps, err := m.client.Dynamic.Resource(client.GVRDeployment).
 		Namespace(Namespace).
 		List(ctx, metav1.ListOptions{})
-	if err == nil {
-		for _, d := range deps.Items {
-			ws := WorkloadStatus{Name: d.GetName()}
-			status, _ := d.Object["status"].(map[string]interface{})
-			if status != nil {
-				ws.Replicas, _ = status["replicas"].(int64)
-				ws.Available, _ = status["availableReplicas"].(int64)
-				ws.Ready = ws.Available > 0 && ws.Available >= ws.Replicas
-			}
-			result.Workloads = append(result.Workloads, ws)
+	if err != nil {
+		return nil, fmt.Errorf("listing deployments: %w", err)
+	}
+	for _, d := range deps.Items {
+		ws := WorkloadStatus{Name: d.GetName()}
+		spec, _ := d.Object["spec"].(map[string]interface{})
+		if spec != nil {
+			ws.Replicas, _ = spec["replicas"].(int64)
 		}
+		status, _ := d.Object["status"].(map[string]interface{})
+		if status != nil {
+			ws.Available, _ = status["availableReplicas"].(int64)
+		}
+		ws.Ready = ws.Replicas > 0 && ws.Available >= ws.Replicas
+		result.Workloads = append(result.Workloads, ws)
 	}
 
 	sts, err := m.client.Dynamic.Resource(client.GVRStatefulSet).
 		Namespace(Namespace).
 		List(ctx, metav1.ListOptions{})
-	if err == nil {
-		for _, s := range sts.Items {
-			ws := WorkloadStatus{Name: s.GetName()}
-			status, _ := s.Object["status"].(map[string]interface{})
-			if status != nil {
-				ws.Replicas, _ = status["replicas"].(int64)
-				ws.Available, _ = status["readyReplicas"].(int64)
-				ws.Ready = ws.Available > 0 && ws.Available >= ws.Replicas
-			}
-			result.Workloads = append(result.Workloads, ws)
+	if err != nil {
+		return nil, fmt.Errorf("listing statefulsets: %w", err)
+	}
+	for _, s := range sts.Items {
+		ws := WorkloadStatus{Name: s.GetName()}
+		spec, _ := s.Object["spec"].(map[string]interface{})
+		if spec != nil {
+			ws.Replicas, _ = spec["replicas"].(int64)
 		}
+		status, _ := s.Object["status"].(map[string]interface{})
+		if status != nil {
+			ws.Available, _ = status["readyReplicas"].(int64)
+		}
+		ws.Ready = ws.Replicas > 0 && ws.Available >= ws.Replicas
+		result.Workloads = append(result.Workloads, ws)
 	}
 
 	pvcs, err := m.client.Dynamic.Resource(client.GVRPersistentVolumeClaim).
 		Namespace(Namespace).
 		List(ctx, metav1.ListOptions{})
-	if err == nil {
-		for _, p := range pvcs.Items {
-			status, _ := p.Object["status"].(map[string]interface{})
-			if status != nil {
-				phase, _ := status["phase"].(string)
-				if phase != "Bound" {
-					result.PVCsBound = false
-				}
-			}
+	if err != nil {
+		return nil, fmt.Errorf("listing PVCs: %w", err)
+	}
+	for _, p := range pvcs.Items {
+		status, _ := p.Object["status"].(map[string]interface{})
+		if status == nil {
+			result.PVCsBound = false
+			continue
+		}
+		phase, _ := status["phase"].(string)
+		if phase != "Bound" {
+			result.PVCsBound = false
 		}
 	}
 
 	health, err := m.ListAddonHealth(ctx)
-	if err == nil {
-		result.AddonHealth = health
+	if err != nil {
+		return nil, fmt.Errorf("listing addon health: %w", err)
 	}
+	result.AddonHealth = health
 
 	return result, nil
 }

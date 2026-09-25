@@ -18,7 +18,7 @@ Three tiers of object storage are supported, selected via `--storage-backend`:
 
 **PoC (minio):** MinIO deployed as a single pod with a PVC (`ibmc-vpc-block-10iops-tier`, 20Gi). The `acmlab observability setup` command deploys MinIO, creates the Thanos secret, and creates the MCO CR — all idempotent. `acmlab observability teardown` removes everything cleanly.
 
-**Lab (obc):** ObjectBucketClaim (OBC) backed by NooBaa or a compatible CSI driver. The `acmlab observability configure-storage --storage-class <sc>` command creates the OBC, waits for it to bind, reads the generated bucket name and credentials from the OBC ConfigMap/Secret, and builds the Thanos secret automatically. No MinIO pod is deployed. Use `--storage-class` to specify the OBC storage class independently from the volume storage class.
+**Lab (obc) — planned:** ObjectBucketClaim (OBC) backed by NooBaa or a compatible CSI driver. When implemented, the `acmlab observability configure-storage --storage-class <sc>` command will create the OBC, wait for it to bind, read the generated bucket name and credentials from the OBC ConfigMap/Secret, and build the Thanos secret automatically. No MinIO pod will be deployed. The OBC storage class will be configurable independently from the volume storage class. This backend is not yet available — the CLI currently accepts the flag but the end-to-end OBC credential discovery is pending.
 
 **Production:** Replace with the cloud provider's native object storage (IBM COS, AWS S3, etc.). The only change is the Thanos secret content — the MCO CR and all other configuration remain identical.
 
