@@ -726,23 +726,19 @@ func TestConfigureAdvancedPreservesExisting(t *testing.T) {
 	}
 }
 
-func TestConfigureMetricsWorkload(t *testing.T) {
+func TestConfigureMetricsWorkloadError(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
 
-	if err := mgr.ConfigureMetrics(context.Background(), MetricsConfigOpts{
+	err := mgr.ConfigureMetrics(context.Background(), MetricsConfigOpts{
 		Scope:   MetricsScopeWorkload,
 		Metrics: []string{"my_app_requests_total"},
-	}); err != nil {
-		t.Fatalf("ConfigureMetrics (workload) failed: %v", err)
+	})
+	if err == nil {
+		t.Fatal("expected error for workload-scoped metrics")
 	}
-	obj, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, MetricsAllowlistCM)
-	if err != nil {
-		t.Fatalf("CM not found: %v", err)
-	}
-	data := obj.Object["data"].(map[string]interface{})
-	if _, ok := data["uwl_metrics_list.yaml"]; !ok {
-		t.Error("expected uwl_metrics_list.yaml key")
+	if !strings.Contains(err.Error(), "managed cluster") {
+		t.Errorf("error should mention managed cluster, got: %v", err)
 	}
 }
 
@@ -1025,21 +1021,37 @@ func TestMergeMetricsKeyGetError(t *testing.T) {
 }
 
 func TestReviewPreserveMetricsKeys(t *testing.T) {
-	c := fakeClient()
+	cm := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      MetricsAllowlistCM,
+				"namespace": Namespace,
+			},
+			"data": map[string]interface{}{
+				"metrics_list.yaml":     "names:\n  - existing_platform_metric\n",
+				"uwl_metrics_list.yaml": "names:\n  - existing_workload_metric\n",
+			},
+		},
+	}
+	cm.SetGroupVersionKind(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"})
+	c := fakeClient(cm)
 	m := New(c, config.Config{}, discardLogger)
 	ctx := context.Background()
-	if err := m.ConfigureMetrics(ctx, MetricsConfigOpts{Scope: MetricsScopeGlobal, Metrics: []string{"platform_metric"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.ConfigureMetrics(ctx, MetricsConfigOpts{Scope: MetricsScopeWorkload, Metrics: []string{"workload_metric"}}); err != nil {
+	if err := m.ConfigureMetricsAllowlist(ctx, MetricsOpts{Metrics: []string{"new_platform_metric"}}); err != nil {
 		t.Fatal(err)
 	}
 	obj, err := c.Get(ctx, client.GVRConfigMap, Namespace, MetricsAllowlistCM)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := obj.Object["data"].(map[string]interface{})["metrics_list.yaml"]; !ok {
-		t.Fatal("workload update erased platform metrics_list.yaml")
+	data := obj.Object["data"].(map[string]interface{})
+	if _, ok := data["uwl_metrics_list.yaml"]; !ok {
+		t.Fatal("ConfigureMetricsAllowlist erased uwl_metrics_list.yaml key")
+	}
+	if _, ok := data["metrics_list.yaml"]; !ok {
+		t.Fatal("metrics_list.yaml key missing after update")
 	}
 }
 
@@ -1067,6 +1079,26 @@ func TestReviewVerifyDesiredReplicas(t *testing.T) {
 	}
 	if r.Workloads[0].Ready {
 		t.Fatal("deployment marked ready with only 1 of 3 desired replicas")
+	}
+}
+
+func TestReviewVerifyStaleGeneration(t *testing.T) {
+	d := &unstructured.Unstructured{}
+	d.SetGroupVersionKind(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"})
+	d.SetName("observability-stale")
+	d.SetNamespace(Namespace)
+	d.SetGeneration(3)
+	d.Object["spec"] = map[string]interface{}{"replicas": int64(2)}
+	d.Object["status"] = map[string]interface{}{
+		"observedGeneration": int64(2),
+		"availableReplicas":  int64(2),
+	}
+	r, err := New(fakeClient(newMCO(), d), config.Config{}, discardLogger).Verify(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Workloads[0].Ready {
+		t.Fatal("deployment marked ready but observedGeneration < generation")
 	}
 }
 

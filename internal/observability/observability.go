@@ -228,8 +228,7 @@ func (m *Manager) RemoveDashboard(ctx context.Context, name string) error {
 
 func (m *Manager) ConfigureMetricsAllowlist(ctx context.Context, opts MetricsOpts) error {
 	m.logger.Info("observability.ConfigureMetricsAllowlist")
-	cm := buildMetricsAllowlistConfigMap(Namespace, opts.Metrics)
-	return m.createOrUpdate(ctx, client.GVRConfigMap, Namespace, cm)
+	return m.mergeMetricsKey(ctx, "metrics_list.yaml", opts.Metrics)
 }
 
 func (m *Manager) ListAddonHealth(ctx context.Context) ([]AddonHealth, error) {
@@ -300,20 +299,7 @@ func (m *Manager) ConfigureRetention(ctx context.Context, opts RetentionOpts) er
 
 func (m *Manager) ConfigureMetricsAllowlistFromYAML(ctx context.Context, metricsYAML string) error {
 	m.logger.Info("observability.ConfigureMetricsAllowlistFromYAML")
-	cm := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "v1",
-			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
-				"name":      MetricsAllowlistCM,
-				"namespace": Namespace,
-			},
-			"data": map[string]interface{}{
-				"metrics_list.yaml": metricsYAML,
-			},
-		},
-	}
-	return m.createOrUpdate(ctx, client.GVRConfigMap, Namespace, cm)
+	return m.mergeMetricsData(ctx, "metrics_list.yaml", metricsYAML)
 }
 
 type MetricsScope string
@@ -336,14 +322,17 @@ func (m *Manager) ConfigureMetrics(ctx context.Context, opts MetricsConfigOpts) 
 	case MetricsScopeCluster:
 		return fmt.Errorf("per-cluster metrics configuration requires direct access to the managed cluster %q", opts.Cluster)
 	case MetricsScopeWorkload:
-		return m.mergeMetricsKey(ctx, "uwl_metrics_list.yaml", opts.Metrics)
+		return fmt.Errorf("user workload metrics require enabling the user-workload-monitoring stack on each managed cluster; hub-only configuration via this tool is not yet supported")
 	default:
 		return m.mergeMetricsKey(ctx, "metrics_list.yaml", opts.Metrics)
 	}
 }
 
 func (m *Manager) mergeMetricsKey(ctx context.Context, key string, metrics []string) error {
-	value := "names:\n" + metricsToYAML(metrics)
+	return m.mergeMetricsData(ctx, key, "names:\n"+metricsToYAML(metrics))
+}
+
+func (m *Manager) mergeMetricsData(ctx context.Context, key, value string) error {
 	existing, err := m.client.Get(ctx, client.GVRConfigMap, Namespace, MetricsAllowlistCM)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -596,6 +585,31 @@ type VerifyResult struct {
 	AddonHealth []AddonHealth    `json:"addonHealth"`
 }
 
+func workloadFromUnstructured(obj unstructured.Unstructured) WorkloadStatus {
+	ws := WorkloadStatus{Name: obj.GetName()}
+	spec, _ := obj.Object["spec"].(map[string]interface{})
+	if spec != nil {
+		ws.Replicas, _ = spec["replicas"].(int64)
+	}
+	status, _ := obj.Object["status"].(map[string]interface{})
+	if status != nil {
+		if avail, ok := status["availableReplicas"].(int64); ok {
+			ws.Available = avail
+		} else if ready, ok := status["readyReplicas"].(int64); ok {
+			ws.Available = ready
+		}
+	}
+	ws.Ready = ws.Replicas > 0 && ws.Available >= ws.Replicas
+	generation := obj.GetGeneration()
+	if generation > 0 {
+		observedGen, _, _ := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
+		if observedGen < generation {
+			ws.Ready = false
+		}
+	}
+	return ws
+}
+
 func (m *Manager) Verify(ctx context.Context) (*VerifyResult, error) {
 	m.logger.Info("observability.Verify")
 	result := &VerifyResult{PVCsBound: true}
@@ -613,16 +627,7 @@ func (m *Manager) Verify(ctx context.Context) (*VerifyResult, error) {
 		return nil, fmt.Errorf("listing deployments: %w", err)
 	}
 	for _, d := range deps.Items {
-		ws := WorkloadStatus{Name: d.GetName()}
-		spec, _ := d.Object["spec"].(map[string]interface{})
-		if spec != nil {
-			ws.Replicas, _ = spec["replicas"].(int64)
-		}
-		status, _ := d.Object["status"].(map[string]interface{})
-		if status != nil {
-			ws.Available, _ = status["availableReplicas"].(int64)
-		}
-		ws.Ready = ws.Replicas > 0 && ws.Available >= ws.Replicas
+		ws := workloadFromUnstructured(d)
 		result.Workloads = append(result.Workloads, ws)
 	}
 
@@ -633,16 +638,7 @@ func (m *Manager) Verify(ctx context.Context) (*VerifyResult, error) {
 		return nil, fmt.Errorf("listing statefulsets: %w", err)
 	}
 	for _, s := range sts.Items {
-		ws := WorkloadStatus{Name: s.GetName()}
-		spec, _ := s.Object["spec"].(map[string]interface{})
-		if spec != nil {
-			ws.Replicas, _ = spec["replicas"].(int64)
-		}
-		status, _ := s.Object["status"].(map[string]interface{})
-		if status != nil {
-			ws.Available, _ = status["readyReplicas"].(int64)
-		}
-		ws.Ready = ws.Replicas > 0 && ws.Available >= ws.Replicas
+		ws := workloadFromUnstructured(s)
 		result.Workloads = append(result.Workloads, ws)
 	}
 

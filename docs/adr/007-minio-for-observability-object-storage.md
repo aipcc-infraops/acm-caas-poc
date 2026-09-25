@@ -32,13 +32,13 @@ config:
   access_key: <minio-access-key>
   secret_key: <minio-secret-key>
 
-# Lab — OBC (auto-populated from ObjectBucketClaim)
-type: s3
-config:
-  bucket: <obc-generated-bucket>
-  endpoint: <obc-generated-endpoint>
-  access_key: <obc-generated-key>
-  secret_key: <obc-generated-secret>
+# Lab — OBC (planned, not yet implemented)
+# type: s3
+# config:
+#   bucket: <obc-generated-bucket>
+#   endpoint: <obc-generated-endpoint>
+#   access_key: <obc-generated-key>
+#   secret_key: <obc-generated-secret>
 
 # Production — cloud object storage
 type: s3
@@ -55,7 +55,7 @@ config:
 - **Pro:** Setup and teardown are fully automated and idempotent
 - **Pro:** Migration to production is a secret change, not an architecture change
 - **Pro:** MinIO PVC uses the same storage class as other workloads — no new infra
-- **Pro:** OBC path automates credential discovery — no manual secret assembly
+- **Pro (planned):** OBC path will automate credential discovery — no manual secret assembly (not yet implemented)
 - **Con:** MinIO is single-replica, not HA — acceptable for PoC, not for production
 - **Con:** MinIO PVC data is lost on teardown — acceptable since Thanos metrics are ephemeral for the PoC
 - **Con:** MinIO credentials are hardcoded constants — production must use proper secret management
