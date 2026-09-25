@@ -607,6 +607,12 @@ func workloadFromUnstructured(obj unstructured.Unstructured) WorkloadStatus {
 			ws.Ready = false
 		}
 	}
+	if ws.Ready && status != nil {
+		updated, ok := status["updatedReplicas"].(int64)
+		if ok && updated < ws.Replicas {
+			ws.Ready = false
+		}
+	}
 	return ws
 }
 

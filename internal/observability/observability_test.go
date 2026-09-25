@@ -1102,6 +1102,18 @@ func TestReviewVerifyStaleGeneration(t *testing.T) {
 	}
 }
 
+func TestReviewObservedButIncompleteRollout(t *testing.T) {
+	obj := unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apps/v1", "kind": "Deployment",
+		"metadata":  map[string]interface{}{"name": "observability-test", "generation": int64(2)},
+		"spec":      map[string]interface{}{"replicas": int64(3)},
+		"status":    map[string]interface{}{"observedGeneration": int64(2), "availableReplicas": int64(3), "updatedReplicas": int64(0)},
+	}}
+	if workloadFromUnstructured(obj).Ready {
+		t.Fatal("Ready=true with 0/3 updated replicas despite observed generation")
+	}
+}
+
 func TestReviewInvalidRulesRejectedByDeploy(t *testing.T) {
 	err := New(fakeClient(), config.Config{}, discardLogger).DeployCustomRules(context.Background(), CustomRuleOpts{Rules: "groups: ["})
 	if err == nil {
