@@ -138,6 +138,9 @@ var (
 	GVRKubeadmConfigTemplate = schema.GroupVersionResource{
 		Group: "bootstrap.cluster.x-k8s.io", Version: "v1beta2", Resource: "kubeadmconfigtemplates",
 	}
+	GVRClusterResourceSet = schema.GroupVersionResource{
+		Group: "addons.cluster.x-k8s.io", Version: "v1beta2", Resource: "clusterresourcesets",
+	}
 	GVRAddOnPlacementScore = schema.GroupVersionResource{
 		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "addonplacementscores",
 	}
