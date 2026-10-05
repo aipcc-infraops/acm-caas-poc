@@ -68,6 +68,7 @@ type suiteContext struct {
 	lastManifestWorkNS     string
 	importKubeconfig       []byte
 	hypershiftList         []provisioning.HyperShiftInfo
+	capiList               []provisioning.CAPIClusterInfo
 }
 
 func TestFeatures(t *testing.T) {
@@ -115,6 +116,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		s.lastManifestWorkName = ""
 		s.lastManifestWorkNS = ""
 		s.hypershiftList = nil
+		s.capiList = nil
 		return ctx, nil
 	})
 
@@ -152,6 +154,9 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 	// Pool steps
 	registerPoolSteps(sc, s)
 	registerManualPoolSteps(sc, s)
+
+	// CAPI steps
+	registerCAPISteps(sc, s)
 
 	// HyperShift steps
 	registerHyperShiftSteps(sc, s)
