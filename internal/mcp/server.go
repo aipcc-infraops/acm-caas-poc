@@ -33,6 +33,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/rollout"
 	"github.com/pablofelix/acm-caas-poc/internal/security"
 	"github.com/pablofelix/acm-caas-poc/internal/upgrade"
+	"github.com/pablofelix/acm-caas-poc/internal/virtualization"
 )
 
 func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MCPServer {
@@ -102,6 +103,9 @@ func NewServer(c *client.Client, cfg config.Config, log *slog.Logger) *server.MC
 
 	gitopsMgr := gitops.New(c, cfg, log)
 	registerGitOpsTools(s, gitopsMgr)
+
+	vmMgr := virtualization.New(c, cfg, log)
+	registerVirtualizationTools(s, vmMgr)
 
 	return s
 }
@@ -1213,6 +1217,178 @@ func registerDecommissionTools(s *server.MCPServer, m *decommission.Manager) {
 			}
 			data, _ := json.MarshalIndent(report, "", "  ")
 			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+}
+
+func registerVirtualizationTools(s *server.MCPServer, m *virtualization.Manager) {
+	s.AddTool(
+		mcp.NewTool("acm_vm_deploy",
+			mcp.WithDescription("Deploy a virtual machine to a managed cluster via ManifestWork. Requires OpenShift Virtualization on the target cluster — run ensure-cnv first."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("VM name")),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+			mcp.WithString("cpu", mcp.Description("CPU cores (default: 2)")),
+			mcp.WithString("memory", mcp.Description("Memory (default: 4Gi)")),
+			mcp.WithString("image", mcp.Description("Container disk image")),
+			mcp.WithString("diskSize", mcp.Description("Disk size (default: 20Gi)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			opts := virtualization.VMOpts{
+				Name:    args["name"].(string),
+				Cluster: args["cluster"].(string),
+			}
+			if v, ok := args["cpu"].(string); ok {
+				opts.CPU = v
+			}
+			if v, ok := args["memory"].(string); ok {
+				opts.Memory = v
+			}
+			if v, ok := args["image"].(string); ok {
+				opts.Image = v
+			}
+			if v, ok := args["diskSize"].(string); ok {
+				opts.DiskSize = v
+			}
+			if err := m.Deploy(ctx, opts); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("VM %s deployed to %s", opts.Name, opts.Cluster)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_remove",
+			mcp.WithDescription("Remove a virtual machine from a managed cluster."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("VM name")),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			if err := m.Remove(ctx, args["name"].(string), args["cluster"].(string)); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText("VM removed"), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_start",
+			mcp.WithDescription("Start a virtual machine."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("VM name")),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			if err := m.Start(ctx, args["name"].(string), args["cluster"].(string)); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText("VM started"), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_stop",
+			mcp.WithDescription("Stop a virtual machine."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("VM name")),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			if err := m.Stop(ctx, args["name"].(string), args["cluster"].(string)); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText("VM stopped"), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_migrate",
+			mcp.WithDescription("Live-migrate a virtual machine to another node."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("VM name")),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			if err := m.Migrate(ctx, args["name"].(string), args["cluster"].(string)); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText("Migration initiated"), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_status",
+			mcp.WithDescription("Get detailed status of a virtual machine."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("VM name")),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			args := req.GetArguments()
+			detail, err := m.Status(ctx, args["name"].(string), args["cluster"].(string))
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(detail, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_list",
+			mcp.WithDescription("List all virtual machines across the fleet."),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			vms, err := m.List(ctx)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(vms, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_ensure_cnv",
+			mcp.WithDescription("Install OpenShift Virtualization (CNV) on a managed cluster via ACM governance policy. Creates Namespace, OperatorGroup, Subscription, and HyperConverged CR. Idempotent."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			if err := m.EnsureCNVOperator(ctx, cluster); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("CNV operator policy applied to %s", cluster)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_cnv_status",
+			mcp.WithDescription("Check OpenShift Virtualization installation status on a managed cluster."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			status, err := m.CNVStatus(ctx, cluster)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			data, _ := json.MarshalIndent(status, "", "  ")
+			return mcp.NewToolResultText(string(data)), nil
+		},
+	)
+
+	s.AddTool(
+		mcp.NewTool("acm_vm_remove_cnv",
+			mcp.WithDescription("Remove OpenShift Virtualization governance policy from a managed cluster."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Target cluster")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cluster := req.GetArguments()["cluster"].(string)
+			if err := m.RemoveCNVOperator(ctx, cluster); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("CNV operator policy removed from %s", cluster)), nil
 		},
 	)
 }
