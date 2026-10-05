@@ -121,6 +121,7 @@ methods. Uses `github.com/mark3labs/mcp-go` for the stdio transport.
 | 25 | ClusterPool pre-warmed clusters | `pool` | In Progress |
 | 38 | HyperShift hosted control planes | `provisioning` | In Progress |
 | 40 | CAPI cluster provisioning | `provisioning` | In Progress |
+| 51 | VM lifecycle via KubeVirt | `virtualization` | Done |
 
 ## Data Flow
 
