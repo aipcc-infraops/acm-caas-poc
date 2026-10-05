@@ -159,4 +159,10 @@ var (
 	GVRImageConfig = schema.GroupVersionResource{
 		Group: "config.openshift.io", Version: "v1", Resource: "images",
 	}
+	GVRRoute = schema.GroupVersionResource{
+		Group: "route.openshift.io", Version: "v1", Resource: "routes",
+	}
+	GVRStatefulSet = schema.GroupVersionResource{
+		Group: "apps", Version: "v1", Resource: "statefulsets",
+	}
 )
