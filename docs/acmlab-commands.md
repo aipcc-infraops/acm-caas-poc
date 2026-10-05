@@ -1666,6 +1666,10 @@ spoke2                    -               cleanup-job     active
 
 ### Virtual Machines (UC-51)
 
+> **Prerequisite:** The target managed cluster must have OpenShift Virtualization (KubeVirt operator) installed. The ManifestWork is created on the hub regardless, but the spoke will report `Applied=False` if the `VirtualMachine` CRD is not available.
+
+**Integration tests:** `features/vm-lifecycle.feature` (tag `@vm`, 8 scenarios). Run with `GODOG_TAGS="@vm"`.
+
 #### `acmlab vm deploy`
 
 Deploy a virtual machine to a managed cluster via ManifestWork wrapping a KubeVirt VirtualMachine CRD.
