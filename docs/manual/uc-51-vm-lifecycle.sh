@@ -2,6 +2,8 @@
 # UC-51: VM lifecycle management — OpenShift Virtualization (manual)
 # Shows raw ACM resources: ManifestWork wrapping KubeVirt VirtualMachine CRD
 # Prerequisite: target cluster must have OpenShift Virtualization (KubeVirt) installed
+# Install via governance policy: acmlab vm ensure-cnv <cluster>
+# Or manually with: oc apply -f (Policy + ConfigurationPolicy for Namespace, OperatorGroup, Subscription, HyperConverged)
 
 set -euo pipefail
 

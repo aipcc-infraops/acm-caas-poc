@@ -2,6 +2,7 @@
 # UC-51: VM lifecycle management (OpenShift Virtualization)
 # Demonstrates deploy, start, stop, migrate, status, list, and remove VMs
 # Prerequisite: target cluster must have OpenShift Virtualization (KubeVirt) installed
+# Use 'acmlab vm ensure-cnv <cluster>' to install via ACM governance policy
 
 set -euo pipefail
 
@@ -9,6 +10,11 @@ CLUSTER="${1:-spoke1}"
 
 echo "=== UC-51: VM Lifecycle Management ==="
 
+echo "0. Ensure OpenShift Virtualization is installed"
+acmlab vm ensure-cnv ${CLUSTER}
+acmlab vm cnv-status ${CLUSTER}
+
+echo ""
 echo "1. Deploy a VM to a managed cluster"
 acmlab vm deploy --name web-vm --cluster ${CLUSTER} --cpu 4 --memory 8Gi
 

@@ -1666,7 +1666,7 @@ spoke2                    -               cleanup-job     active
 
 ### Virtual Machines (UC-51)
 
-> **Prerequisite:** The target managed cluster must have OpenShift Virtualization (KubeVirt operator) installed. The ManifestWork is created on the hub regardless, but the spoke will report `Applied=False` if the `VirtualMachine` CRD is not available.
+> **Prerequisite:** The target managed cluster must have OpenShift Virtualization (KubeVirt operator) installed. Use `acmlab vm ensure-cnv <cluster>` to install it via ACM governance policy. The ManifestWork is created on the hub regardless, but the spoke will report `Applied=False` if the `VirtualMachine` CRD is not available.
 
 **Integration tests:** `features/vm-lifecycle.feature` (tag `@vm`, 8 scenarios). Run with `GODOG_TAGS="@vm"`.
 
@@ -1724,6 +1724,33 @@ Remove a virtual machine from a managed cluster.
 
 **Flags:**
 - `--cluster <cluster>`: target cluster (required)
+
+#### `acmlab vm ensure-cnv <cluster>`
+
+Install OpenShift Virtualization (CNV) on a managed cluster via ACM governance policy. Creates a Policy with ConfigurationPolicy templates that enforce: Namespace (`openshift-cnv`), OperatorGroup (OwnNamespace mode), Subscription (`kubevirt-hyperconverged`), and HyperConverged CR. Idempotent — safe to run multiple times.
+
+```
+$ acmlab vm ensure-cnv infraops1
+Ensuring OpenShift Virtualization on infraops1...
+CNV operator policy applied. Use 'acmlab vm cnv-status' to check progress.
+```
+
+#### `acmlab vm cnv-status <cluster>`
+
+Check OpenShift Virtualization installation status on a managed cluster. Shows compliance state of the governance policy.
+
+**Flags:**
+- `--json`: output as JSON
+
+```
+$ acmlab vm cnv-status infraops1
+Cluster:   infraops1
+Status:    Compliant
+```
+
+#### `acmlab vm remove-cnv <cluster>`
+
+Remove the OpenShift Virtualization governance policy from a managed cluster. Removes the Policy, Placement, and PlacementBinding. Does not uninstall the operator from the spoke — it only removes the governance policy.
 
 ### Observability (UC-52)
 
