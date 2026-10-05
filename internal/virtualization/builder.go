@@ -84,8 +84,10 @@ func buildVMManifestWork(cluster, name string, opts VMOpts) *unstructured.Unstru
 				"name":      mwName(name, cluster),
 				"namespace": cluster,
 				"labels": map[string]interface{}{
-					LabelVM:                    "true",
-					LabelVMName:               name,
+					LabelVM:     "true",
+					LabelVMName: name,
+				},
+				"annotations": map[string]interface{}{
 					"acmlab.redhat.com/vm-image": opts.Image,
 					"acmlab.redhat.com/vm-disk":  opts.DiskSize,
 				},

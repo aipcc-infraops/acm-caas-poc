@@ -197,9 +197,9 @@ func (m *Manager) Status(ctx context.Context, name, cluster string) (VMDetail, e
 		}
 	}
 
-	labels := obj.GetLabels()
-	detail.Image = labels["acmlab.redhat.com/vm-image"]
-	detail.DiskSize = labels["acmlab.redhat.com/vm-disk"]
+	annotations := obj.GetAnnotations()
+	detail.Image = annotations["acmlab.redhat.com/vm-image"]
+	detail.DiskSize = annotations["acmlab.redhat.com/vm-disk"]
 
 	return detail, nil
 }
