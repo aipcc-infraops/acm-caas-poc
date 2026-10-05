@@ -24,6 +24,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/registry"
 	"github.com/pablofelix/acm-caas-poc/internal/scaling"
 	"github.com/pablofelix/acm-caas-poc/internal/tenant"
+	"github.com/pablofelix/acm-caas-poc/internal/virtualization"
 )
 
 type suiteContext struct {
@@ -39,6 +40,7 @@ type suiteContext struct {
 	registry    *registry.Manager
 	provisioner  *provisioning.Manager
 	poolManager  *pool.Manager
+	vm           *virtualization.Manager
 
 	err            error
 	clusters       []fleet.ClusterInfo
@@ -69,6 +71,8 @@ type suiteContext struct {
 	importKubeconfig       []byte
 	hypershiftList         []provisioning.HyperShiftInfo
 	capiList               []provisioning.CAPIClusterInfo
+	vmDetail               *virtualization.VMDetail
+	vmList                 []virtualization.VMInfo
 }
 
 func TestFeatures(t *testing.T) {
@@ -117,6 +121,8 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		s.lastManifestWorkNS = ""
 		s.hypershiftList = nil
 		s.capiList = nil
+		s.vmDetail = nil
+		s.vmList = nil
 		return ctx, nil
 	})
 
@@ -160,6 +166,9 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 	// HyperShift steps
 	registerHyperShiftSteps(sc, s)
+
+	// VM lifecycle steps
+	registerVMSteps(sc, s)
 }
 
 func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
@@ -185,6 +194,7 @@ func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
 	s.scaling = scaling.New(c, cfg, logger)
 	s.registry = registry.New(c, cfg, logger)
 	s.provisioner = provisioning.New(c, cfg, logger)
+	s.vm = virtualization.New(c, cfg, logger)
 	s.poolManager = pool.NewWithManagers(c, cfg, logger, s.provisioner, s.lifecycle)
 
 	return nil

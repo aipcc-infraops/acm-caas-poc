@@ -59,8 +59,8 @@ func TestDeployDefaultValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ManifestWork not found: %v", err)
 	}
-	labels := obj.GetLabels()
-	if labels["acmlab.redhat.com/vm-image"] != DefaultImage {
+	annotations := obj.GetAnnotations()
+	if annotations["acmlab.redhat.com/vm-image"] != DefaultImage {
 		t.Errorf("default image not applied")
 	}
 }
