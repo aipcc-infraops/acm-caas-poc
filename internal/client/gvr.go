@@ -138,6 +138,9 @@ var (
 	GVRKubeadmConfigTemplate = schema.GroupVersionResource{
 		Group: "bootstrap.cluster.x-k8s.io", Version: "v1beta2", Resource: "kubeadmconfigtemplates",
 	}
+	GVRClusterResourceSet = schema.GroupVersionResource{
+		Group: "addons.cluster.x-k8s.io", Version: "v1beta2", Resource: "clusterresourcesets",
+	}
 	GVRAddOnPlacementScore = schema.GroupVersionResource{
 		Group: "addon.open-cluster-management.io", Version: "v1alpha1", Resource: "addonplacementscores",
 	}
@@ -179,5 +182,11 @@ var (
 	}
 	GVRStatefulSet = schema.GroupVersionResource{
 		Group: "apps", Version: "v1", Resource: "statefulsets",
+	}
+	GVRMultiClusterHub = schema.GroupVersionResource{
+		Group: "operator.open-cluster-management.io", Version: "v1", Resource: "multiclusterhubs",
+	}
+	GVRMultiClusterEngine = schema.GroupVersionResource{
+		Group: "multicluster.openshift.io", Version: "v1", Resource: "multiclusterengines",
 	}
 )
