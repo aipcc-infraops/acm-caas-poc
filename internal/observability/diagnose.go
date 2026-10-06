@@ -45,45 +45,27 @@ func (m *Manager) Diagnose(ctx context.Context) (*DiagnoseResult, error) {
 func (m *Manager) checkMCEAvailable(ctx context.Context, result *DiagnoseResult) {
 	list, err := m.client.Dynamic.Resource(client.GVRMultiClusterEngine).
 		List(ctx, metav1.ListOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			result.addCheck("mce-available", "skip", "MultiClusterEngine CRD not found")
-			return
-		}
-		result.addCheck("mce-available", "fail", fmt.Sprintf("error listing MCE: %v", err))
+	if err != nil || len(list.Items) == 0 {
+		result.addCheck("mce-available", "skip", "MultiClusterEngine not found")
 		return
 	}
-	if len(list.Items) == 0 {
-		result.addCheck("mce-available", "skip", "no MultiClusterEngine found")
-		return
-	}
-	mce := list.Items[0]
-	available, reason := conditionStatus(mce.Object, "Available")
+	available, reason := conditionStatus(list.Items[0].Object, "Available")
 	if available == "True" {
 		result.addCheck("mce-available", "pass", "MultiClusterEngine is available")
 		return
 	}
 	result.addCheck("mce-available", "fail",
-		fmt.Sprintf("MultiClusterEngine not available (%s=%s); this blocks MCH and MCO addon deployment", "Available", available+": "+reason))
+		fmt.Sprintf("MultiClusterEngine not available (Available=%s: %s); this blocks MCH and MCO addon deployment", available, reason))
 }
 
 func (m *Manager) checkMCHComplete(ctx context.Context, result *DiagnoseResult) {
 	list, err := m.client.Dynamic.Resource(client.GVRMultiClusterHub).
 		List(ctx, metav1.ListOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			result.addCheck("mch-complete", "skip", "MultiClusterHub CRD not found")
-			return
-		}
-		result.addCheck("mch-complete", "fail", fmt.Sprintf("error listing MCH: %v", err))
+	if err != nil || len(list.Items) == 0 {
+		result.addCheck("mch-complete", "skip", "MultiClusterHub not found")
 		return
 	}
-	if len(list.Items) == 0 {
-		result.addCheck("mch-complete", "skip", "no MultiClusterHub found")
-		return
-	}
-	mch := list.Items[0]
-	complete, reason := conditionStatus(mch.Object, "Complete")
+	complete, reason := conditionStatus(list.Items[0].Object, "Complete")
 	if complete == "True" {
 		result.addCheck("mch-complete", "pass", "MultiClusterHub is complete")
 		return
@@ -94,16 +76,12 @@ func (m *Manager) checkMCHComplete(ctx context.Context, result *DiagnoseResult) 
 
 func (m *Manager) checkPullSecret(ctx context.Context, result *DiagnoseResult) {
 	_, err := m.client.Get(ctx, client.GVRSecret, Namespace, PullSecretName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			result.addCheck("pull-secret", "fail",
-				fmt.Sprintf("%s not found in %s; MCO cannot resolve addon images without it", PullSecretName, Namespace))
-			return
-		}
-		result.addCheck("pull-secret", "fail", fmt.Sprintf("error checking pull secret: %v", err))
+	if err == nil {
+		result.addCheck("pull-secret", "pass", "pull secret present")
 		return
 	}
-	result.addCheck("pull-secret", "pass", "pull secret present")
+	result.addCheck("pull-secret", "fail",
+		fmt.Sprintf("%s not found in %s; MCO cannot resolve addon images without it", PullSecretName, Namespace))
 }
 
 func (m *Manager) checkMCOStatus(ctx context.Context, result *DiagnoseResult) {

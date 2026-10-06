@@ -316,6 +316,434 @@ func TestRepairCreatesPullSecretAndEnablesCluster(t *testing.T) {
 	}
 }
 
+func TestDiagnoseMCENotAvailable(t *testing.T) {
+	mce := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "multicluster.openshift.io/v1",
+		"kind":       "MultiClusterEngine",
+		"metadata":   map[string]interface{}{"name": "multiclusterengine"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "False", "message": "Not all components available"},
+			},
+		},
+	}}
+	mco := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "observability.open-cluster-management.io/v1beta2",
+		"kind":       "MultiClusterObservability",
+		"metadata":   map[string]interface{}{"name": MCOName},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+
+	c := diagnoseFakeClient(mce, mco, pullSecret)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	if result.Healthy {
+		t.Error("expected unhealthy when MCE is not available")
+	}
+}
+
+func TestDiagnoseMCONotInstalled(t *testing.T) {
+	mce := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "multicluster.openshift.io/v1",
+		"kind":       "MultiClusterEngine",
+		"metadata":   map[string]interface{}{"name": "multiclusterengine"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+			},
+		},
+	}}
+	mch := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "operator.open-cluster-management.io/v1",
+		"kind":       "MultiClusterHub",
+		"metadata":   map[string]interface{}{"name": "multiclusterhub", "namespace": "open-cluster-management"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Complete", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+
+	c := diagnoseFakeClient(mce, mch, pullSecret)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "mco-status" && check.Status == "fail" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected mco-status fail when MCO not installed")
+	}
+}
+
+func TestDiagnoseMCOProgressing(t *testing.T) {
+	mce := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "multicluster.openshift.io/v1",
+		"kind":       "MultiClusterEngine",
+		"metadata":   map[string]interface{}{"name": "multiclusterengine"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+			},
+		},
+	}}
+	mch := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "operator.open-cluster-management.io/v1",
+		"kind":       "MultiClusterHub",
+		"metadata":   map[string]interface{}{"name": "multiclusterhub", "namespace": "open-cluster-management"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Complete", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+	mco := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "observability.open-cluster-management.io/v1beta2",
+		"kind":       "MultiClusterObservability",
+		"metadata":   map[string]interface{}{"name": MCOName},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Progressing", "status": "True"},
+			},
+		},
+	}}
+
+	c := diagnoseFakeClient(mce, mch, pullSecret, mco)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "mco-status" && check.Status == "warn" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected mco-status warn when MCO is progressing")
+	}
+}
+
+func TestDiagnoseMissingAddon(t *testing.T) {
+	mce := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "multicluster.openshift.io/v1",
+		"kind":       "MultiClusterEngine",
+		"metadata":   map[string]interface{}{"name": "multiclusterengine"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+			},
+		},
+	}}
+	mch := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "operator.open-cluster-management.io/v1",
+		"kind":       "MultiClusterHub",
+		"metadata":   map[string]interface{}{"name": "multiclusterhub", "namespace": "open-cluster-management"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Complete", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+	mco := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "observability.open-cluster-management.io/v1beta2",
+		"kind":       "MultiClusterObservability",
+		"metadata":   map[string]interface{}{"name": MCOName},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+	cluster := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "cluster.open-cluster-management.io/v1",
+		"kind":       "ManagedCluster",
+		"metadata":   map[string]interface{}{"name": "spoke1"},
+	}}
+
+	c := diagnoseFakeClient(mce, mch, pullSecret, mco, cluster)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "addon-health" && check.Status == "fail" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected addon-health fail when cluster has no addon")
+	}
+}
+
+func TestDiagnoseDegradedAddon(t *testing.T) {
+	mce := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "multicluster.openshift.io/v1",
+		"kind":       "MultiClusterEngine",
+		"metadata":   map[string]interface{}{"name": "multiclusterengine"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+			},
+		},
+	}}
+	mch := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "operator.open-cluster-management.io/v1",
+		"kind":       "MultiClusterHub",
+		"metadata":   map[string]interface{}{"name": "multiclusterhub", "namespace": "open-cluster-management"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Complete", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+	mco := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "observability.open-cluster-management.io/v1beta2",
+		"kind":       "MultiClusterObservability",
+		"metadata":   map[string]interface{}{"name": MCOName},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+	cluster := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "cluster.open-cluster-management.io/v1",
+		"kind":       "ManagedCluster",
+		"metadata":   map[string]interface{}{"name": "spoke1"},
+	}}
+	addon := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "addon.open-cluster-management.io/v1alpha1",
+		"kind":       "ManagedClusterAddOn",
+		"metadata":   map[string]interface{}{"name": "observability-controller", "namespace": "spoke1"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+				map[string]interface{}{"type": "Degraded", "status": "True"},
+			},
+		},
+	}}
+
+	c := diagnoseFakeClient(mce, mch, pullSecret, mco, cluster, addon)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "addon-health" && check.Status == "warn" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected addon-health warn when addon is degraded")
+	}
+}
+
+func TestDiagnoseNoMCEFound(t *testing.T) {
+	mco := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "observability.open-cluster-management.io/v1beta2",
+		"kind":       "MultiClusterObservability",
+		"metadata":   map[string]interface{}{"name": MCOName},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+	mch := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "operator.open-cluster-management.io/v1",
+		"kind":       "MultiClusterHub",
+		"metadata":   map[string]interface{}{"name": "multiclusterhub", "namespace": "open-cluster-management"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Complete", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+
+	c := diagnoseFakeClient(mco, mch, pullSecret)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	for _, check := range result.Checks {
+		if check.Name == "mce-available" && check.Status != "skip" {
+			t.Errorf("expected skip for mce-available when no MCE, got %s", check.Status)
+		}
+	}
+}
+
+func TestDiagnoseNoMCHFound(t *testing.T) {
+	mco := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "observability.open-cluster-management.io/v1beta2",
+		"kind":       "MultiClusterObservability",
+		"metadata":   map[string]interface{}{"name": MCOName},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+	mce := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "multicluster.openshift.io/v1",
+		"kind":       "MultiClusterEngine",
+		"metadata":   map[string]interface{}{"name": "multiclusterengine"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+
+	c := diagnoseFakeClient(mco, mce, pullSecret)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	for _, check := range result.Checks {
+		if check.Name == "mch-complete" && check.Status != "skip" {
+			t.Errorf("expected skip for mch-complete when no MCH, got %s", check.Status)
+		}
+	}
+}
+
+func TestDiagnoseAddonUnavailable(t *testing.T) {
+	mce := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "multicluster.openshift.io/v1",
+		"kind":       "MultiClusterEngine",
+		"metadata":   map[string]interface{}{"name": "multiclusterengine"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+			},
+		},
+	}}
+	mch := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "operator.open-cluster-management.io/v1",
+		"kind":       "MultiClusterHub",
+		"metadata":   map[string]interface{}{"name": "multiclusterhub", "namespace": "open-cluster-management"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Complete", "status": "True"},
+			},
+		},
+	}}
+	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]interface{}{"name": PullSecretName, "namespace": Namespace},
+	}}
+	mco := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "observability.open-cluster-management.io/v1beta2",
+		"kind":       "MultiClusterObservability",
+		"metadata":   map[string]interface{}{"name": MCOName},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+	cluster := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "cluster.open-cluster-management.io/v1",
+		"kind":       "ManagedCluster",
+		"metadata":   map[string]interface{}{"name": "spoke1"},
+	}}
+	addon := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "addon.open-cluster-management.io/v1alpha1",
+		"kind":       "ManagedClusterAddOn",
+		"metadata":   map[string]interface{}{"name": "observability-controller", "namespace": "spoke1"},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "False"},
+			},
+		},
+	}}
+
+	c := diagnoseFakeClient(mce, mch, pullSecret, mco, cluster, addon)
+	mgr := New(c, config.Config{}, discardLogger)
+	result, err := mgr.Diagnose(context.Background())
+	if err != nil {
+		t.Fatalf("Diagnose failed: %v", err)
+	}
+	found := false
+	for _, check := range result.Checks {
+		if check.Name == "addon-health" && check.Status == "warn" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected addon-health warn when addon is unavailable")
+	}
+}
+
+func TestConditionStatusMissingCondition(t *testing.T) {
+	obj := map[string]interface{}{
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Other", "status": "True"},
+			},
+		},
+	}
+	status, _ := conditionStatus(obj, "Ready")
+	if status != "Unknown" {
+		t.Errorf("expected Unknown for missing condition, got %s", status)
+	}
+}
+
+func TestConditionStatusNilStatus(t *testing.T) {
+	obj := map[string]interface{}{}
+	status, _ := conditionStatus(obj, "Ready")
+	if status != "Unknown" {
+		t.Errorf("expected Unknown for nil status, got %s", status)
+	}
+}
+
 func TestRepairNoActionWhenHealthy(t *testing.T) {
 	pullSecret := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "v1", "kind": "Secret",
