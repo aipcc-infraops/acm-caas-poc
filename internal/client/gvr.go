@@ -183,4 +183,10 @@ var (
 	GVRStatefulSet = schema.GroupVersionResource{
 		Group: "apps", Version: "v1", Resource: "statefulsets",
 	}
+	GVRMultiClusterHub = schema.GroupVersionResource{
+		Group: "operator.open-cluster-management.io", Version: "v1", Resource: "multiclusterhubs",
+	}
+	GVRMultiClusterEngine = schema.GroupVersionResource{
+		Group: "multicluster.openshift.io", Version: "v1", Resource: "multiclusterengines",
+	}
 )
