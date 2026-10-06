@@ -21,6 +21,7 @@ func observabilityCmd() *cobra.Command {
 		observabilityTeardownCmd(),
 		observabilityStatusCmd(),
 		observabilityVerifyCmd(),
+		observabilityDiagnoseCmd(),
 		observabilityPullSecretCmd(),
 		observabilityStorageCmd(),
 		observabilityDeployRulesCmd(),
@@ -559,5 +560,74 @@ func observabilityRetentionCmd() *cobra.Command {
 	cmd.Flags().StringVar(&retention, "retention", "", "local retention duration (e.g. 24h)")
 	cmd.Flags().StringVar(&blockDuration, "block-duration", "", "TSDB block duration (e.g. 2h)")
 	cmd.Flags().StringVar(&deleteDelay, "delete-delay", "", "deletion delay for blocks (e.g. 48h)")
+	return cmd
+}
+
+func observabilityDiagnoseCmd() *cobra.Command {
+	var repair bool
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "diagnose",
+		Short: "Diagnose observability issues (pull secret, MCH/MCE health, addon status)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := observability.New(c, cfg, logger)
+
+			if repair {
+				fmt.Println("Running repairs...")
+				actions, err := mgr.Repair(context.Background())
+				if err != nil {
+					return err
+				}
+				if len(actions) == 0 {
+					fmt.Println("No automatic repairs needed.")
+				} else {
+					for _, a := range actions {
+						fmt.Printf("  [fixed] %s\n", a)
+					}
+				}
+				fmt.Println()
+			}
+
+			result, err := mgr.Diagnose(context.Background())
+			if err != nil {
+				return err
+			}
+
+			if outputJSON {
+				data, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+
+			for _, check := range result.Checks {
+				var icon string
+				switch check.Status {
+				case "pass":
+					icon = "[ok]"
+				case "fail":
+					icon = "[FAIL]"
+				case "warn":
+					icon = "[WARN]"
+				default:
+					icon = "[skip]"
+				}
+				fmt.Printf("  %-8s %-20s %s\n", icon, check.Name, check.Message)
+			}
+			fmt.Println()
+			if result.Healthy {
+				fmt.Println("Observability stack is healthy.")
+			} else {
+				fmt.Println("Issues detected. Run with --repair to fix what can be fixed automatically.")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&repair, "repair", false, "attempt automatic repairs before diagnosing")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "output as JSON")
 	return cmd
 }

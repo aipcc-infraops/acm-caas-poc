@@ -134,7 +134,15 @@ oc get configmap -n "${NS}" observability-metrics-custom-allowlist
 oc get secret -n "${NS}" alertmanager-config
 
 echo ""
-echo "13. Clean up"
+echo "13. Diagnose observability health"
+acmlab observability diagnose
+
+echo ""
+echo "14. Diagnose and auto-repair"
+acmlab observability diagnose --repair
+
+echo ""
+echo "15. Clean up"
 oc delete secret -n "${NS}" alertmanager-config
 oc delete configmap -n "${NS}" observability-metrics-custom-allowlist
 oc delete configmap -n "${NS}" gpu-overview

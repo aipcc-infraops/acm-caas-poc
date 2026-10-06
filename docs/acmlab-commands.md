@@ -1815,6 +1815,39 @@ Show observability addon health status across all managed clusters.
 **Flags:**
 - `--json`: output as JSON
 
+#### `acmlab observability diagnose`
+
+Diagnose observability issues across the MCE/MCH/MCO chain, pull secret, addon health, and cluster labels.
+
+**Flags:**
+- `--repair`: attempt automatic repairs (create missing pull secret, re-enable disabled clusters) before diagnosing
+- `--json`: output as JSON
+
+**Checks performed:**
+1. MCE Available — blocks MCH and MCO if false
+2. MCH Complete — MCO cannot populate image list until MCH completes
+3. Pull secret present in observability namespace
+4. MCO status (Ready, Progressing, NotInstalled)
+5. Clusters with `observability=disabled` label
+6. Addon health across all managed clusters
+
+```bash
+$ acmlab observability diagnose
+  [ok]     mce-available        MultiClusterEngine is available
+  [ok]     mch-complete         MultiClusterHub is complete
+  [ok]     pull-secret          pull secret present
+  [ok]     mco-status           MCO is ready
+  [ok]     disabled-clusters    no clusters have observability disabled
+  [ok]     addon-health         all 4 cluster addons healthy
+
+Observability stack is healthy.
+
+$ acmlab observability diagnose --repair
+Running repairs...
+  [fixed] created pull secret multiclusterhub-operator-pull-secret
+  [fixed] enabled observability for cluster caas-pool-1
+```
+
 #### `acmlab observability configure-retention`
 
 Configure Thanos retention settings on the MCO.
