@@ -2,8 +2,10 @@ package provisioning
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,6 +30,8 @@ func fakeCAPIClient(objs ...runtime.Object) *client.Client {
 			client.GVRAWSMachineTemplate:     "AWSMachineTemplateList",
 			client.GVRKubeadmControlPlane:    "KubeadmControlPlaneList",
 			client.GVRKubeadmConfigTemplate:  "KubeadmConfigTemplateList",
+			client.GVRClusterResourceSet:     "ClusterResourceSetList",
+			client.GVRConfigMap:              "ConfigMapList",
 		}, objs...)
 	return &client.Client{Dynamic: fake}
 }
@@ -760,5 +764,344 @@ func TestGetLabelsEmpty(t *testing.T) {
 	})
 	if ok {
 		t.Error("expected ok=false for metadata without labels")
+	}
+}
+
+func TestEnsureCAPIAddonsCreatesResourcesForAWS(t *testing.T) {
+	ns := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": "capi-addons",
+			},
+		},
+	}
+	c := fakeCAPIClient(ns)
+	m := New(c, config.Config{}, discardLogger)
+
+	if err := m.EnsureCAPIAddons(context.Background(), "aws"); err != nil {
+		t.Fatalf("EnsureCAPIAddons failed: %v", err)
+	}
+
+	_, err := c.Get(context.Background(), client.GVRConfigMap, "capi-addons", "capi-addon-calico")
+	if err != nil {
+		t.Error("Calico ConfigMap not created")
+	}
+	_, err = c.Get(context.Background(), client.GVRConfigMap, "capi-addons", "capi-addon-aws-ccm")
+	if err != nil {
+		t.Error("AWS CCM ConfigMap not created")
+	}
+	crs, err := c.Get(context.Background(), client.GVRClusterResourceSet, "capi-addons", "capi-addons-aws")
+	if err != nil {
+		t.Fatalf("ClusterResourceSet not created: %v", err)
+	}
+	spec, _ := crs.Object["spec"].(map[string]interface{})
+	selector, _ := spec["clusterSelector"].(map[string]interface{})
+	labels, _ := selector["matchLabels"].(map[string]interface{})
+	if labels["acmlab.redhat.com/infra-provider"] != "aws" {
+		t.Errorf("selector infra-provider = %v, want aws", labels["acmlab.redhat.com/infra-provider"])
+	}
+}
+
+func TestEnsureCAPIAddonsIdempotent(t *testing.T) {
+	ns := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": "capi-addons",
+			},
+		},
+	}
+	c := fakeCAPIClient(ns)
+	m := New(c, config.Config{}, discardLogger)
+
+	if err := m.EnsureCAPIAddons(context.Background(), "docker"); err != nil {
+		t.Fatalf("first call failed: %v", err)
+	}
+	if err := m.EnsureCAPIAddons(context.Background(), "docker"); err != nil {
+		t.Fatalf("second call failed: %v", err)
+	}
+}
+
+func TestWatchAndAutoImportCreatesSecret(t *testing.T) {
+	kubeconfig := "apiVersion: v1\nclusters:\n- cluster:\n    server: https://test:6443\n  name: test\n"
+	encodedKubeconfig := base64.StdEncoding.EncodeToString([]byte(kubeconfig))
+
+	kubeconfigSecret := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test-cluster-kubeconfig",
+				"namespace": "test-cluster",
+			},
+			"data": map[string]interface{}{
+				"value": encodedKubeconfig,
+			},
+		},
+	}
+
+	ns := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": "test-cluster",
+			},
+		},
+	}
+
+	c := fakeCAPIClient(ns, kubeconfigSecret)
+	m := New(c, config.Config{}, discardLogger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	m.watchAndAutoImport(ctx, "test-cluster", "test-cluster")
+
+	secret, err := c.Get(context.Background(), client.GVRSecret, "test-cluster", "auto-import-secret")
+	if err != nil {
+		t.Fatalf("auto-import-secret not created: %v", err)
+	}
+	data, _, _ := unstructured.NestedStringMap(secret.Object, "stringData")
+	if data["kubeconfig"] != kubeconfig {
+		t.Errorf("kubeconfig mismatch: got %q", data["kubeconfig"])
+	}
+}
+
+func TestWatchAndAutoImportTimesOutGracefully(t *testing.T) {
+	c := fakeCAPIClient()
+	m := New(c, config.Config{}, discardLogger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	m.watchAndAutoImport(ctx, "missing", "missing")
+
+	_, err := c.Get(context.Background(), client.GVRSecret, "missing", "auto-import-secret")
+	if err == nil {
+		t.Error("auto-import-secret should not exist when kubeconfig is missing")
+	}
+}
+
+func TestCreateCAPIAutoImportSecretIdempotent(t *testing.T) {
+	ns := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": "test-ns",
+			},
+		},
+	}
+	c := fakeCAPIClient(ns)
+	m := New(c, config.Config{}, discardLogger)
+
+	kubeconfig := []byte("apiVersion: v1\nserver: https://test:6443\n")
+
+	if err := m.createCAPIAutoImportSecret(context.Background(), "test-ns", kubeconfig); err != nil {
+		t.Fatalf("first create failed: %v", err)
+	}
+	if err := m.createCAPIAutoImportSecret(context.Background(), "test-ns", kubeconfig); err != nil {
+		t.Fatalf("second create (update) failed: %v", err)
+	}
+}
+
+func TestEnsureCAPIAddonsDockerOnlyCNI(t *testing.T) {
+	ns := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": "capi-addons",
+			},
+		},
+	}
+	c := fakeCAPIClient(ns)
+	m := New(c, config.Config{}, discardLogger)
+
+	if err := m.EnsureCAPIAddons(context.Background(), "docker"); err != nil {
+		t.Fatalf("EnsureCAPIAddons failed: %v", err)
+	}
+
+	_, err := c.Get(context.Background(), client.GVRConfigMap, "capi-addons", "capi-addon-calico")
+	if err != nil {
+		t.Error("Calico ConfigMap not created for docker provider")
+	}
+	_, err = c.Get(context.Background(), client.GVRConfigMap, "capi-addons", "capi-addon-aws-ccm")
+	if err == nil {
+		t.Error("AWS CCM ConfigMap should not be created for docker provider")
+	}
+	crs, err := c.Get(context.Background(), client.GVRClusterResourceSet, "capi-addons", "capi-addons-docker")
+	if err != nil {
+		t.Fatalf("ClusterResourceSet not created: %v", err)
+	}
+	spec, _ := crs.Object["spec"].(map[string]interface{})
+	resources, _ := spec["resources"].([]interface{})
+	if len(resources) != 1 {
+		t.Errorf("expected 1 resource for docker, got %d", len(resources))
+	}
+}
+
+func TestCreateCAPIAWSCreatesAllResources(t *testing.T) {
+	c := fakeCAPIClient()
+	m := New(c, config.Config{Platform: "aws"}, discardLogger)
+
+	err := m.CreateCAPI(context.Background(), CAPIClusterOpts{
+		Name:          "aws-test",
+		InfraProvider: "aws",
+		Region:        "us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateCAPI aws failed: %v", err)
+	}
+
+	for _, check := range []struct {
+		gvr  schema.GroupVersionResource
+		ns   string
+		name string
+	}{
+		{client.GVRAWSCluster, "aws-test", "aws-test"},
+		{client.GVRAWSMachineTemplate, "aws-test", "aws-test-control-plane"},
+		{client.GVRAWSMachineTemplate, "aws-test", "aws-test-workers"},
+		{client.GVRKubeadmControlPlane, "aws-test", "aws-test-control-plane"},
+		{client.GVRKubeadmConfigTemplate, "aws-test", "aws-test-workers"},
+		{client.GVRCAPICluster, "aws-test", "aws-test"},
+		{client.GVRCAPIMachineDeployment, "aws-test", "aws-test-workers"},
+		{client.GVRManagedCluster, "", "aws-test"},
+	} {
+		_, err := c.Get(context.Background(), check.gvr, check.ns, check.name)
+		if err != nil {
+			t.Errorf("%s %s/%s not created: %v", check.gvr.Resource, check.ns, check.name, err)
+		}
+	}
+}
+
+func TestCreateCAPIAWSFailsOnAWSCluster(t *testing.T) {
+	scheme := runtime.NewScheme()
+	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPICluster:           "ClusterList",
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+			client.GVRManagedCluster:        "ManagedClusterList",
+			client.GVRNamespace:             "NamespaceList",
+			client.GVRSecret:                "SecretList",
+			client.GVRAWSCluster:            "AWSClusterList",
+			client.GVRAWSMachineTemplate:    "AWSMachineTemplateList",
+			client.GVRKubeadmControlPlane:   "KubeadmControlPlaneList",
+			client.GVRKubeadmConfigTemplate: "KubeadmConfigTemplateList",
+			client.GVRClusterResourceSet:    "ClusterResourceSetList",
+			client.GVRConfigMap:             "ConfigMapList",
+		})
+	fake.PrependReactor("create", "awsclusters", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated AWSCluster create failure")
+	})
+	c := &client.Client{Dynamic: fake}
+	m := New(c, config.Config{}, discardLogger)
+
+	err := m.CreateCAPI(context.Background(), CAPIClusterOpts{
+		Name:          "fail-aws",
+		InfraProvider: "aws",
+		Region:        "us-east-1",
+	})
+	if err == nil {
+		t.Fatal("expected error when AWSCluster creation fails")
+	}
+	if !contains(err.Error(), "AWSCluster") {
+		t.Errorf("expected AWSCluster error, got: %v", err)
+	}
+}
+
+func TestCreateCAPIAWSFailsOnKubeadmControlPlane(t *testing.T) {
+	scheme := runtime.NewScheme()
+	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPICluster:           "ClusterList",
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+			client.GVRManagedCluster:        "ManagedClusterList",
+			client.GVRNamespace:             "NamespaceList",
+			client.GVRSecret:                "SecretList",
+			client.GVRAWSCluster:            "AWSClusterList",
+			client.GVRAWSMachineTemplate:    "AWSMachineTemplateList",
+			client.GVRKubeadmControlPlane:   "KubeadmControlPlaneList",
+			client.GVRKubeadmConfigTemplate: "KubeadmConfigTemplateList",
+			client.GVRClusterResourceSet:    "ClusterResourceSetList",
+			client.GVRConfigMap:             "ConfigMapList",
+		})
+	fake.PrependReactor("create", "kubeadmcontrolplanes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated KubeadmControlPlane create failure")
+	})
+	c := &client.Client{Dynamic: fake}
+	m := New(c, config.Config{}, discardLogger)
+
+	err := m.CreateCAPI(context.Background(), CAPIClusterOpts{
+		Name:          "fail-kcp",
+		InfraProvider: "aws",
+		Region:        "us-east-1",
+	})
+	if err == nil {
+		t.Fatal("expected error when KubeadmControlPlane creation fails")
+	}
+}
+
+func TestCreateCAPIAWSFailsOnMachineDeployment(t *testing.T) {
+	scheme := runtime.NewScheme()
+	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPICluster:           "ClusterList",
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+			client.GVRManagedCluster:        "ManagedClusterList",
+			client.GVRNamespace:             "NamespaceList",
+			client.GVRSecret:                "SecretList",
+			client.GVRAWSCluster:            "AWSClusterList",
+			client.GVRAWSMachineTemplate:    "AWSMachineTemplateList",
+			client.GVRKubeadmControlPlane:   "KubeadmControlPlaneList",
+			client.GVRKubeadmConfigTemplate: "KubeadmConfigTemplateList",
+			client.GVRClusterResourceSet:    "ClusterResourceSetList",
+			client.GVRConfigMap:             "ConfigMapList",
+		})
+	fake.PrependReactor("create", "machinedeployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated MachineDeployment create failure")
+	})
+	c := &client.Client{Dynamic: fake}
+	m := New(c, config.Config{}, discardLogger)
+
+	err := m.CreateCAPI(context.Background(), CAPIClusterOpts{
+		Name:          "fail-md",
+		InfraProvider: "aws",
+		Region:        "us-east-1",
+	})
+	if err == nil {
+		t.Fatal("expected error when MachineDeployment creation fails")
+	}
+}
+
+func TestWatchAndAutoImportBadBase64(t *testing.T) {
+	kubeconfigSecret := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "bad-cluster-kubeconfig",
+				"namespace": "bad-cluster",
+			},
+			"data": map[string]interface{}{
+				"value": "not-valid-base64!@#$",
+			},
+		},
+	}
+	c := fakeCAPIClient(kubeconfigSecret)
+	m := New(c, config.Config{}, discardLogger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	m.watchAndAutoImport(ctx, "bad-cluster", "bad-cluster")
+
+	_, err := c.Get(context.Background(), client.GVRSecret, "bad-cluster", "auto-import-secret")
+	if err == nil {
+		t.Error("auto-import-secret should not exist with bad base64 kubeconfig")
 	}
 }

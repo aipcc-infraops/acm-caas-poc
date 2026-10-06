@@ -1666,6 +1666,10 @@ spoke2                    -               cleanup-job     active
 
 ### Virtual Machines (UC-51)
 
+> **Prerequisite:** The target managed cluster must have OpenShift Virtualization (KubeVirt operator) installed. Use `acmlab vm ensure-cnv <cluster>` to install it via ACM governance policy. The ManifestWork is created on the hub regardless, but the spoke will report `Applied=False` if the `VirtualMachine` CRD is not available.
+
+**Integration tests:** `features/vm-lifecycle.feature` (tag `@vm`, 8 scenarios). Run with `GODOG_TAGS="@vm"`.
+
 #### `acmlab vm deploy`
 
 Deploy a virtual machine to a managed cluster via ManifestWork wrapping a KubeVirt VirtualMachine CRD.
@@ -1720,6 +1724,33 @@ Remove a virtual machine from a managed cluster.
 
 **Flags:**
 - `--cluster <cluster>`: target cluster (required)
+
+#### `acmlab vm ensure-cnv <cluster>`
+
+Install OpenShift Virtualization (CNV) on a managed cluster via ACM governance policy. Creates a Policy with ConfigurationPolicy templates that enforce: Namespace (`openshift-cnv`), OperatorGroup (OwnNamespace mode), Subscription (`kubevirt-hyperconverged`), and HyperConverged CR. Idempotent — safe to run multiple times.
+
+```
+$ acmlab vm ensure-cnv infraops1
+Ensuring OpenShift Virtualization on infraops1...
+CNV operator policy applied. Use 'acmlab vm cnv-status' to check progress.
+```
+
+#### `acmlab vm cnv-status <cluster>`
+
+Check OpenShift Virtualization installation status on a managed cluster. Shows compliance state of the governance policy.
+
+**Flags:**
+- `--json`: output as JSON
+
+```
+$ acmlab vm cnv-status infraops1
+Cluster:   infraops1
+Status:    Compliant
+```
+
+#### `acmlab vm remove-cnv <cluster>`
+
+Remove the OpenShift Virtualization governance policy from a managed cluster. Removes the Policy, Placement, and PlacementBinding. Does not uninstall the operator from the spoke — it only removes the governance policy.
 
 ### Observability (UC-52)
 
@@ -1783,6 +1814,39 @@ Show observability addon health status across all managed clusters.
 
 **Flags:**
 - `--json`: output as JSON
+
+#### `acmlab observability diagnose`
+
+Diagnose observability issues across the MCE/MCH/MCO chain, pull secret, addon health, and cluster labels.
+
+**Flags:**
+- `--repair`: attempt automatic repairs (create missing pull secret, re-enable disabled clusters) before diagnosing
+- `--json`: output as JSON
+
+**Checks performed:**
+1. MCE Available — blocks MCH and MCO if false
+2. MCH Complete — MCO cannot populate image list until MCH completes
+3. Pull secret present in observability namespace
+4. MCO status (Ready, Progressing, NotInstalled)
+5. Clusters with `observability=disabled` label
+6. Addon health across all managed clusters
+
+```bash
+$ acmlab observability diagnose
+  [ok]     mce-available        MultiClusterEngine is available
+  [ok]     mch-complete         MultiClusterHub is complete
+  [ok]     pull-secret          pull secret present
+  [ok]     mco-status           MCO is ready
+  [ok]     disabled-clusters    no clusters have observability disabled
+  [ok]     addon-health         all 4 cluster addons healthy
+
+Observability stack is healthy.
+
+$ acmlab observability diagnose --repair
+Running repairs...
+  [fixed] created pull secret multiclusterhub-operator-pull-secret
+  [fixed] enabled observability for cluster caas-pool-1
+```
 
 #### `acmlab observability configure-retention`
 

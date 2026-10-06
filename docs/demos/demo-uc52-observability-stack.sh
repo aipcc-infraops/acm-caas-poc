@@ -75,15 +75,19 @@ echo "17. Configure retention settings"
 acmlab observability configure-retention --retention 24h --block-duration 2h --delete-delay 48h
 
 echo ""
-echo "18. Remove custom rules"
+echo "18. Diagnose observability health"
+acmlab observability diagnose
+
+echo ""
+echo "19. Remove custom rules"
 acmlab observability remove-rules
 
 echo ""
-echo "19. Remove custom dashboard"
+echo "20. Remove custom dashboard"
 acmlab observability remove-dashboard gpu-overview
 
 echo ""
-echo "20. Teardown observability stack"
+echo "21. Teardown observability stack"
 acmlab observability teardown
 
 echo ""
