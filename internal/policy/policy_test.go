@@ -1079,3 +1079,38 @@ func TestComplianceReportListError(t *testing.T) {
 		t.Fatal("expected error when cluster list fails")
 	}
 }
+
+func TestNormalizeNamespace(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", DefaultNamespace},
+		{"global-set", "open-cluster-management-global-set"},
+		{"policies", "open-cluster-management-policies"},
+		{"open-cluster-management-global-set", "open-cluster-management-global-set"},
+		{"custom-ns", "custom-ns"},
+	}
+	for _, tt := range tests {
+		got := NormalizeNamespace(tt.input)
+		if got != tt.want {
+			t.Errorf("NormalizeNamespace(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestApplyWithAliasNamespace(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	opts := PolicyOpts{
+		Name:      "test-alias",
+		Namespace: "global-set",
+	}
+	if err := mgr.Apply(context.Background(), opts); err != nil {
+		t.Fatalf("Apply with alias namespace failed: %v", err)
+	}
+	if _, err := c.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "test-alias"); err != nil {
+		t.Errorf("policy not created in resolved namespace: %v", err)
+	}
+}

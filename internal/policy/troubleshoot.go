@@ -39,9 +39,7 @@ type TroubleshootReport struct {
 
 func (m *Manager) GetViolations(ctx context.Context, name, namespace string) (*PolicyViolations, error) {
 	m.logger.Info("policy.GetViolations", "policy", name)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 
 	obj, err := m.client.Get(ctx, client.GVRPolicy, namespace, name)
 	if err != nil {
@@ -99,9 +97,7 @@ func (m *Manager) GetViolations(ctx context.Context, name, namespace string) (*P
 
 func (m *Manager) Troubleshoot(ctx context.Context, name, namespace string) (*TroubleshootReport, error) {
 	m.logger.Info("policy.Troubleshoot", "policy", name)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 
 	violations, err := m.GetViolations(ctx, name, namespace)
 	if err != nil {

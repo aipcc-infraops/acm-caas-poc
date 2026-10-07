@@ -543,3 +543,97 @@ func TestStringVal(t *testing.T) {
 		t.Error("expected empty for missing")
 	}
 }
+
+func TestBuildComplianceOperatorPolicyHasUpgradeApproval(t *testing.T) {
+	pol := buildComplianceOperatorPolicy("spoke1")
+	approval, _, _ := unstructured.NestedString(pol.Object, "spec", "upgradeApproval")
+	if approval != "Automatic" {
+		t.Errorf("upgradeApproval = %q, want Automatic", approval)
+	}
+}
+
+func TestParseComplianceScanStatusNonCompliant(t *testing.T) {
+	obj := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"labels": map[string]interface{}{
+				"acmlab.redhat.com/compliance-profile": "ocp4-cis",
+			},
+		},
+		"status": map[string]interface{}{
+			"compliant": "NonCompliant",
+			"details": []interface{}{
+				map[string]interface{}{"rule": "r1", "status": "FAIL"},
+			},
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Compliant", "status": "False"},
+				"not-a-map",
+			},
+		},
+	}
+	s := parseComplianceScanStatus("spoke1", obj)
+	if s.Phase != "Done" {
+		t.Errorf("Phase = %q, want Done", s.Phase)
+	}
+	if s.NonCompliant != 1 {
+		t.Errorf("NonCompliant = %d, want 1", s.NonCompliant)
+	}
+	if len(s.Conditions) != 1 {
+		t.Errorf("Conditions = %d, want 1 (bad entry skipped)", len(s.Conditions))
+	}
+}
+
+func TestParseComplianceScanStatusBadDetail(t *testing.T) {
+	obj := map[string]interface{}{
+		"metadata": map[string]interface{}{},
+		"status": map[string]interface{}{
+			"compliant": "Compliant",
+			"details": []interface{}{
+				"not-a-map",
+				map[string]interface{}{"rule": "r1", "status": "PASS"},
+			},
+		},
+	}
+	s := parseComplianceScanStatus("spoke1", obj)
+	if s.Compliant != 1 {
+		t.Errorf("Compliant = %d, want 1 (bad detail skipped)", s.Compliant)
+	}
+}
+
+func TestBuildComplianceScanPlacementWithClusterSet(t *testing.T) {
+	p := buildComplianceScanPlacement("spoke1", "team-gpu")
+	cs, _, _ := unstructured.NestedStringSlice(p.Object, "spec", "clusterSets")
+	if len(cs) != 1 || cs[0] != "team-gpu" {
+		t.Errorf("clusterSets = %v, want [team-gpu]", cs)
+	}
+}
+
+func TestGetComplianceStatusScanWithoutOperator(t *testing.T) {
+	scanPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1",
+			"kind":       "Policy",
+			"metadata": map[string]interface{}{
+				"name":      "compliance-scan-spoke1",
+				"namespace": DefaultNamespace,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/compliance-profile": "ocp4-cis",
+				},
+			},
+			"status": map[string]interface{}{
+				"compliant": "Pending",
+			},
+		},
+	}
+
+	mgr := complianceManager(scanPolicy)
+	status, err := mgr.GetComplianceStatus(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("GetComplianceStatus failed: %v", err)
+	}
+	if status.Phase != "ScanWithoutOperator" {
+		t.Errorf("Phase = %q, want ScanWithoutOperator", status.Phase)
+	}
+	if status.Profile != "ocp4-cis" {
+		t.Errorf("Profile = %q, want ocp4-cis", status.Profile)
+	}
+}

@@ -27,10 +27,7 @@ type PolicySetInfo struct {
 
 func (m *Manager) ApplyPolicySet(ctx context.Context, opts PolicySetOpts) error {
 	m.logger.Info("policy.ApplyPolicySet", "name", opts.Name)
-	ns := opts.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
-	}
+	ns := NormalizeNamespace(opts.Namespace)
 
 	policySet := buildPolicySet(opts.Name, ns, opts.Description, opts.Policies)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRPolicySet, ns, policySet); err != nil {
@@ -52,9 +49,7 @@ func (m *Manager) ApplyPolicySet(ctx context.Context, opts PolicySetOpts) error 
 
 func (m *Manager) GetPolicySet(ctx context.Context, name, namespace string) (*PolicySetInfo, error) {
 	m.logger.Info("policy.GetPolicySet", "name", name)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 
 	obj, err := m.client.Get(ctx, client.GVRPolicySet, namespace, name)
 	if err != nil {
@@ -66,9 +61,7 @@ func (m *Manager) GetPolicySet(ctx context.Context, name, namespace string) (*Po
 
 func (m *Manager) ListPolicySets(ctx context.Context, namespace string) ([]PolicySetInfo, error) {
 	m.logger.Info("policy.ListPolicySets")
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 
 	list, err := m.client.List(ctx, client.GVRPolicySet, namespace, "")
 	if err != nil {
@@ -84,9 +77,7 @@ func (m *Manager) ListPolicySets(ctx context.Context, namespace string) ([]Polic
 
 func (m *Manager) RemovePolicySet(ctx context.Context, name, namespace string) (bool, error) {
 	m.logger.Info("policy.RemovePolicySet", "name", name)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 
 	_, err := m.client.Get(ctx, client.GVRPolicySet, namespace, name)
 	if err != nil {

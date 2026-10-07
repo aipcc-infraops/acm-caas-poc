@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -86,6 +87,8 @@ func policyListCmd() *cobra.Command {
 
 func policyStatusCmd() *cobra.Command {
 	var namespace string
+	var wait bool
+	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "status <name>",
 		Short: "Show detailed policy compliance status",
@@ -96,10 +99,30 @@ func policyStatusCmd() *cobra.Command {
 				return err
 			}
 			mgr := policy.New(c, cfg, logger)
-			info, err := mgr.Get(context.Background(), args[0], namespace)
-			if err != nil {
-				return err
+
+			ctx := context.Background()
+			var info *policy.PolicyInfo
+
+			if wait {
+				deadline := time.Now().Add(timeout)
+				for {
+					info, err = mgr.Get(ctx, args[0], namespace)
+					if err != nil {
+						return err
+					}
+					if info.Compliant != "" || time.Now().After(deadline) {
+						break
+					}
+					fmt.Println("Waiting for compliance status...")
+					time.Sleep(5 * time.Second)
+				}
+			} else {
+				info, err = mgr.Get(ctx, args[0], namespace)
+				if err != nil {
+					return err
+				}
 			}
+
 			fmt.Printf("Policy:      %s\n", info.Name)
 			fmt.Printf("Namespace:   %s\n", info.Namespace)
 			fmt.Printf("Remediation: %s\n", info.RemediationAction)
@@ -120,6 +143,8 @@ func policyStatusCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().BoolVar(&wait, "wait", false, "wait until compliance status is available")
+	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "timeout for --wait")
 	return cmd
 }
 
