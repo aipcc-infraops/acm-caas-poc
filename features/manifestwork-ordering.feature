@@ -9,7 +9,8 @@ Feature: ManifestWork ordering (UC-55)
     When I run "acmlab workorder create-ordered app-stack --cluster spoke1 --manifests app-manifests.json"
     Then a ManifestWork "app-stack" is created in namespace "spoke1"
     And manifests are ordered by ordinal (namespace first, then config, then deployment)
-    And manifestConfigs include resourceIdentifier with ordinal sequencing
+    And manifestConfigs include resourceIdentifier with group, resource, name, and namespace
+    And resourceIdentifier does not contain an ordinal field
 
   Scenario: Get ordered work status
     Given ordered ManifestWork "app-stack" exists on "spoke1"

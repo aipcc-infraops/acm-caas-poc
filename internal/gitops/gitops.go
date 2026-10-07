@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -47,9 +48,122 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
+type DiagnoseCheck struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type DiagnoseResult struct {
+	Namespace string          `json:"namespace"`
+	Healthy   bool            `json:"healthy"`
+	Checks    []DiagnoseCheck `json:"checks"`
+}
+
+func (r *DiagnoseResult) addCheck(name, status, message string) {
+	r.Checks = append(r.Checks, DiagnoseCheck{Name: name, Status: status, Message: message})
+	if status == "fail" {
+		r.Healthy = false
+	}
+}
+
+func (m *Manager) Diagnose(ctx context.Context, namespace string) (*DiagnoseResult, error) {
+	if namespace == "" {
+		namespace = DefaultNamespace
+	}
+	result := &DiagnoseResult{Namespace: namespace, Healthy: true}
+
+	_, err := m.client.Get(ctx, client.GVRCustomResourceDefinition, "", "applicationsets.argoproj.io")
+	if err != nil {
+		result.addCheck("applicationset-crd", "fail",
+			"ApplicationSet CRD (applicationsets.argoproj.io) is not installed. Install OpenShift GitOps or Argo CD.")
+	} else {
+		result.addCheck("applicationset-crd", "pass", "ApplicationSet CRD is available.")
+	}
+
+	_, err = m.client.Get(ctx, client.GVRNamespace, "", namespace)
+	if err != nil {
+		result.addCheck("namespace", "fail",
+			fmt.Sprintf("Namespace %q does not exist. Create it or choose a namespace where Argo CD is installed.", namespace))
+	} else {
+		result.addCheck("namespace", "pass", fmt.Sprintf("Namespace %q exists.", namespace))
+	}
+
+	m.checkGitOpsCSV(ctx, namespace, result)
+
+	return result, nil
+}
+
+func (m *Manager) checkGitOpsCSV(ctx context.Context, namespace string, result *DiagnoseResult) {
+	csvList, err := m.client.List(ctx, client.GVRClusterServiceVersion, namespace, "")
+	if err != nil {
+		result.addCheck("gitops-operator", "warn",
+			"Could not query ClusterServiceVersions. GitOps may still work with a standalone Argo CD installation.")
+		return
+	}
+	for _, csv := range csvList.Items {
+		name := csv.GetName()
+		if strings.Contains(name, "openshift-gitops") || strings.Contains(name, "gitops-operator") {
+			phase, _, _ := unstructuredNestedString(csv.Object, "status", "phase")
+			if phase == "Succeeded" {
+				result.addCheck("gitops-operator", "pass",
+					fmt.Sprintf("OpenShift GitOps operator %q is installed and healthy.", name))
+				return
+			}
+			result.addCheck("gitops-operator", "warn",
+				fmt.Sprintf("OpenShift GitOps operator %q found but phase is %q.", name, phase))
+			return
+		}
+	}
+	result.addCheck("gitops-operator", "warn",
+		"No OpenShift GitOps operator CSV found. GitOps may still work with a standalone Argo CD installation.")
+}
+
+func unstructuredNestedString(obj map[string]interface{}, fields ...string) (string, bool, error) {
+	current := obj
+	for i, field := range fields {
+		if i == len(fields)-1 {
+			val, ok := current[field].(string)
+			return val, ok, nil
+		}
+		next, ok := current[field].(map[string]interface{})
+		if !ok {
+			return "", false, nil
+		}
+		current = next
+	}
+	return "", false, nil
+}
+
+func (m *Manager) CheckPrerequisites(ctx context.Context, namespace string) error {
+	if namespace == "" {
+		namespace = DefaultNamespace
+	}
+	_, err := m.client.Get(ctx, client.GVRCustomResourceDefinition, "", "applicationsets.argoproj.io")
+	if err != nil {
+		return fmt.Errorf("GitOps prerequisites not met: ApplicationSet CRD is not installed. Run 'acmlab gitops diagnose --namespace %s' for details", namespace)
+	}
+	_, err = m.client.Get(ctx, client.GVRNamespace, "", namespace)
+	if err != nil {
+		return fmt.Errorf("GitOps prerequisites not met: namespace %q does not exist. Run 'acmlab gitops diagnose --namespace %s' for details", namespace, namespace)
+	}
+	return nil
+}
+
+func isResourceNotFound(err error) bool {
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	return strings.Contains(err.Error(), "the server could not find the requested resource")
+}
+
 func (m *Manager) Create(ctx context.Context, opts AppSetOpts) error {
 	m.logger.Info("gitops.Create", "name", opts.Name)
 	applyDefaults(&opts)
+
+	if err := m.CheckPrerequisites(ctx, opts.Namespace); err != nil {
+		return err
+	}
 
 	appSet := buildApplicationSet(opts)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRApplicationSet, opts.Namespace, appSet); err != nil {
@@ -64,6 +178,10 @@ func (m *Manager) Get(ctx context.Context, name, namespace string) (*AppSetInfo,
 		namespace = DefaultNamespace
 	}
 
+	if err := m.CheckPrerequisites(ctx, namespace); err != nil {
+		return nil, err
+	}
+
 	obj, err := m.client.Get(ctx, client.GVRApplicationSet, namespace, name)
 	if err != nil {
 		return nil, fmt.Errorf("getting ApplicationSet %s: %w", name, err)
@@ -75,6 +193,10 @@ func (m *Manager) List(ctx context.Context, namespace string) ([]AppSetInfo, err
 	m.logger.Info("gitops.List", "namespace", namespace)
 	if namespace == "" {
 		namespace = DefaultNamespace
+	}
+
+	if err := m.CheckPrerequisites(ctx, namespace); err != nil {
+		return nil, err
 	}
 
 	list, err := m.client.List(ctx, client.GVRApplicationSet, namespace, "acmlab.redhat.com/gitops")
@@ -96,7 +218,7 @@ func (m *Manager) Delete(ctx context.Context, name, namespace string) (bool, err
 
 	_, err := m.client.Get(ctx, client.GVRApplicationSet, namespace, name)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) || isResourceNotFound(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("checking ApplicationSet %s: %w", name, err)
@@ -112,6 +234,10 @@ func (m *Manager) Sync(ctx context.Context, name, namespace string) error {
 	m.logger.Info("gitops.Sync", "name", name, "namespace", namespace)
 	if namespace == "" {
 		namespace = DefaultNamespace
+	}
+
+	if err := m.CheckPrerequisites(ctx, namespace); err != nil {
+		return err
 	}
 
 	_, err := m.client.Get(ctx, client.GVRApplicationSet, namespace, name)
@@ -160,6 +286,10 @@ func (m *Manager) EnableAgentMode(ctx context.Context, opts AgentModeOpts) error
 		opts.Revision = "main"
 	}
 
+	if err := m.CheckPrerequisites(ctx, opts.Namespace); err != nil {
+		return err
+	}
+
 	appSet := buildAgentModeApplicationSet(opts)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRApplicationSet, opts.Namespace, appSet); err != nil {
 		return fmt.Errorf("creating agent-mode ApplicationSet: %w", err)
@@ -175,7 +305,7 @@ func (m *Manager) DisableAgentMode(ctx context.Context, name, namespace string) 
 
 	obj, err := m.client.Get(ctx, client.GVRApplicationSet, namespace, name)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) || isResourceNotFound(err) {
 			return false, nil
 		}
 		return false, fmt.Errorf("checking agent-mode ApplicationSet %s: %w", name, err)
@@ -196,6 +326,10 @@ func (m *Manager) AgentModeStatus(ctx context.Context, name, namespace string) (
 	m.logger.Info("gitops.AgentModeStatus", "name", name)
 	if namespace == "" {
 		namespace = DefaultNamespace
+	}
+
+	if err := m.CheckPrerequisites(ctx, namespace); err != nil {
+		return nil, err
 	}
 
 	obj, err := m.client.Get(ctx, client.GVRApplicationSet, namespace, name)

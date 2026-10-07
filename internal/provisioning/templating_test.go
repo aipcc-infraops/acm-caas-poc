@@ -23,13 +23,14 @@ func fakeTemplateClient(objs ...runtime.Object) *client.Client {
 	return &client.Client{Dynamic: fake}
 }
 
-func templateObj(name string) *unstructured.Unstructured {
+func templateObj(name, namespace string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "hive.openshift.io/v1",
 			"kind":       "ClusterDeploymentCustomization",
 			"metadata": map[string]interface{}{
-				"name": name,
+				"name":      name,
+				"namespace": namespace,
 			},
 			"spec": map[string]interface{}{
 				"installConfigPatches": []interface{}{
@@ -60,7 +61,7 @@ func TestCreateTemplate(t *testing.T) {
 	patches := []TemplatePatch{
 		{Op: "replace", Path: "/networking/clusterNetwork/0/cidr", Value: "10.128.0.0/14"},
 	}
-	if err := m.CreateTemplate(context.Background(), "small-cluster", patches); err != nil {
+	if err := m.CreateTemplate(context.Background(), "small-cluster", "hive-test", patches); err != nil {
 		t.Fatalf("CreateTemplate failed: %v", err)
 	}
 }
@@ -70,20 +71,38 @@ func TestCreateTemplateIdempotent(t *testing.T) {
 	m := New(c, config.Config{}, discardLogger)
 
 	patches := []TemplatePatch{{Op: "replace", Path: "/p", Value: "v"}}
-	if err := m.CreateTemplate(context.Background(), "tmpl", patches); err != nil {
+	if err := m.CreateTemplate(context.Background(), "tmpl", "hive-test", patches); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	if err := m.CreateTemplate(context.Background(), "tmpl", patches); err != nil {
+	if err := m.CreateTemplate(context.Background(), "tmpl", "hive-test", patches); err != nil {
 		t.Fatalf("second create should be idempotent: %v", err)
 	}
 }
 
+func TestCreateTemplateWithNamespace(t *testing.T) {
+	c := fakeTemplateClient()
+	m := New(c, config.Config{}, discardLogger)
+
+	patches := []TemplatePatch{{Op: "replace", Path: "/p", Value: "v"}}
+	if err := m.CreateTemplate(context.Background(), "gpu-template", "my-ns", patches); err != nil {
+		t.Fatalf("CreateTemplate failed: %v", err)
+	}
+
+	obj, err := c.Get(context.Background(), client.GVRClusterDeploymentCustomization, "my-ns", "gpu-template")
+	if err != nil {
+		t.Fatalf("resource not found in namespace my-ns: %v", err)
+	}
+	if obj.GetNamespace() != "my-ns" {
+		t.Errorf("namespace = %q, want my-ns", obj.GetNamespace())
+	}
+}
+
 func TestGetTemplate(t *testing.T) {
-	tmpl := templateObj("gpu-large")
+	tmpl := templateObj("gpu-large", "hive-test")
 	c := fakeTemplateClient(tmpl)
 	m := New(c, config.Config{}, discardLogger)
 
-	obj, err := m.GetTemplate(context.Background(), "gpu-large")
+	obj, err := m.GetTemplate(context.Background(), "gpu-large", "hive-test")
 	if err != nil {
 		t.Fatalf("GetTemplate failed: %v", err)
 	}
@@ -97,17 +116,17 @@ func TestGetTemplateNotFound(t *testing.T) {
 	c := fakeTemplateClient()
 	m := New(c, config.Config{}, discardLogger)
 
-	_, err := m.GetTemplate(context.Background(), "nonexistent")
+	_, err := m.GetTemplate(context.Background(), "nonexistent", "hive-test")
 	if err == nil {
 		t.Fatal("expected error for nonexistent template")
 	}
 }
 
 func TestListTemplates(t *testing.T) {
-	c := fakeTemplateClient(templateObj("small"), templateObj("large"))
+	c := fakeTemplateClient(templateObj("small", "hive-test"), templateObj("large", "hive-test"))
 	m := New(c, config.Config{}, discardLogger)
 
-	list, err := m.ListTemplates(context.Background())
+	list, err := m.ListTemplates(context.Background(), "hive-test")
 	if err != nil {
 		t.Fatalf("ListTemplates failed: %v", err)
 	}
@@ -116,23 +135,58 @@ func TestListTemplates(t *testing.T) {
 	}
 }
 
-func TestRemoveTemplate(t *testing.T) {
-	c := fakeTemplateClient(templateObj("old"))
+func TestListTemplatesInNamespace(t *testing.T) {
+	c := fakeTemplateClient(
+		templateObj("t1", "ns-a"),
+		templateObj("t2", "ns-b"),
+	)
 	m := New(c, config.Config{}, discardLogger)
 
-	if err := m.RemoveTemplate(context.Background(), "old"); err != nil {
+	listA, err := m.ListTemplates(context.Background(), "ns-a")
+	if err != nil {
+		t.Fatalf("ListTemplates ns-a failed: %v", err)
+	}
+	if len(listA) != 1 {
+		t.Errorf("expected 1 template in ns-a, got %d", len(listA))
+	}
+
+	listB, err := m.ListTemplates(context.Background(), "ns-b")
+	if err != nil {
+		t.Fatalf("ListTemplates ns-b failed: %v", err)
+	}
+	if len(listB) != 1 {
+		t.Errorf("expected 1 template in ns-b, got %d", len(listB))
+	}
+}
+
+func TestRemoveTemplate(t *testing.T) {
+	c := fakeTemplateClient(templateObj("old", "hive-test"))
+	m := New(c, config.Config{}, discardLogger)
+
+	if err := m.RemoveTemplate(context.Background(), "old", "hive-test"); err != nil {
 		t.Fatalf("RemoveTemplate failed: %v", err)
 	}
 }
 
 func TestApplyTemplate(t *testing.T) {
-	tmpl := templateObj("gpu-large")
+	tmpl := templateObj("gpu-large", "spoke1")
 	cd := clusterDeploymentObj("spoke1")
 	c := fakeTemplateClient(tmpl, cd)
 	m := New(c, config.Config{}, discardLogger)
 
-	if err := m.ApplyTemplate(context.Background(), "spoke1", "gpu-large"); err != nil {
+	if err := m.ApplyTemplate(context.Background(), "spoke1", "gpu-large", "spoke1"); err != nil {
 		t.Fatalf("ApplyTemplate failed: %v", err)
+	}
+}
+
+func TestApplyTemplateDefaultNamespace(t *testing.T) {
+	tmpl := templateObj("gpu-large", "spoke1")
+	cd := clusterDeploymentObj("spoke1")
+	c := fakeTemplateClient(tmpl, cd)
+	m := New(c, config.Config{}, discardLogger)
+
+	if err := m.ApplyTemplate(context.Background(), "spoke1", "gpu-large", ""); err != nil {
+		t.Fatalf("ApplyTemplate with empty templateNamespace failed: %v", err)
 	}
 }
 
@@ -141,7 +195,7 @@ func TestApplyTemplateNotFound(t *testing.T) {
 	c := fakeTemplateClient(cd)
 	m := New(c, config.Config{}, discardLogger)
 
-	err := m.ApplyTemplate(context.Background(), "spoke1", "nonexistent")
+	err := m.ApplyTemplate(context.Background(), "spoke1", "nonexistent", "spoke1")
 	if err == nil {
 		t.Fatal("expected error for nonexistent template")
 	}
@@ -151,9 +205,12 @@ func TestBuildClusterDeploymentCustomization(t *testing.T) {
 	patches := []TemplatePatch{
 		{Op: "replace", Path: "/p", Value: "v"},
 	}
-	obj := buildClusterDeploymentCustomization("test", patches)
+	obj := buildClusterDeploymentCustomization("test", "hive-test", patches)
 	if obj.GetName() != "test" {
 		t.Errorf("expected name test, got %s", obj.GetName())
+	}
+	if obj.GetNamespace() != "hive-test" {
+		t.Errorf("expected namespace hive-test, got %s", obj.GetNamespace())
 	}
 	labels := obj.GetLabels()
 	if labels["acmlab.redhat.com/cluster-template"] != "true" {

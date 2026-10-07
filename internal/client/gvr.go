@@ -195,4 +195,7 @@ var (
 	GVRServiceExport = schema.GroupVersionResource{
 		Group: "multicluster.x-k8s.io", Version: "v1alpha1", Resource: "serviceexports",
 	}
+	GVRClusterServiceVersion = schema.GroupVersionResource{
+		Group: "operators.coreos.com", Version: "v1alpha1", Resource: "clusterserviceversions",
+	}
 )
