@@ -145,12 +145,11 @@ func (m *Manager) GetPowerStateStatus(ctx context.Context, namespace, name strin
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return "", fmt.Errorf("no ClusterDeployment found for cluster %s/%s", namespace, name)
+			return m.getCAPIPowerState(ctx, name)
 		}
 		return "", fmt.Errorf("getting ClusterDeployment: %w", err)
 	}
 
-	// Read status.powerState
 	powerState, found, err := unstructured.NestedString(cd.Object, "status", "powerState")
 	if err != nil {
 		return "", fmt.Errorf("reading status.powerState: %w", err)
@@ -225,18 +224,16 @@ func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name str
 		return &LifecycleSupportReason{Support: LifecycleUnsupported, ClusterType: client.ClusterTypeUnknown}, nil
 	}
 
-	switch clusterType {
-	case client.ClusterTypeKubernetes:
-		return &LifecycleSupportReason{
-			Support:     LifecycleFull,
-			ClusterType: clusterType,
-		}, nil
-	default:
-		return &LifecycleSupportReason{
-			Support:     LifecycleUnsupported,
-			ClusterType: clusterType,
-		}, nil
+	if clusterType == client.ClusterTypeKubernetes {
+		return &LifecycleSupportReason{Support: LifecycleFull, ClusterType: clusterType}, nil
 	}
+
+	mds, mdErr := m.listCAPIMachineDeployments(ctx, name)
+	if mdErr == nil && len(mds) > 0 {
+		return &LifecycleSupportReason{Support: LifecycleFull, ClusterType: clusterType}, nil
+	}
+
+	return &LifecycleSupportReason{Support: LifecycleUnsupported, ClusterType: clusterType}, nil
 }
 
 // ClusterSupportsLifecycle checks if a cluster supports lifecycle operations (has ClusterDeployment).
@@ -388,7 +385,7 @@ func (m *Manager) Diagnose(ctx context.Context, namespace, name string) (*Diagno
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("no ClusterDeployment found for cluster %s/%s: this cluster may be imported (not Hive-provisioned)", namespace, name)
+			return m.diagnoseCAPI(ctx, name, report)
 		}
 		return nil, fmt.Errorf("getting ClusterDeployment: %w", err)
 	}
@@ -429,6 +426,63 @@ func (m *Manager) Diagnose(ctx context.Context, namespace, name string) (*Diagno
 		report.ACMAvailable = available
 		report.ACMJoined = joined
 		report.Checks = append(report.Checks, checkACMHealth(report.HivePowerSpec, available, joined)...)
+	}
+
+	report.Suggestions = deriveSuggestions(report.Checks)
+	return report, nil
+}
+
+func (m *Manager) diagnoseCAPI(ctx context.Context, name string, report *DiagnosticReport) (*DiagnosticReport, error) {
+	mds, err := m.listCAPIMachineDeployments(ctx, name)
+	if err != nil || len(mds) == 0 {
+		return nil, fmt.Errorf("no ClusterDeployment or CAPI MachineDeployment found for cluster %s", name)
+	}
+
+	report.Platform = "CAPI"
+
+	state, _ := m.getCAPIPowerState(ctx, name)
+	report.HivePowerSpec = state
+	report.HivePowerStatus = state
+
+	totalReplicas := int64(0)
+	for _, md := range mds {
+		r, _, _ := unstructured.NestedInt64(md.Object, "spec", "replicas")
+		totalReplicas += r
+	}
+
+	if totalReplicas == 0 {
+		report.Checks = append(report.Checks, DiagnosticCheck{
+			Name:     "capi-replicas",
+			Severity: SeverityWarning,
+			Message:  fmt.Sprintf("All %d MachineDeployments have 0 replicas (hibernated)", len(mds)),
+			Detail:   "Use 'acmlab lifecycle resume' to scale workers back up",
+		})
+	} else {
+		report.Checks = append(report.Checks, DiagnosticCheck{
+			Name:     "capi-replicas",
+			Severity: SeverityOK,
+			Message:  fmt.Sprintf("%d MachineDeployment(s) with %d total replicas", len(mds), totalReplicas),
+		})
+	}
+
+	mc, err := m.client.Get(ctx, client.GVRManagedCluster, "", name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			report.ACMAvailable = "not found"
+			report.ACMJoined = "not found"
+			report.Checks = append(report.Checks, DiagnosticCheck{
+				Name:     "managedcluster-exists",
+				Severity: SeverityWarning,
+				Message:  "No ManagedCluster resource found",
+			})
+		} else {
+			return nil, fmt.Errorf("getting ManagedCluster: %w", err)
+		}
+	} else {
+		available, joined := extractMCConditions(mc)
+		report.ACMAvailable = available
+		report.ACMJoined = joined
+		report.Checks = append(report.Checks, checkACMHealth(state, available, joined)...)
 	}
 
 	report.Suggestions = deriveSuggestions(report.Checks)
