@@ -41,6 +41,8 @@ type ComplianceReport struct {
 func (m *Manager) DeployComplianceOperator(ctx context.Context, cluster, clusterSet string) error {
 	m.logger.Info("security.DeployComplianceOperator", "cluster", cluster)
 
+	opName := complianceOperatorPolicyName(cluster)
+
 	opPolicy := buildComplianceOperatorPolicy(cluster)
 	if err := m.client.CreateIfNotExists(ctx, client.GVROperatorPolicy, DefaultNamespace, opPolicy); err != nil {
 		return fmt.Errorf("creating compliance operator policy: %w", err)
@@ -48,16 +50,22 @@ func (m *Manager) DeployComplianceOperator(ctx context.Context, cluster, cluster
 
 	policy := buildComplianceOperatorHealthPolicy(cluster)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRPolicy, DefaultNamespace, policy); err != nil {
+		_ = m.client.DeleteIfExists(ctx, client.GVROperatorPolicy, DefaultNamespace, opName)
 		return fmt.Errorf("creating compliance operator health policy: %w", err)
 	}
 
 	placement := buildCompliancePlacement(cluster, clusterSet)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRPlacement, DefaultNamespace, placement); err != nil {
+		_ = m.client.DeleteIfExists(ctx, client.GVRPolicy, DefaultNamespace, opName+"-health")
+		_ = m.client.DeleteIfExists(ctx, client.GVROperatorPolicy, DefaultNamespace, opName)
 		return fmt.Errorf("creating compliance placement: %w", err)
 	}
 
 	binding := buildCompliancePlacementBinding(cluster)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRPlacementBinding, DefaultNamespace, binding); err != nil {
+		_ = m.client.DeleteIfExists(ctx, client.GVRPlacement, DefaultNamespace, opName+"-placement")
+		_ = m.client.DeleteIfExists(ctx, client.GVRPolicy, DefaultNamespace, opName+"-health")
+		_ = m.client.DeleteIfExists(ctx, client.GVROperatorPolicy, DefaultNamespace, opName)
 		return fmt.Errorf("creating compliance placement binding: %w", err)
 	}
 
@@ -96,31 +104,41 @@ func (m *Manager) GetComplianceStatus(ctx context.Context, cluster string) (*Com
 		Phase:   "Pending",
 	}
 
+	operatorDeployed := false
 	opName := complianceOperatorPolicyName(cluster)
 	opObj, err := m.client.Get(ctx, client.GVROperatorPolicy, DefaultNamespace, opName)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			status.Phase = "NotDeployed"
-			return status, nil
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("getting compliance operator policy: %w", err)
 		}
-		return nil, fmt.Errorf("getting compliance operator policy: %w", err)
+	} else {
+		operatorDeployed = true
+		opConditions := extractPolicyConditions(opObj.Object)
+		status.Conditions = append(status.Conditions, opConditions...)
 	}
-
-	opConditions := extractPolicyConditions(opObj.Object)
-	status.Conditions = append(status.Conditions, opConditions...)
 
 	scanName := complianceScanPolicyName(cluster)
 	scanObj, err := m.client.Get(ctx, client.GVRPolicy, DefaultNamespace, scanName)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			status.Phase = "OperatorDeployed"
-			return status, nil
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("getting compliance scan policy: %w", err)
 		}
-		return nil, fmt.Errorf("getting compliance scan policy: %w", err)
+		if operatorDeployed {
+			status.Phase = "OperatorDeployed"
+		} else {
+			status.Phase = "NotDeployed"
+		}
+		return status, nil
+	}
+
+	if !operatorDeployed {
+		status.Phase = "ScanWithoutOperator"
 	}
 
 	scanStatus := parseComplianceScanStatus(cluster, scanObj.Object)
-	status.Phase = scanStatus.Phase
+	if operatorDeployed {
+		status.Phase = scanStatus.Phase
+	}
 	status.Profile = scanStatus.Profile
 	status.Compliant = scanStatus.Compliant
 	status.NonCompliant = scanStatus.NonCompliant
@@ -175,11 +193,11 @@ func (m *Manager) RemoveComplianceScan(ctx context.Context, cluster string) erro
 }
 
 func complianceOperatorPolicyName(cluster string) string {
-	return "compliance-operator-" + cluster
+	return "co-" + cluster
 }
 
 func complianceScanPolicyName(cluster string) string {
-	return "compliance-scan-" + cluster
+	return "cs-" + cluster
 }
 
 func extractPolicyConditions(obj map[string]interface{}) []string {

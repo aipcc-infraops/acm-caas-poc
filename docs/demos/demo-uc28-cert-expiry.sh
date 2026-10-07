@@ -12,8 +12,8 @@ acmlab policy apply cert-expiry-check \
   --cert-expiry "$DAYS" \
   --cert-namespaces "openshift-config,openshift-ingress"
 
-echo "--- Step 2: Check compliance (shows clusters with expiring certs) ---"
-acmlab policy status cert-expiry-check
+echo "--- Step 2: Check compliance (waits for propagation, shows clusters with expiring certs) ---"
+acmlab policy status cert-expiry-check --wait --timeout 2m
 
 echo "--- Step 3: Apply stricter policy (7 days) for critical namespaces ---"
 acmlab policy apply cert-expiry-critical \

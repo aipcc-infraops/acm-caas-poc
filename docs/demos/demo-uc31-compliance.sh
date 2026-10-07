@@ -6,13 +6,13 @@ echo "=== UC-31: Compliance Operator ==="
 echo ""
 
 echo "--- Deploy Compliance Operator to a cluster ---"
-echo '$ acmlab security deploy-compliance spoke1 --cluster-set default'
-acmlab security deploy-compliance spoke1 --cluster-set default
+echo '$ acmlab security deploy-compliance --cluster spoke1 --cluster-set default'
+acmlab security deploy-compliance --cluster spoke1 --cluster-set default
 echo ""
 
 echo "--- Create a compliance scan (CIS node profile) ---"
-echo '$ acmlab security scan spoke1 --profile cis-node'
-acmlab security scan spoke1 --profile cis-node
+echo '$ acmlab security scan --cluster spoke1 --profile cis-node'
+acmlab security scan --cluster spoke1 --profile cis-node
 echo ""
 
 echo "--- Check scan status ---"

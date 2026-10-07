@@ -318,6 +318,125 @@ func TestGroupByClusterSetUnassigned(t *testing.T) {
 	}
 }
 
+func TestParseClusterStatusAvailableAndConnectionDegraded(t *testing.T) {
+	obj := map[string]interface{}{
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+				map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+				map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+				map[string]interface{}{
+					"type":    "SubmarinerConnectionDegraded",
+					"status":  "True",
+					"reason":  "ConnectionsNotEstablished",
+					"message": "There are no connections on gateways",
+				},
+			},
+		},
+	}
+	cs := parseClusterStatus("spoke1", obj)
+	if !cs.AddonAvailable {
+		t.Error("expected AddonAvailable=true")
+	}
+	if !cs.GatewayReady {
+		t.Error("expected GatewayReady=true")
+	}
+	if !cs.AgentReady {
+		t.Error("expected AgentReady=true")
+	}
+	if !cs.ConnectionDegraded {
+		t.Error("expected ConnectionDegraded=true")
+	}
+	if cs.Reason != "ConnectionsNotEstablished" {
+		t.Errorf("expected reason=ConnectionsNotEstablished, got %s", cs.Reason)
+	}
+	if cs.Message != "There are no connections on gateways" {
+		t.Errorf("expected message about no connections, got %s", cs.Message)
+	}
+	if cs.Connections != 0 {
+		t.Errorf("expected connections=0, got %d", cs.Connections)
+	}
+}
+
+func TestParseClusterStatusConnectionNotDegraded(t *testing.T) {
+	obj := map[string]interface{}{
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "False"},
+			},
+		},
+	}
+	cs := parseClusterStatus("spoke1", obj)
+	if cs.ConnectionDegraded {
+		t.Error("expected ConnectionDegraded=false")
+	}
+	if cs.Reason != "" {
+		t.Errorf("expected empty reason, got %s", cs.Reason)
+	}
+}
+
+func TestParseClusterStatusAvailableFalse(t *testing.T) {
+	obj := map[string]interface{}{
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "False"},
+			},
+		},
+	}
+	cs := parseClusterStatus("spoke1", obj)
+	if cs.AddonAvailable {
+		t.Error("expected AddonAvailable=false")
+	}
+}
+
+func TestStatusIncludesConnectionDegraded(t *testing.T) {
+	c1 := managedCluster("spoke1", "prod-set")
+	addon := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+		map[string]interface{}{
+			"type":    "SubmarinerConnectionDegraded",
+			"status":  "True",
+			"reason":  "ConnectionsNotEstablished",
+			"message": "There are no connections on gateways",
+		},
+	})
+	mgr := newTestManager(c1, addon)
+
+	status, err := mgr.Status(context.Background(), "prod-set")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Connected {
+		t.Error("expected Connected=false when connection degraded")
+	}
+	if !status.Clusters[0].ConnectionDegraded {
+		t.Error("expected ConnectionDegraded=true in cluster status")
+	}
+	if status.Clusters[0].Reason != "ConnectionsNotEstablished" {
+		t.Errorf("expected reason in JSON, got %s", status.Clusters[0].Reason)
+	}
+}
+
+func TestStatusDisconnectedWhenZeroConnections(t *testing.T) {
+	c1 := managedCluster("spoke1", "prod-set")
+	addon := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "False"},
+	})
+	mgr := newTestManager(c1, addon)
+
+	status, err := mgr.Status(context.Background(), "prod-set")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Connected {
+		t.Error("expected Connected=false when 0 connections")
+	}
+}
+
 func TestEnableMultipleClusters(t *testing.T) {
 	c1 := managedCluster("spoke1", "multi-set")
 	c2 := managedCluster("spoke2", "multi-set")

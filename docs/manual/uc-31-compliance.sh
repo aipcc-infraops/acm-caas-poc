@@ -6,7 +6,7 @@ set -euo pipefail
 
 CLUSTER_NAME="spoke1"
 CLUSTER_SET="default"
-NAMESPACE="open-cluster-management-policies"
+NAMESPACE="open-cluster-management-global-set"
 
 echo "=== UC-31: Compliance Operator (manual) ==="
 
@@ -24,6 +24,7 @@ spec:
   remediationAction: enforce
   severity: high
   complianceType: musthave
+  upgradeApproval: Automatic
   subscription:
     channel: stable
     name: compliance-operator

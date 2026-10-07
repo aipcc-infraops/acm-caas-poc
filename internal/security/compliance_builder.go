@@ -24,6 +24,7 @@ func buildComplianceOperatorPolicy(cluster string) *unstructured.Unstructured {
 				"remediationAction": "enforce",
 				"severity":          "high",
 				"complianceType":    "musthave",
+				"upgradeApproval":   "Automatic",
 				"subscription": map[string]interface{}{
 					"channel":         "stable",
 					"name":            "compliance-operator",

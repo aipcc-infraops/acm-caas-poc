@@ -10,13 +10,14 @@ Feature: SCAP scanning via Compliance Operator (UC-31)
 
   Scenario: Deploy Compliance Operator to a cluster
     Given a cluster "spoke1" is registered in ACM
-    When I run "acmlab security deploy-compliance spoke1 --cluster-set default"
+    When I run "acmlab security deploy-compliance --cluster spoke1 --cluster-set default"
     Then an OperatorPolicy deploys the Compliance Operator to "spoke1"
+    And the OperatorPolicy has upgradeApproval "Automatic"
     And a ConfigurationPolicy monitors operator health
 
   Scenario: Create a compliance scan
     Given the Compliance Operator is deployed on "spoke1"
-    When I run "acmlab security scan spoke1 --profile cis-node"
+    When I run "acmlab security scan --cluster spoke1 --profile cis-node"
     Then a ConfigurationPolicy triggers a ComplianceScan on "spoke1"
     And the scan targets the "cis-node" profile
 
@@ -24,6 +25,11 @@ Feature: SCAP scanning via Compliance Operator (UC-31)
     Given a compliance scan is running on "spoke1"
     When I run "acmlab security scan-status spoke1"
     Then the output shows scan phase, compliant count, and non-compliant count
+
+  Scenario: Scan status without operator reports partial state
+    Given a compliance scan policy exists but the operator is not deployed on "spoke1"
+    When I run "acmlab security scan-status spoke1"
+    Then the phase is "ScanWithoutOperator"
 
   Scenario: Get compliance report
     Given a compliance scan has completed on "spoke1"

@@ -68,10 +68,18 @@ func parseClusterStatus(cluster string, obj map[string]interface{}) ClusterStatu
 		condStatus, _ := cond["status"].(string)
 
 		switch condType {
+		case "Available":
+			cs.AddonAvailable = condStatus == "True"
 		case "SubmarinerGatewayNodesLabeled":
 			cs.GatewayReady = condStatus == "True"
 		case "SubmarinerAgentDegraded":
 			cs.AgentReady = condStatus != "True"
+		case "SubmarinerConnectionDegraded":
+			cs.ConnectionDegraded = condStatus == "True"
+			if cs.ConnectionDegraded {
+				cs.Reason, _ = cond["reason"].(string)
+				cs.Message, _ = cond["message"].(string)
+			}
 		case "SubmarinerConnectionsEstablished":
 			cs.AgentReady = true
 			if condStatus == "True" {
