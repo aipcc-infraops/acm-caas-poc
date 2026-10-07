@@ -203,11 +203,13 @@ func (m *Manager) Disable(ctx context.Context, clusterSet string) error {
 		_, _ = m.client.Patch(ctx, client.GVRManagedCluster, "", name, types.MergePatchType, patch)
 	}
 
-	m.waitForAddonCleanup(ctx, clusters)
+	if !m.waitForAddonCleanup(ctx, clusters) {
+		return fmt.Errorf("Submariner resources deleted but addon cleanup timed out after 60s — wait before re-enabling to avoid stale state")
+	}
 	return nil
 }
 
-func (m *Manager) waitForAddonCleanup(ctx context.Context, clusters []string) {
+func (m *Manager) waitForAddonCleanup(ctx context.Context, clusters []string) bool {
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		allGone := true
@@ -219,15 +221,16 @@ func (m *Manager) waitForAddonCleanup(ctx context.Context, clusters []string) {
 			}
 		}
 		if allGone {
-			return
+			return true
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-time.After(3 * time.Second):
 		}
 	}
 	m.logger.Info("submariner.waitForAddonCleanup", "result", "timed out waiting for addon removal")
+	return false
 }
 
 func (m *Manager) Status(ctx context.Context, clusterSet string) (*SubmarinerStatus, error) {

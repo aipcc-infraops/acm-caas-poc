@@ -151,6 +151,8 @@ After the cluster has been destroyed, use --infra-id, --platform, and --region i
 func provisionCreateCmd() *cobra.Command {
 	var platform, region, baseDomain, imageSet, workerType, masterType, sshKeyFile, sshPrivateKeyFile, pullSecretFile, manifestsDir string
 	var clusterType, kubernetesVersion, infraProvider, releaseImage, sshKeyName string
+	var clusterNetworkCIDR, serviceNetworkCIDR string
+	var clusterNetworkHostPrefix int64
 	var workers, masters int64
 	cmd := &cobra.Command{
 		Use:   "create <cluster-name>",
@@ -217,16 +219,19 @@ func provisionCreateCmd() *cobra.Command {
 			}
 
 			opts := provisioning.ClusterOpts{
-				Name:           args[0],
-				Platform:       platform,
-				BaseDomain:     baseDomain,
-				Region:         region,
-				ImageSet:       imageSet,
-				WorkerType:     workerType,
-				MasterType:     masterType,
-				WorkerReplicas: workers,
-				MasterReplicas: masters,
-				ManifestsDir:   manifestsDir,
+				Name:                     args[0],
+				Platform:                 platform,
+				BaseDomain:               baseDomain,
+				Region:                   region,
+				ImageSet:                 imageSet,
+				WorkerType:               workerType,
+				MasterType:               masterType,
+				WorkerReplicas:           workers,
+				MasterReplicas:           masters,
+				ManifestsDir:             manifestsDir,
+				ClusterNetworkCIDR:       clusterNetworkCIDR,
+				ClusterNetworkHostPrefix: clusterNetworkHostPrefix,
+				ServiceNetworkCIDR:       serviceNetworkCIDR,
 			}
 
 			if pullSecretFile != "" {
@@ -298,6 +303,9 @@ func provisionCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sshKeyFile, "ssh-key", "", "path to SSH public key file")
 	cmd.Flags().StringVar(&sshPrivateKeyFile, "ssh-private-key", "", "path to SSH private key file")
 	cmd.Flags().StringVar(&manifestsDir, "manifests-dir", "", "path to ccoctl-generated manifests directory (optional)")
+	cmd.Flags().StringVar(&clusterNetworkCIDR, "cluster-network-cidr", "", "pod network CIDR (default: 10.128.0.0/14)")
+	cmd.Flags().Int64Var(&clusterNetworkHostPrefix, "cluster-network-host-prefix", 0, "per-node host prefix length (default: 23)")
+	cmd.Flags().StringVar(&serviceNetworkCIDR, "service-network-cidr", "", "service network CIDR (default: 172.30.0.0/16)")
 	return cmd
 }
 
@@ -689,7 +697,7 @@ func provisionImageSetsCmd() *cobra.Command {
 }
 
 func provisionTemplateCreateCmd() *cobra.Command {
-	var patches []string
+	var patches, patchesJSON []string
 	var namespace string
 	cmd := &cobra.Command{
 		Use:   "template-create <name>",
@@ -699,13 +707,24 @@ func provisionTemplateCreateCmd() *cobra.Command {
 			if namespace == "" {
 				return fmt.Errorf("the --namespace flag is required (ClusterDeploymentCustomization is a namespaced resource)")
 			}
-			parsed := make([]provisioning.TemplatePatch, 0, len(patches))
+			parsed := make([]provisioning.TemplatePatch, 0, len(patches)+len(patchesJSON))
 			for _, p := range patches {
 				parts := strings.SplitN(p, ":", 3)
 				if len(parts) != 3 {
 					return fmt.Errorf("invalid patch format %q (expected op:path:value)", p)
 				}
 				parsed = append(parsed, provisioning.TemplatePatch{Op: parts[0], Path: parts[1], Value: parts[2]})
+			}
+			for _, p := range patchesJSON {
+				parts := strings.SplitN(p, ":", 3)
+				if len(parts) != 3 {
+					return fmt.Errorf("invalid patch-json format %q (expected op:path:jsonValue)", p)
+				}
+				var val interface{}
+				if err := json.Unmarshal([]byte(parts[2]), &val); err != nil {
+					return fmt.Errorf("invalid JSON value in patch-json %q: %w", parts[2], err)
+				}
+				parsed = append(parsed, provisioning.TemplatePatch{Op: parts[0], Path: parts[1], Value: val})
 			}
 			c, err := buildClient()
 			if err != nil {
@@ -719,7 +738,8 @@ func provisionTemplateCreateCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&patches, "patch", nil, "install config patches (format: op:path:value)")
+	cmd.Flags().StringSliceVar(&patches, "patch", nil, "install config patches as strings (format: op:path:value)")
+	cmd.Flags().StringSliceVar(&patchesJSON, "patch-json", nil, "install config patches with typed JSON values (format: op:path:jsonValue, e.g. replace:/compute/0/replicas:2)")
 	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace for the ClusterDeploymentCustomization (required)")
 	return cmd
 }

@@ -52,6 +52,12 @@ Feature: GitOps fleet deployment via ApplicationSet
     Then the ApplicationSet CRD check fails
     And the output recommends installing OpenShift GitOps
 
+  Scenario: JSON diagnose exits non-zero when prerequisites are missing
+    Given OpenShift GitOps is not installed
+    When I run "acmlab gitops diagnose --namespace openshift-gitops --json"
+    Then the output is valid JSON with "healthy": false
+    And the command exits with a non-zero status
+
   Scenario: List ApplicationSets when GitOps is not installed
     Given OpenShift GitOps is not installed
     When I run "acmlab gitops list --namespace openshift-gitops"
