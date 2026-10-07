@@ -2,7 +2,7 @@ package provisioning
 
 import "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-func buildClusterDeploymentCustomization(name string, patches []TemplatePatch) *unstructured.Unstructured {
+func buildClusterDeploymentCustomization(name, namespace string, patches []TemplatePatch) *unstructured.Unstructured {
 	patchList := make([]interface{}, len(patches))
 	for i, p := range patches {
 		patchList[i] = map[string]interface{}{
@@ -17,7 +17,8 @@ func buildClusterDeploymentCustomization(name string, patches []TemplatePatch) *
 			"apiVersion": "hive.openshift.io/v1",
 			"kind":       "ClusterDeploymentCustomization",
 			"metadata": map[string]interface{}{
-				"name": name,
+				"name":      name,
+				"namespace": namespace,
 				"labels": map[string]interface{}{
 					"acmlab.redhat.com/cluster-template": "true",
 				},

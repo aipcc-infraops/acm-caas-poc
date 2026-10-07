@@ -157,3 +157,141 @@ func TestBuildOrderedManifestWork(t *testing.T) {
 		t.Error("expected ordered-work label")
 	}
 }
+
+func TestBuildOrderedManifestWorkNoOrdinalInResourceIdentifier(t *testing.T) {
+	manifests := []OrderedManifest{
+		{Ordinal: 0, Object: map[string]interface{}{
+			"apiVersion": "v1", "kind": "Namespace",
+			"metadata": map[string]interface{}{"name": "app-ns"},
+		}},
+		{Ordinal: 1, Object: map[string]interface{}{
+			"apiVersion": "v1", "kind": "ConfigMap",
+			"metadata": map[string]interface{}{"name": "app-config", "namespace": "app-ns"},
+		}},
+	}
+	obj := buildOrderedManifestWork("spoke1", "test-ordinal", manifests)
+
+	spec, _ := obj.Object["spec"].(map[string]interface{})
+	configs, _ := spec["manifestConfigs"].([]interface{})
+	for i, cfg := range configs {
+		cm, ok := cfg.(map[string]interface{})
+		if !ok {
+			t.Fatalf("manifestConfigs[%d] is not a map", i)
+		}
+		ri, ok := cm["resourceIdentifier"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("manifestConfigs[%d] has no resourceIdentifier", i)
+		}
+		if _, exists := ri["ordinal"]; exists {
+			t.Errorf("manifestConfigs[%d].resourceIdentifier contains 'ordinal' field — this causes API warnings", i)
+		}
+		if _, exists := ri["name"]; !exists {
+			t.Errorf("manifestConfigs[%d].resourceIdentifier missing 'name'", i)
+		}
+		if _, exists := ri["resource"]; !exists {
+			t.Errorf("manifestConfigs[%d].resourceIdentifier missing 'resource'", i)
+		}
+	}
+}
+
+func TestBuildOrderedManifestWorkResourceIdentifierFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		manifest   OrderedManifest
+		wantGroup  string
+		wantRes    string
+		wantName   string
+		wantNS     string
+	}{
+		{
+			name: "core namespace",
+			manifest: OrderedManifest{Ordinal: 0, Object: map[string]interface{}{
+				"apiVersion": "v1", "kind": "Namespace",
+				"metadata": map[string]interface{}{"name": "app-ns"},
+			}},
+			wantGroup: "", wantRes: "namespaces", wantName: "app-ns", wantNS: "",
+		},
+		{
+			name: "apps deployment",
+			manifest: OrderedManifest{Ordinal: 1, Object: map[string]interface{}{
+				"apiVersion": "apps/v1", "kind": "Deployment",
+				"metadata": map[string]interface{}{"name": "web", "namespace": "app-ns"},
+			}},
+			wantGroup: "apps", wantRes: "deployments", wantName: "web", wantNS: "app-ns",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := buildOrderedManifestWork("spoke1", "ri-test", []OrderedManifest{tt.manifest})
+			spec, _ := obj.Object["spec"].(map[string]interface{})
+			configs, _ := spec["manifestConfigs"].([]interface{})
+			cfg := configs[0].(map[string]interface{})
+			ri := cfg["resourceIdentifier"].(map[string]interface{})
+
+			if ri["group"] != tt.wantGroup {
+				t.Errorf("group=%v, want %v", ri["group"], tt.wantGroup)
+			}
+			if ri["resource"] != tt.wantRes {
+				t.Errorf("resource=%v, want %v", ri["resource"], tt.wantRes)
+			}
+			if ri["name"] != tt.wantName {
+				t.Errorf("name=%v, want %v", ri["name"], tt.wantName)
+			}
+			if ri["namespace"] != tt.wantNS {
+				t.Errorf("namespace=%v, want %v", ri["namespace"], tt.wantNS)
+			}
+		})
+	}
+}
+
+func TestExtractGVK(t *testing.T) {
+	tests := []struct {
+		name      string
+		obj       map[string]interface{}
+		wantGroup string
+		wantRes   string
+	}{
+		{
+			name:      "core v1 namespace",
+			obj:       map[string]interface{}{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]interface{}{"name": "ns"}},
+			wantGroup: "", wantRes: "namespaces",
+		},
+		{
+			name:      "apps deployment",
+			obj:       map[string]interface{}{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": map[string]interface{}{"name": "d", "namespace": "ns"}},
+			wantGroup: "apps", wantRes: "deployments",
+		},
+		{
+			name:      "unknown kind",
+			obj:       map[string]interface{}{"apiVersion": "custom.io/v1", "kind": "Widget", "metadata": map[string]interface{}{"name": "w"}},
+			wantGroup: "custom.io", wantRes: "Widget",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := extractGVK(tt.obj)
+			if info.group != tt.wantGroup {
+				t.Errorf("group=%s, want %s", info.group, tt.wantGroup)
+			}
+			if info.resource != tt.wantRes {
+				t.Errorf("resource=%s, want %s", info.resource, tt.wantRes)
+			}
+		})
+	}
+}
+
+func TestSplitAPIVersion(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"apps/v1", "apps"},
+		{"v1", ""},
+		{"custom.io/v1beta1", "custom.io"},
+	}
+	for _, tt := range tests {
+		if got := splitAPIVersion(tt.input); got != tt.want {
+			t.Errorf("splitAPIVersion(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

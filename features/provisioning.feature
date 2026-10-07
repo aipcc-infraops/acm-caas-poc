@@ -41,3 +41,23 @@ Feature: Cluster provisioning via Hive ClusterDeployment
     When I destroy cluster "spoke-test"
     Then the ClusterDeployment "spoke-test" is removed
     And the ManagedCluster "spoke-test" is removed from the hub
+
+  Scenario: Create a cluster template in a namespace
+    Given the Hive ClusterDeploymentCustomization CRD exists
+    When I run "acmlab provision template-create acmlab-small-profile --namespace hive --patch replace:/compute/0/replicas:2"
+    Then a ClusterDeploymentCustomization "acmlab-small-profile" is created in namespace "hive"
+
+  Scenario: Template commands require namespace flag
+    When I run "acmlab provision template-create mytemplate --patch replace:/p:v" without --namespace
+    Then the command fails with "the --namespace flag is required"
+
+  Scenario: List templates in a namespace
+    Given ClusterDeploymentCustomizations exist in namespace "hive"
+    When I run "acmlab provision template-list --namespace hive"
+    Then I see the templates from that namespace
+
+  Scenario: Apply a template to a ClusterDeployment
+    Given ClusterDeploymentCustomization "small-profile" exists in namespace "spoke1"
+    And ClusterDeployment "spoke1" exists
+    When I run "acmlab provision template-apply spoke1 --template small-profile --template-namespace spoke1"
+    Then the ClusterDeployment is annotated with the template name
