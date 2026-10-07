@@ -189,4 +189,7 @@ var (
 	GVRMultiClusterEngine = schema.GroupVersionResource{
 		Group: "multicluster.openshift.io", Version: "v1", Resource: "multiclusterengines",
 	}
+	GVRPod = schema.GroupVersionResource{
+		Group: "", Version: "v1", Resource: "pods",
+	}
 )
