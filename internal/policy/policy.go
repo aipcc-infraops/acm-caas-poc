@@ -18,6 +18,19 @@ const (
 	DefaultNamespace = "open-cluster-management-global-set"
 )
 
+var namespaceAliases = map[string]string{
+	"":           DefaultNamespace,
+	"global-set": DefaultNamespace,
+	"policies":   "open-cluster-management-policies",
+}
+
+func NormalizeNamespace(ns string) string {
+	if resolved, ok := namespaceAliases[ns]; ok {
+		return resolved
+	}
+	return ns
+}
+
 type ComplianceInfo struct {
 	ClusterName      string
 	ComplianceState  string
@@ -44,10 +57,7 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 
 func (m *Manager) Apply(ctx context.Context, opts PolicyOpts) error {
 	m.logger.Info("policy.Apply", "policy", opts.Name)
-	ns := opts.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
-	}
+	ns := NormalizeNamespace(opts.Namespace)
 
 	steps := []struct {
 		name string
@@ -67,9 +77,7 @@ func (m *Manager) Apply(ctx context.Context, opts PolicyOpts) error {
 
 func (m *Manager) Remove(ctx context.Context, name, namespace string) (bool, error) {
 	m.logger.Info("policy.Remove", "policy", name)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 
 	obj, err := m.client.Get(ctx, client.GVRPolicy, namespace, name)
 	if err != nil {
@@ -101,9 +109,7 @@ func (m *Manager) Remove(ctx context.Context, name, namespace string) (bool, err
 
 func (m *Manager) List(ctx context.Context, namespace string) ([]PolicyInfo, error) {
 	m.logger.Info("policy.List")
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 	list, err := m.client.List(ctx, client.GVRPolicy, namespace, "")
 	if err != nil {
 		return nil, fmt.Errorf("listing policies: %w", err)
@@ -117,9 +123,7 @@ func (m *Manager) List(ctx context.Context, namespace string) ([]PolicyInfo, err
 
 func (m *Manager) Get(ctx context.Context, name, namespace string) (*PolicyInfo, error) {
 	m.logger.Info("policy.Get", "policy", name)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 	obj, err := m.client.Get(ctx, client.GVRPolicy, namespace, name)
 	if err != nil {
 		return nil, fmt.Errorf("getting policy %s: %w", name, err)
@@ -130,9 +134,7 @@ func (m *Manager) Get(ctx context.Context, name, namespace string) (*PolicyInfo,
 
 func (m *Manager) SetRemediation(ctx context.Context, name, namespace, action string) error {
 	m.logger.Info("policy.SetRemediation", "policy", name, "action", action)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 	patch := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"remediationAction": action,
@@ -148,9 +150,7 @@ func (m *Manager) SetRemediation(ctx context.Context, name, namespace, action st
 
 func (m *Manager) SetDisabled(ctx context.Context, name, namespace string, disabled bool) error {
 	m.logger.Info("policy.SetDisabled", "policy", name, "disabled", disabled)
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 	patch := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"disabled": disabled,
@@ -253,9 +253,7 @@ type ClusterSetCompliance struct {
 
 func (m *Manager) ComplianceReport(ctx context.Context, namespace string) ([]ClusterSetCompliance, error) {
 	m.logger.Info("policy.ComplianceReport")
-	if namespace == "" {
-		namespace = DefaultNamespace
-	}
+	namespace = NormalizeNamespace(namespace)
 
 	policies, err := m.List(ctx, namespace)
 	if err != nil {

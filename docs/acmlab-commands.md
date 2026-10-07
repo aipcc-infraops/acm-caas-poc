@@ -171,6 +171,22 @@ Options:
 
 Shows policy compliance status across targeted clusters.
 
+Options:
+- `--namespace`, `-n`: policy namespace (default: global-set). Aliases: `global-set` → `open-cluster-management-global-set`, `policies` → `open-cluster-management-policies`
+- `--wait`: wait until compliance status is available (not empty/Pending)
+- `--timeout`: timeout for `--wait` (default: 2m)
+- `--json`: output as JSON
+
+```
+$ acmlab policy status cert-expiry-check --wait --timeout 2m
+Waiting for compliance status...
+Policy:      cert-expiry-check
+Namespace:   open-cluster-management-global-set
+Remediation: inform
+Disabled:    false
+Compliant:   Compliant
+```
+
 #### `acmlab policy report`
 
 Shows per-ClusterSet compliance report across all policies.
@@ -1083,6 +1099,85 @@ Options:
 ```
 $ acmlab security remove-policy deny_latest --cluster spoke1 --engine gatekeeper
 Policy deny_latest removed from spoke1
+```
+
+#### `acmlab security deploy-compliance`
+
+Deploys the Compliance Operator to a managed cluster via ACM OperatorPolicy. Creates an OperatorPolicy (with `upgradeApproval: Automatic`), a health-monitoring ConfigurationPolicy, Placement, and PlacementBinding.
+
+*Source: `cmd/acmlab/security.go`: `securityDeployComplianceCmd()`*
+
+Options:
+- `--cluster`: target cluster name (required)
+- `--cluster-set`: scope placement to a ClusterSet
+
+```
+$ acmlab security deploy-compliance --cluster spoke1 --cluster-set default
+Deploying Compliance Operator to spoke1...
+Compliance Operator deployed. Use 'acmlab security scan' to start a scan.
+```
+
+#### `acmlab security scan`
+
+Creates a compliance scan on a managed cluster using a ScanSettingBinding wrapped in a ConfigurationPolicy.
+
+*Source: `cmd/acmlab/security.go`: `securityScanCmd()`*
+
+Options:
+- `--cluster`: target cluster name (required)
+- `--profile`: compliance profile (default: ocp4-cis)
+- `--cluster-set`: scope placement to a ClusterSet
+
+```
+$ acmlab security scan --cluster spoke1 --profile ocp4-cis
+Creating compliance scan on spoke1 with profile ocp4-cis...
+Compliance scan created. Use 'acmlab security scan-status' to check progress.
+```
+
+#### `acmlab security scan-status <cluster>`
+
+Shows compliance scan status for a cluster. Reports separately whether the operator and scan policies exist, including a `ScanWithoutOperator` phase when a scan was created but the operator is missing.
+
+*Source: `cmd/acmlab/security.go`: `securityScanStatusCmd()`*
+
+Options:
+- `--json`: output as JSON
+
+Phases:
+- `NotDeployed`: neither operator nor scan policy exist
+- `OperatorDeployed`: operator policy exists, no scan yet
+- `ScanWithoutOperator`: scan policy exists but operator policy is missing — run `deploy-compliance` first
+- `Pending` / `Running` / `Done`: scan lifecycle
+
+```
+$ acmlab security scan-status spoke1
+Cluster:       spoke1
+Profile:       ocp4-cis
+Phase:         Done
+Compliant:     45
+Non-Compliant: 3
+```
+
+#### `acmlab security compliance-report <cluster>`
+
+Shows detailed compliance check results for a cluster with per-rule status, severity, and detail.
+
+*Source: `cmd/acmlab/security.go`: `securityComplianceReportCmd()`*
+
+Options:
+- `--profile`: compliance profile (default: ocp4-cis)
+- `--json`: output as JSON
+
+#### `acmlab security remove-compliance <cluster>`
+
+Removes all compliance scanning resources for a cluster: scan policy, operator policy, placements, and bindings.
+
+*Source: `cmd/acmlab/security.go`: `securityRemoveComplianceCmd()`*
+
+```
+$ acmlab security remove-compliance spoke1
+Removing compliance scanning from spoke1...
+Compliance scanning removed.
 ```
 
 ### GitOps

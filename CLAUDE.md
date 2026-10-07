@@ -4,7 +4,7 @@ Go project validating ACM capabilities for CaaS. Code graduates into the Compute
 
 ## Style
 
-Follow conventions from `~/claude/lab/docs/style.md` (not committed to this repo):
+Follow conventions from `style.md` (repo root, gitignored — not committed):
 - Pure functions for logic, structs for I/O — never mixed
 - Factory functions (`New*`) for structs
 - Error wrapping with `fmt.Errorf` and `%w`
