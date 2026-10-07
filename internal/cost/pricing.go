@@ -79,7 +79,7 @@ func calculateTenantCost(cluster, namespace string, cpuHours, memGiBHours float6
 	}
 }
 
-func formatCostCSV(report CostReport) string {
+func FormatCostCSV(report CostReport) string {
 	var sb strings.Builder
 	sb.WriteString("name,nodes,cpuCores,memoryGiB,dailyEstimate,periodEstimate,days\n")
 	for _, c := range report.Clusters {
