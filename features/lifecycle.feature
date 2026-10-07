@@ -25,12 +25,50 @@ Feature: Cluster power management via Hive Go API
     Then the ClusterDeployment status shows powerState = "Running"
     And eventually the ManagedCluster "spoke2" becomes Available = True
 
-  Scenario: Verify lifecycle limitations on imported clusters
+  Scenario: Verify lifecycle limitations on imported clusters without CAPI
     Given a managed cluster "external-cluster" exists for lifecycle check
     And no ClusterDeployment exists for "external-cluster"
+    And no CAPI MachineDeployment exists for "external-cluster"
     When I attempt to get the power state for "external-cluster"
     Then the operation returns an error
-    And the error message indicates "no ClusterDeployment found"
+    And the error message indicates "no ClusterDeployment or CAPI MachineDeployment found"
+
+  Scenario: Hibernate a CAPI cluster via MachineDeployment scale-to-zero
+    Given no ClusterDeployment exists for "capi-aws-test"
+    And a CAPI MachineDeployment "capi-aws-test-workers" exists with replicas=1
+    When I hibernate the cluster "capi-aws-test"
+    Then the MachineDeployment replicas are set to 0
+    And the pre-hibernate replica count is saved in an annotation
+    And the power state reports "Hibernating"
+
+  Scenario: Resume a CAPI cluster restores original replica count
+    Given no ClusterDeployment exists for "capi-aws-test"
+    And a CAPI MachineDeployment "capi-aws-test-workers" exists with replicas=0
+    And the MachineDeployment has pre-hibernate annotation with value "1"
+    When I resume the cluster "capi-aws-test"
+    Then the MachineDeployment replicas are set to 1
+    And the power state reports "Running"
+
+  Scenario: Lifecycle status reports CAPI-derived state
+    Given no ClusterDeployment exists for "capi-aws-test"
+    And a CAPI MachineDeployment "capi-aws-test-workers" exists with replicas=2
+    When I get the power state for "capi-aws-test"
+    Then the state is "Running"
+    And the status is derived from MachineDeployment replicas
+
+  Scenario: Lifecycle support check detects OCP cluster with CAPI MachineDeployments
+    Given a ManagedClusterInfo "capi-aws-test" with distributionInfo.type = "OCP"
+    And no ClusterDeployment exists for "capi-aws-test"
+    And a CAPI MachineDeployment "capi-aws-test-workers" exists with replicas=1
+    When I check lifecycle support for "capi-aws-test"
+    Then the cluster is reported as supporting lifecycle operations
+
+  Scenario: Diagnose reports CAPI cluster state
+    Given no ClusterDeployment exists for "capi-aws-test"
+    And a CAPI MachineDeployment "capi-aws-test-workers" exists with replicas=2
+    When I diagnose the cluster "capi-aws-test"
+    Then the report shows platform "CAPI"
+    And the report includes MachineDeployment replica information
 
   Scenario: Check current power state of a cluster
     Given a ClusterDeployment "spoke2" exists in namespace "spoke2"

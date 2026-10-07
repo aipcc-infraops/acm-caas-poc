@@ -243,7 +243,11 @@ func TestClusterSupportsLifecycleReturnsTrueWhenClusterDeploymentExists(t *testi
 
 func TestClusterSupportsLifecycleReturnsFalseWhenClusterDeploymentMissing(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -620,7 +624,11 @@ func TestGetPowerStateStatusReturnsUnknownWhenFieldMissing(t *testing.T) {
 
 func TestGetPowerStateStatusReturnsErrorForMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -708,7 +716,12 @@ func TestCheckLifecycleSupportUnsupportedForOCP(t *testing.T) {
 	}
 
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, mci)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+		mci,
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -723,7 +736,11 @@ func TestCheckLifecycleSupportUnsupportedForOCP(t *testing.T) {
 
 func TestCheckLifecycleSupportUnsupportedWhenTypeCheckFails(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -959,13 +976,17 @@ func TestDiagnoseWithMissingManagedCluster(t *testing.T) {
 
 func TestDiagnoseReturnsErrorForMissingClusterDeployment(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
 	_, err := m.Diagnose(context.Background(), "test-ns", "missing")
 	if err == nil {
-		t.Fatal("expected error for missing ClusterDeployment")
+		t.Fatal("expected error for missing ClusterDeployment and CAPI MachineDeployment")
 	}
 }
 
@@ -1663,12 +1684,12 @@ func TestWaitForPowerStateCancelledContext(t *testing.T) {
 }
 
 func TestClusterSupportsLifecycleErrorPath(t *testing.T) {
-	// CheckLifecycleSupport returns (nil, err) only when the Get call fails
-	// with a non-NotFound error. The fake dynamic client won't produce that
-	// with the default setup, so we test the existing paths more thoroughly.
-	// The ClusterSupportsLifecycle wrapper should return false for unsupported.
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -2307,7 +2328,11 @@ func TestApproveExpiredCSRsListError(t *testing.T) {
 
 func TestWaitForPowerStateMissingCluster(t *testing.T) {
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 

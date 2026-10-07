@@ -689,7 +689,7 @@ Options:
 
 #### `acmlab lifecycle hibernate <cluster-name>`
 
-Hibernates a Hive-provisioned cluster by setting `spec.powerState` to `Hibernating`. Idempotent: if already hibernating, does nothing.
+Hibernates a cluster. For Hive-provisioned clusters, sets `spec.powerState` to `Hibernating`. For CAPI clusters (e.g., clusters provisioned via Cluster API without a ClusterDeployment), scales all MachineDeployments to zero replicas and saves the original count in an annotation. Idempotent: if already hibernating, does nothing.
 
 Options:
 - `--namespace`, `-n`: cluster namespace (defaults to cluster name)
@@ -706,7 +706,7 @@ Cluster spoke2/spoke2 is hibernating
 
 #### `acmlab lifecycle resume <cluster-name>`
 
-Resumes a hibernated cluster by setting `spec.powerState` to `Running`. Idempotent.
+Resumes a hibernated cluster. For Hive clusters, sets `spec.powerState` to `Running`. For CAPI clusters, restores MachineDeployment replicas from the saved annotation (defaults to 2 if no annotation). Idempotent.
 
 When used with `--wait`, after the cluster reaches Running state, automatically connects to the spoke cluster and approves any expired kubelet certificates. OpenShift kubelet client certs rotate every ~24h: if the cluster was hibernated during a rotation window, the certs expire and nodes cannot start pods until the CSRs are approved. This recovery step handles that automatically.
 
@@ -732,7 +732,7 @@ Approved 20 expired kubelet certificate(s)
 
 #### `acmlab lifecycle status <cluster-name>`
 
-Shows cluster power state: both desired (spec) and actual (status). Indicates when a transition is in progress.
+Shows cluster power state: both desired (spec) and actual (status). Indicates when a transition is in progress. For CAPI clusters, infers state from MachineDeployment replicas (all zero = Hibernating, any > 0 = Running).
 
 ```
 $ acmlab lifecycle status spoke2
@@ -745,7 +745,7 @@ Note: Power state transition in progress
 
 #### `acmlab lifecycle diagnose <cluster-name>`
 
-Runs diagnostic checks that cross-reference Hive ClusterDeployment state with ACM ManagedCluster conditions. Detects inconsistencies like a cluster that Hive reports as Running but ACM shows as unavailable (klusterlet issue). Outputs actionable suggestions when problems are found.
+Runs diagnostic checks for a cluster. For Hive clusters, cross-references ClusterDeployment state with ACM ManagedCluster conditions. For CAPI clusters, reports MachineDeployment replica state and ACM health. Detects inconsistencies like a cluster that is Running but ACM shows as unavailable (klusterlet issue). Outputs actionable suggestions when problems are found.
 
 Options:
 - `--namespace`, `-n`: cluster namespace (defaults to cluster name)
@@ -773,7 +773,7 @@ Issues detected. Review suggestions above.
 
 #### `acmlab lifecycle list`
 
-Lists all clusters that support lifecycle operations (Hive-provisioned). Imported clusters are excluded.
+Lists all clusters that support lifecycle operations (Hive-provisioned or CAPI with MachineDeployments). Imported clusters without Hive or CAPI are excluded.
 
 ```
 $ acmlab lifecycle list
