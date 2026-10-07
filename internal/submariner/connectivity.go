@@ -79,9 +79,14 @@ func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpt
 			return result, nil
 		}
 		conditions := extractConditions(addOn.Object)
-		if len(conditions) > 0 && !conditionIsTrue(conditions, "Available") {
+		if len(conditions) == 0 {
 			result.Phase = "PreflightFailed"
-			result.Message = fmt.Sprintf("ManagedClusterAddOn/submariner on %s is not Available. Run 'acmlab submariner diagnose' for details.", cluster)
+			result.Message = fmt.Sprintf("ManagedClusterAddOn/submariner on %s has no conditions yet — add-on is still initializing.", cluster)
+			return result, nil
+		}
+		if msg := checkSubmarinerReadiness(conditions, cluster); msg != "" {
+			result.Phase = "PreflightFailed"
+			result.Message = msg + " Run 'acmlab submariner diagnose' for details."
 			return result, nil
 		}
 	}
@@ -89,7 +94,7 @@ func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpt
 	if opts.KubeconfigA == "" || opts.KubeconfigB == "" {
 		result.Phase = "SpokeAccessRequired"
 		result.Message = fmt.Sprintf(
-			"Preflight passed: both clusters have Submariner add-on. "+
+			"Preflight passed: Submariner is healthy on both clusters. "+
 				"Provide spoke kubeconfigs: "+
 				"--kubeconfig-a /path/to/%s.kubeconfig --kubeconfig-b /path/to/%s.kubeconfig",
 			opts.ClusterA, opts.ClusterB)
@@ -291,6 +296,33 @@ func podStatusReason(obj map[string]interface{}) string {
 	}
 	if reason, ok := status["reason"].(string); ok {
 		return reason
+	}
+	return ""
+}
+
+func checkSubmarinerReadiness(conditions []condition, cluster string) string {
+	if !conditionIsTrue(conditions, "Available") {
+		return fmt.Sprintf("Submariner add-on on %s is not Available.", cluster)
+	}
+	if !conditionIsTrue(conditions, "SubmarinerBrokerConfigApplied") {
+		return fmt.Sprintf("Broker config not applied on %s — check cloud credentials in SubmarinerConfig.", cluster)
+	}
+	if !conditionIsTrue(conditions, "SubmarinerGatewayNodesLabeled") {
+		return fmt.Sprintf("No gateway node labelled on %s — the add-on controller may lack credentials to provision a gateway.", cluster)
+	}
+	for _, c := range conditions {
+		if c.condType == "SubmarinerAgentDegraded" && c.status == "True" {
+			msg := fmt.Sprintf("Submariner agent is degraded on %s.", cluster)
+			if c.message != "" {
+				msg += " Detail: " + c.message
+			}
+			return msg
+		}
+	}
+	for _, c := range conditions {
+		if c.condType == "SubmarinerConnectionDegraded" && c.status == "True" {
+			return fmt.Sprintf("No gateway connections established on %s — check CIDR overlap and firewall/NAT-T ports.", cluster)
+		}
 	}
 	return ""
 }

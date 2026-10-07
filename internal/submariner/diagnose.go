@@ -173,7 +173,7 @@ func (m *Manager) checkCondition(conditions []condition, checkName, cluster, con
 
 func (m *Manager) checkClusterConfig(ctx context.Context, cluster string, result *DiagnoseResult) {
 	checkName := fmt.Sprintf("config/%s", cluster)
-	_, err := m.client.Get(ctx, client.GVRSubmarinerConfig, cluster, "submariner")
+	cfg, err := m.client.Get(ctx, client.GVRSubmarinerConfig, cluster, "submariner")
 	if err != nil {
 		result.addCheck(checkName, "warn",
 			fmt.Sprintf("No SubmarinerConfig on %s. Submariner may use defaults.", cluster))
@@ -181,6 +181,22 @@ func (m *Manager) checkClusterConfig(ctx context.Context, cluster string, result
 	}
 	result.addCheck(checkName, "pass",
 		fmt.Sprintf("SubmarinerConfig present on %s.", cluster))
+
+	credsName, found, _ := unstructured.NestedString(cfg.Object, "spec", "credentialsSecret", "name")
+	credsCheckName := fmt.Sprintf("config/%s/credentials", cluster)
+	if !found || credsName == "" {
+		result.addCheck(credsCheckName, "fail",
+			fmt.Sprintf("SubmarinerConfig on %s has no credentialsSecret. The add-on controller needs cloud credentials to label gateway nodes and configure the broker.", cluster))
+		return
+	}
+	_, err = m.client.Get(ctx, client.GVRSecret, cluster, credsName)
+	if err != nil {
+		result.addCheck(credsCheckName, "fail",
+			fmt.Sprintf("Credentials secret %q not found in namespace %s. The add-on controller cannot configure the broker or label gateway nodes without valid cloud credentials.", credsName, cluster))
+		return
+	}
+	result.addCheck(credsCheckName, "pass",
+		fmt.Sprintf("Credentials secret %q exists in %s.", credsName, cluster))
 }
 
 func (m *Manager) checkDefaultClusterSet(clusterSet string, result *DiagnoseResult) {
