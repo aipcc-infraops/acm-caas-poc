@@ -16,7 +16,52 @@ func gitopsCmd() *cobra.Command {
 		Use:   "gitops",
 		Short: "Manage GitOps fleet deployments via ApplicationSet",
 	}
-	cmd.AddCommand(gitopsCreateCmd(), gitopsGetCmd(), gitopsListCmd(), gitopsDeleteCmd(), gitopsSyncCmd(), gitopsEnableAgentCmd(), gitopsDisableAgentCmd(), gitopsAgentStatusCmd())
+	cmd.AddCommand(gitopsDiagnoseCmd(), gitopsCreateCmd(), gitopsGetCmd(), gitopsListCmd(), gitopsDeleteCmd(), gitopsSyncCmd(), gitopsEnableAgentCmd(), gitopsDisableAgentCmd(), gitopsAgentStatusCmd())
+	return cmd
+}
+
+func gitopsDiagnoseCmd() *cobra.Command {
+	var namespace string
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "diagnose",
+		Short: "Check GitOps prerequisites on the hub",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := gitops.New(c, cfg, logger)
+			result, err := mgr.Diagnose(context.Background(), namespace)
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("GitOps Diagnostics (namespace: %s)\n\n", result.Namespace)
+			for _, check := range result.Checks {
+				marker := "[PASS]"
+				if check.Status == "fail" {
+					marker = "[FAIL]"
+				} else if check.Status == "warn" {
+					marker = "[WARN]"
+				}
+				fmt.Printf("  %s %s: %s\n", marker, check.Name, check.Message)
+			}
+			fmt.Println()
+			if !result.Healthy {
+				return fmt.Errorf("GitOps prerequisites are not met. Install OpenShift GitOps or ensure the ApplicationSet CRD and target namespace exist")
+			}
+			fmt.Println("All GitOps prerequisites are met.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "Namespace to check (default: openshift-gitops)")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
 

@@ -33,6 +33,22 @@ func seedAutomation(c *client.Client) {
 	c.Dynamic.Resource(client.GVRPolicyAutomation).Namespace("open-cluster-management-policies").Create(context.Background(), obj, metav1.CreateOptions{})
 }
 
+func seedGitOpsPrereqs(c *client.Client) {
+	crd := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinition",
+		"metadata":   map[string]interface{}{"name": "applicationsets.argoproj.io"},
+	}}
+	c.Dynamic.Resource(client.GVRCustomResourceDefinition).Create(context.Background(), crd, metav1.CreateOptions{})
+
+	ns := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata":   map[string]interface{}{"name": "openshift-gitops"},
+	}}
+	c.Dynamic.Resource(client.GVRNamespace).Create(context.Background(), ns, metav1.CreateOptions{})
+}
+
 func seedAppSet(c *client.Client) {
 	obj := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "argoproj.io/v1alpha1",
@@ -153,6 +169,7 @@ func TestAutomationSetModeViaMCP(t *testing.T) {
 
 func TestGitOpsCreateViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
+	seedGitOpsPrereqs(c)
 	text := extractToolText(t, callTool(t, c, "acm_create_appset", map[string]interface{}{
 		"name":     "my-appset",
 		"repo_url": "https://github.com/example/repo",
@@ -165,6 +182,7 @@ func TestGitOpsCreateViaMCP(t *testing.T) {
 
 func TestGitOpsGetViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
+	seedGitOpsPrereqs(c)
 	seedAppSet(c)
 	text := extractToolText(t, callTool(t, c, "acm_get_appset", map[string]interface{}{
 		"name": "app-1",
@@ -176,6 +194,7 @@ func TestGitOpsGetViaMCP(t *testing.T) {
 
 func TestGitOpsGetNotFoundViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
+	seedGitOpsPrereqs(c)
 	text, isErr := extractToolResult(t, callTool(t, c, "acm_get_appset", map[string]interface{}{
 		"name": "nonexistent",
 	}))
@@ -186,6 +205,7 @@ func TestGitOpsGetNotFoundViaMCP(t *testing.T) {
 
 func TestGitOpsListViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
+	seedGitOpsPrereqs(c)
 	seedAppSet(c)
 	text := extractToolText(t, callTool(t, c, "acm_list_appsets", nil))
 	if !strings.Contains(text, "app-1") {
@@ -195,6 +215,7 @@ func TestGitOpsListViaMCP(t *testing.T) {
 
 func TestGitOpsDeleteViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
+	seedGitOpsPrereqs(c)
 	seedAppSet(c)
 	text := extractToolText(t, callTool(t, c, "acm_delete_appset", map[string]interface{}{
 		"name": "app-1",
@@ -216,6 +237,7 @@ func TestGitOpsDeleteNotFoundViaMCP(t *testing.T) {
 
 func TestGitOpsSyncViaMCP(t *testing.T) {
 	c := fakeClientWithClusters()
+	seedGitOpsPrereqs(c)
 	seedAppSet(c)
 	text := extractToolText(t, callTool(t, c, "acm_sync_appset", map[string]interface{}{
 		"name": "app-1",
