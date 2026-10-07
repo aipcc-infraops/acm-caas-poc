@@ -36,4 +36,12 @@ echo "7. Aggregate costs as JSON"
 acmlab cost by-center --json
 
 echo ""
+echo "8. Deploy cost dashboard to Grafana (requires ACM observability)"
+acmlab cost dashboard
+
+echo ""
+echo "9. Remove cost dashboard from Grafana"
+acmlab cost remove-dashboard
+
+echo ""
 echo "=== Done ==="

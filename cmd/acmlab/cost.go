@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pablofelix/acm-caas-poc/internal/cost"
+	"github.com/pablofelix/acm-caas-poc/internal/observability"
 )
 
 func costCmd() *cobra.Command {
@@ -25,6 +26,8 @@ func costCmd() *cobra.Command {
 		costCheckBudgetsCmd(),
 		costCreateBudgetCmd(),
 		costRemoveBudgetCmd(),
+		costDashboardCmd(),
+		costRemoveDashboardCmd(),
 	)
 	return cmd
 }
@@ -288,6 +291,86 @@ func costRemoveBudgetCmd() *cobra.Command {
 			} else {
 				fmt.Printf("No budget policy found for cost center %q\n", args[0])
 			}
+			return nil
+		},
+	}
+}
+
+func costDashboardCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "dashboard",
+		Short: "Deploy cost tracking dashboard to Grafana via ACM observability",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			obsMgr := observability.New(c, cfg, logger)
+
+			status, err := obsMgr.Status(context.Background())
+			if err != nil {
+				return fmt.Errorf("checking observability status: %w", err)
+			}
+			if status == "NotInstalled" {
+				return fmt.Errorf("ACM observability is not installed; run 'acmlab observability setup' first")
+			}
+
+			fmt.Println("Configuring cost metrics allowlist...")
+			if err := obsMgr.ConfigureMetricsAllowlist(context.Background(), observability.MetricsOpts{
+				Metrics: cost.CostMetricsAllowlist(),
+			}); err != nil {
+				return fmt.Errorf("configuring metrics allowlist: %w", err)
+			}
+
+			fmt.Println("Deploying cost recording rules...")
+			rulesYAML := cost.CostRecordingRulesYAML(cost.FallbackPricePerCPUHr)
+			if err := obsMgr.DeployCustomRules(context.Background(), observability.CustomRuleOpts{
+				Name:  cost.DashboardName,
+				Rules: rulesYAML,
+			}); err != nil {
+				return fmt.Errorf("deploying recording rules: %w", err)
+			}
+
+			fmt.Println("Deploying Grafana dashboard...")
+			dashJSON := cost.CostDashboardJSON()
+			if err := obsMgr.DeployDashboard(context.Background(), observability.DashboardOpts{
+				Name: cost.DashboardName,
+				JSON: dashJSON,
+			}); err != nil {
+				return fmt.Errorf("deploying dashboard: %w", err)
+			}
+
+			fmt.Println("Cost tracking dashboard deployed successfully.")
+
+			grafanaURL, err := obsMgr.GrafanaURL(context.Background())
+			if err != nil {
+				fmt.Printf("Dashboard deployed but Grafana URL not yet available: %v\n", err)
+			} else {
+				fmt.Printf("Grafana URL: %s\n", grafanaURL)
+			}
+			return nil
+		},
+	}
+}
+
+func costRemoveDashboardCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove-dashboard",
+		Short: "Remove cost tracking dashboard and recording rules from Grafana",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			obsMgr := observability.New(c, cfg, logger)
+
+			if err := obsMgr.RemoveDashboard(context.Background(), cost.DashboardName); err != nil {
+				return fmt.Errorf("removing dashboard: %w", err)
+			}
+			if err := obsMgr.RemoveCustomRules(context.Background()); err != nil {
+				return fmt.Errorf("removing recording rules: %w", err)
+			}
+			fmt.Println("Cost tracking dashboard and recording rules removed.")
 			return nil
 		},
 	}
