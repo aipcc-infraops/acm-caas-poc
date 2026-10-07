@@ -23,7 +23,21 @@ func buildSubmarinerAddOn(cluster string) *unstructured.Unstructured {
 	}
 }
 
-func buildSubmarinerConfig(cluster string) *unstructured.Unstructured {
+type SubmarinerConfigOpts struct {
+	GlobalCIDR string
+}
+
+func buildSubmarinerConfig(cluster string, opts SubmarinerConfigOpts) *unstructured.Unstructured {
+	spec := map[string]interface{}{
+		"IPSecNATTPort":     int64(4500),
+		"NATTEnable":        true,
+		"cableDriver":       "libreswan",
+		"gatewayConfig":     map[string]interface{}{"gateways": int64(1)},
+		"credentialsSecret": map[string]interface{}{"name": cluster + "-submariner-creds"},
+	}
+	if opts.GlobalCIDR != "" {
+		spec["globalCIDR"] = opts.GlobalCIDR
+	}
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "submarineraddon.open-cluster-management.io/v1alpha1",
@@ -35,13 +49,7 @@ func buildSubmarinerConfig(cluster string) *unstructured.Unstructured {
 					"acmlab.redhat.com/managed": "true",
 				},
 			},
-			"spec": map[string]interface{}{
-				"IPSecNATTPort":    int64(4500),
-				"NATTEnable":       true,
-				"cableDriver":     "libreswan",
-				"gatewayConfig":   map[string]interface{}{"gateways": int64(1)},
-				"credentialsSecret": map[string]interface{}{"name": cluster + "-submariner-creds"},
-			},
+			"spec": spec,
 		},
 	}
 }

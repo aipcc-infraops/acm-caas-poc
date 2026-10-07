@@ -3,6 +3,7 @@ package submariner
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -71,10 +72,16 @@ func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpt
 	}
 
 	for _, cluster := range []string{opts.ClusterA, opts.ClusterB} {
-		_, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, cluster, "submariner")
+		addOn, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, cluster, "submariner")
 		if err != nil {
 			result.Phase = "PreflightFailed"
 			result.Message = fmt.Sprintf("ManagedClusterAddOn/submariner not found on %s. Enable Submariner first.", cluster)
+			return result, nil
+		}
+		conditions := extractConditions(addOn.Object)
+		if len(conditions) > 0 && !conditionIsTrue(conditions, "Available") {
+			result.Phase = "PreflightFailed"
+			result.Message = fmt.Sprintf("ManagedClusterAddOn/submariner on %s is not Available. Run 'acmlab submariner diagnose' for details.", cluster)
 			return result, nil
 		}
 	}
@@ -131,6 +138,11 @@ func (m *Manager) runConnectivityTest(ctx context.Context, opts ConnectivityTest
 
 	svcExport := buildServiceExport(opts.Namespace)
 	if _, err := clientB.Create(ctx, client.GVRServiceExport, opts.Namespace, svcExport); err != nil && !apierrors.IsAlreadyExists(err) {
+		if isResourceNotAvailable(err) {
+			result.Phase = "PreflightFailed"
+			result.Message = fmt.Sprintf("ServiceExport API not available on %s. Submariner may not be fully deployed or the cluster does not support multi-cluster services.", opts.ClusterB)
+			return result, nil
+		}
 		result.Phase = "HarnessFailed"
 		result.Message = fmt.Sprintf("Cannot create ServiceExport on %s: %v", opts.ClusterB, err)
 		return result, nil
@@ -281,6 +293,15 @@ func podStatusReason(obj map[string]interface{}) string {
 		return reason
 	}
 	return ""
+}
+
+func isResourceNotAvailable(err error) bool {
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "the server could not find the requested resource") ||
+		strings.Contains(msg, "no matches for kind")
 }
 
 func ensureNamespace(ctx context.Context, c *client.Client, ns *unstructured.Unstructured) error {

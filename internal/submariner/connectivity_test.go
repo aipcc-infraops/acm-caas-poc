@@ -2,6 +2,7 @@ package submariner
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -67,6 +68,72 @@ func TestTestConnectivitySpokeAccessRequired(t *testing.T) {
 	}
 	if result.Success {
 		t.Error("expected success=false without kubeconfigs")
+	}
+}
+
+func TestTestConnectivityAddonNotAvailable(t *testing.T) {
+	c1 := managedCluster("spoke1", "test-set")
+	c2 := managedCluster("spoke2", "test-set")
+	addon1 := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+	})
+	addon2 := addOnWithStatus("spoke2", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "False", "reason": "NotReady"},
+	})
+	mgr := newTestManager(c1, c2, addon1, addon2)
+
+	result, err := mgr.TestConnectivity(context.Background(), ConnectivityTestOpts{
+		ClusterA:  "spoke1",
+		ClusterB:  "spoke2",
+		Namespace: "test-ns",
+		Timeout:   10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Phase != "PreflightFailed" {
+		t.Errorf("expected PreflightFailed, got %s", result.Phase)
+	}
+	if result.Message == "" {
+		t.Error("expected non-empty message about addon not available")
+	}
+}
+
+func TestTestConnectivityAddonNoConditionsPassesPreflight(t *testing.T) {
+	c1 := managedCluster("spoke1", "test-set")
+	c2 := managedCluster("spoke2", "test-set")
+	addon1 := addOnWithStatus("spoke1", []interface{}{})
+	addon2 := addOnWithStatus("spoke2", []interface{}{})
+	mgr := newTestManager(c1, c2, addon1, addon2)
+
+	result, err := mgr.TestConnectivity(context.Background(), ConnectivityTestOpts{
+		ClusterA:  "spoke1",
+		ClusterB:  "spoke2",
+		Namespace: "test-ns",
+		Timeout:   10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Phase == "PreflightFailed" {
+		t.Error("addon with no conditions should pass preflight (may be initializing)")
+	}
+}
+
+func TestIsResourceNotAvailable(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{fmt.Errorf("the server could not find the requested resource"), true},
+		{fmt.Errorf("no matches for kind \"ServiceExport\""), true},
+		{fmt.Errorf("connection refused"), false},
+		{fmt.Errorf("unauthorized"), false},
+	}
+	for _, tt := range tests {
+		if got := isResourceNotAvailable(tt.err); got != tt.want {
+			t.Errorf("isResourceNotAvailable(%q) = %v, want %v", tt.err, got, tt.want)
+		}
 	}
 }
 
