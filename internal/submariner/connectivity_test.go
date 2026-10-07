@@ -46,12 +46,8 @@ func TestTestConnectivityNoAddOnButClustersExist(t *testing.T) {
 func TestTestConnectivitySpokeAccessRequired(t *testing.T) {
 	c1 := managedCluster("spoke1", "test-set")
 	c2 := managedCluster("spoke2", "test-set")
-	addon1 := addOnWithStatus("spoke1", []interface{}{
-		map[string]interface{}{"type": "Available", "status": "True"},
-	})
-	addon2 := addOnWithStatus("spoke2", []interface{}{
-		map[string]interface{}{"type": "Available", "status": "True"},
-	})
+	addon1 := healthyAddon("spoke1")
+	addon2 := healthyAddon("spoke2")
 	mgr := newTestManager(c1, c2, addon1, addon2)
 
 	result, err := mgr.TestConnectivity(context.Background(), ConnectivityTestOpts{
@@ -99,7 +95,7 @@ func TestTestConnectivityAddonNotAvailable(t *testing.T) {
 	}
 }
 
-func TestTestConnectivityAddonNoConditionsPassesPreflight(t *testing.T) {
+func TestTestConnectivityAddonNoConditionsFailsPreflight(t *testing.T) {
 	c1 := managedCluster("spoke1", "test-set")
 	c2 := managedCluster("spoke2", "test-set")
 	addon1 := addOnWithStatus("spoke1", []interface{}{})
@@ -115,8 +111,60 @@ func TestTestConnectivityAddonNoConditionsPassesPreflight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Phase == "PreflightFailed" {
-		t.Error("addon with no conditions should pass preflight (may be initializing)")
+	if result.Phase != "PreflightFailed" {
+		t.Errorf("addon with no conditions should fail preflight, got %s", result.Phase)
+	}
+}
+
+func TestTestConnectivityBrokerNotAppliedFailsPreflight(t *testing.T) {
+	c1 := managedCluster("spoke1", "test-set")
+	c2 := managedCluster("spoke2", "test-set")
+	addon1 := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "False", "reason": "BrokerConfigMissing"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+	})
+	addon2 := healthyAddon("spoke2")
+	mgr := newTestManager(c1, c2, addon1, addon2)
+
+	result, err := mgr.TestConnectivity(context.Background(), ConnectivityTestOpts{
+		ClusterA:  "spoke1",
+		ClusterB:  "spoke2",
+		Namespace: "test-ns",
+		Timeout:   10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Phase != "PreflightFailed" {
+		t.Errorf("expected PreflightFailed for missing broker config, got %s", result.Phase)
+	}
+}
+
+func TestTestConnectivityAgentDegradedFailsPreflight(t *testing.T) {
+	c1 := managedCluster("spoke1", "test-set")
+	c2 := managedCluster("spoke2", "test-set")
+	addon1 := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "True", "message": "NoGatewayDaemonSet"},
+	})
+	addon2 := healthyAddon("spoke2")
+	mgr := newTestManager(c1, c2, addon1, addon2)
+
+	result, err := mgr.TestConnectivity(context.Background(), ConnectivityTestOpts{
+		ClusterA:  "spoke1",
+		ClusterB:  "spoke2",
+		Namespace: "test-ns",
+		Timeout:   10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Phase != "PreflightFailed" {
+		t.Errorf("expected PreflightFailed for degraded agent, got %s", result.Phase)
 	}
 }
 

@@ -442,7 +442,46 @@ func (m *Manager) ConfigureMetrics(ctx context.Context, opts MetricsConfigOpts) 
 }
 
 func (m *Manager) mergeMetricsKey(ctx context.Context, key string, metrics []string) error {
+	existing, err := m.client.Get(ctx, client.GVRConfigMap, Namespace, MetricsAllowlistCM)
+	if err == nil {
+		data, _ := existing.Object["data"].(map[string]interface{})
+		if data != nil {
+			if existingYAML, ok := data[key].(string); ok && existingYAML != "" {
+				metrics = mergeMetricNames(existingYAML, metrics)
+			}
+		}
+	}
 	return m.mergeMetricsData(ctx, key, "names:\n"+metricsToYAML(metrics))
+}
+
+func mergeMetricNames(existingYAML string, newMetrics []string) []string {
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(existingYAML), &parsed); err != nil {
+		return newMetrics
+	}
+	namesList, ok := parsed["names"].([]interface{})
+	if !ok {
+		return newMetrics
+	}
+	seen := map[string]bool{}
+	var merged []string
+	for _, n := range namesList {
+		name, ok := n.(string)
+		if !ok || name == "" {
+			continue
+		}
+		if !seen[name] {
+			seen[name] = true
+			merged = append(merged, name)
+		}
+	}
+	for _, name := range newMetrics {
+		if !seen[name] {
+			seen[name] = true
+			merged = append(merged, name)
+		}
+	}
+	return merged
 }
 
 func (m *Manager) mergeMetricsData(ctx context.Context, key, value string) error {

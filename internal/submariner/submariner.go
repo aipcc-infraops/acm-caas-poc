@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
@@ -22,6 +23,7 @@ type SubmarinerStatus struct {
 type ClusterStatus struct {
 	Name               string `json:"name"`
 	AddonAvailable     bool   `json:"addonAvailable"`
+	BrokerConfigured   bool   `json:"brokerConfigured"`
 	GatewayReady       bool   `json:"gatewayReady"`
 	AgentReady         bool   `json:"agentReady"`
 	Connections        int    `json:"connections"`
@@ -62,18 +64,23 @@ func (m *Manager) Enable(ctx context.Context, clusterSet string, opts EnableOpts
 	}
 
 	for i, name := range clusters {
+		credsSecret, err := m.lookupCredentialsSecret(ctx, name)
+		if err != nil {
+			m.logger.Info("submariner.Enable", "cluster", name, "creds_lookup", err.Error())
+		}
+
 		addOn := buildSubmarinerAddOn(name)
 		if err := m.client.CreateIfNotExists(ctx, client.GVRManagedClusterAddOn, name, addOn); err != nil {
 			return fmt.Errorf("creating submariner addon for %s: %w", name, err)
 		}
 
-		cfgOpts := SubmarinerConfigOpts{}
+		cfgOpts := SubmarinerConfigOpts{CredentialsSecret: credsSecret}
 		if opts.Globalnet {
 			cfgOpts.GlobalCIDR = defaultGlobalCIDR(i)
 		}
 		cfg := buildSubmarinerConfig(name, cfgOpts)
-		if err := m.client.CreateIfNotExists(ctx, client.GVRSubmarinerConfig, name, cfg); err != nil {
-			return fmt.Errorf("creating submariner config for %s: %w", name, err)
+		if err := m.createOrUpdateSubmarinerConfig(ctx, name, cfg); err != nil {
+			return fmt.Errorf("creating/updating submariner config for %s: %w", name, err)
 		}
 
 		patch, _ := json.Marshal(map[string]interface{}{
@@ -88,6 +95,30 @@ func (m *Manager) Enable(ctx context.Context, clusterSet string, opts EnableOpts
 	return nil
 }
 
+func (m *Manager) createOrUpdateSubmarinerConfig(ctx context.Context, namespace string, desired *unstructured.Unstructured) error {
+	existing, err := m.client.Get(ctx, client.GVRSubmarinerConfig, namespace, "submariner")
+	if err != nil {
+		return m.client.CreateIfNotExists(ctx, client.GVRSubmarinerConfig, namespace, desired)
+	}
+	desired.SetResourceVersion(existing.GetResourceVersion())
+	_, err = m.client.Update(ctx, client.GVRSubmarinerConfig, namespace, desired)
+	return err
+}
+
+func (m *Manager) lookupCredentialsSecret(ctx context.Context, cluster string) (string, error) {
+	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, cluster, cluster)
+	if err != nil {
+		return "", fmt.Errorf("ClusterDeployment not found for %s: %w", cluster, err)
+	}
+	for _, platform := range []string{"aws", "gcp", "azure", "ibmcloud", "openstack", "vsphere"} {
+		ref, found, _ := unstructured.NestedString(cd.Object, "spec", "platform", platform, "credentialsSecretRef", "name")
+		if found && ref != "" {
+			return ref, nil
+		}
+	}
+	return "", fmt.Errorf("no cloud credentials found in ClusterDeployment for %s", cluster)
+}
+
 func (m *Manager) WaitForReady(ctx context.Context, clusterSet string, timeout time.Duration) (*SubmarinerStatus, error) {
 	m.logger.Info("submariner.WaitForReady", "clusterSet", clusterSet, "timeout", timeout)
 	deadline := time.Now().Add(timeout)
@@ -95,7 +126,8 @@ func (m *Manager) WaitForReady(ctx context.Context, clusterSet string, timeout t
 
 	for {
 		if time.Now().After(deadline) {
-			return lastStatus, fmt.Errorf("timed out after %s waiting for Submariner readiness on %q", timeout, clusterSet)
+			reason := summarizeBlocker(lastStatus)
+			return lastStatus, fmt.Errorf("timed out after %s waiting for Submariner readiness on %q: %s", timeout, clusterSet, reason)
 		}
 
 		status, err := m.Status(ctx, clusterSet)
@@ -114,6 +146,37 @@ func (m *Manager) WaitForReady(ctx context.Context, clusterSet string, timeout t
 		case <-time.After(10 * time.Second):
 		}
 	}
+}
+
+func summarizeBlocker(status *SubmarinerStatus) string {
+	if status == nil {
+		return "no status available"
+	}
+	for _, cs := range status.Clusters {
+		if !cs.AddonAvailable {
+			return fmt.Sprintf("add-on not available on %s", cs.Name)
+		}
+		if !cs.BrokerConfigured {
+			return fmt.Sprintf("broker config not applied on %s — check cloud credentials in SubmarinerConfig credentialsSecret", cs.Name)
+		}
+		if !cs.GatewayReady {
+			return fmt.Sprintf("no gateway node labelled on %s — the add-on controller needs valid cloud credentials to provision a gateway", cs.Name)
+		}
+		if !cs.AgentReady {
+			return fmt.Sprintf("agent not ready on %s", cs.Name)
+		}
+		if cs.ConnectionDegraded {
+			msg := fmt.Sprintf("connections degraded on %s", cs.Name)
+			if cs.Message != "" {
+				msg += ": " + cs.Message
+			}
+			return msg
+		}
+		if cs.Connections == 0 {
+			return fmt.Sprintf("0 connections on %s", cs.Name)
+		}
+	}
+	return "unknown — check 'acmlab submariner diagnose'"
 }
 
 func defaultGlobalCIDR(index int) string {
@@ -139,7 +202,32 @@ func (m *Manager) Disable(ctx context.Context, clusterSet string) error {
 		})
 		_, _ = m.client.Patch(ctx, client.GVRManagedCluster, "", name, types.MergePatchType, patch)
 	}
+
+	m.waitForAddonCleanup(ctx, clusters)
 	return nil
+}
+
+func (m *Manager) waitForAddonCleanup(ctx context.Context, clusters []string) {
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		allGone := true
+		for _, name := range clusters {
+			_, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, name, "submariner")
+			if err == nil {
+				allGone = false
+				break
+			}
+		}
+		if allGone {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
+	}
+	m.logger.Info("submariner.waitForAddonCleanup", "result", "timed out waiting for addon removal")
 }
 
 func (m *Manager) Status(ctx context.Context, clusterSet string) (*SubmarinerStatus, error) {
@@ -162,7 +250,7 @@ func (m *Manager) Status(ctx context.Context, clusterSet string) (*SubmarinerSta
 			continue
 		}
 		cs := parseClusterStatus(name, addOn.Object)
-		if !cs.GatewayReady || !cs.AgentReady || cs.ConnectionDegraded || cs.Connections == 0 {
+		if !cs.BrokerConfigured || !cs.GatewayReady || !cs.AgentReady || cs.ConnectionDegraded || cs.Connections == 0 {
 			status.Connected = false
 		}
 		status.Clusters = append(status.Clusters, cs)

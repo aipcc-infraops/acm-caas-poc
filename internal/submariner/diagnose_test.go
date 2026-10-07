@@ -3,7 +3,22 @@ package submariner
 import (
 	"context"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+func testSecret(name, namespace string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+		},
+	}
+}
 
 func TestDiagnoseEmptyClusterSet(t *testing.T) {
 	mgr := newTestManager()
@@ -177,7 +192,9 @@ func TestDiagnoseHealthyClusterSet(t *testing.T) {
 	})
 	cfg1 := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
 	cfg2 := buildSubmarinerConfig("spoke2", SubmarinerConfigOpts{})
-	mgr := newTestManager(c1, c2, addon1, addon2, cfg1, cfg2)
+	sec1 := testSecret("spoke1-cloud-creds", "spoke1")
+	sec2 := testSecret("spoke2-cloud-creds", "spoke2")
+	mgr := newTestManager(c1, c2, addon1, addon2, cfg1, cfg2, sec1, sec2)
 
 	result, err := mgr.Diagnose(context.Background(), "healthy-set")
 	if err != nil {

@@ -84,6 +84,17 @@ func addOnWithStatus(cluster string, conditions []interface{}) *unstructured.Uns
 	}
 }
 
+func healthyAddon(cluster string) *unstructured.Unstructured {
+	return addOnWithStatus(cluster, []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+		map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "False"},
+		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "True"},
+	})
+}
+
 func TestEnable(t *testing.T) {
 	c1 := managedCluster("spoke1", "prod-set")
 	c2 := managedCluster("spoke2", "prod-set")
@@ -142,6 +153,10 @@ func TestDisable(t *testing.T) {
 func TestStatusConnected(t *testing.T) {
 	c1 := managedCluster("spoke1", "prod-set")
 	addon := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{
+			"type":   "SubmarinerBrokerConfigApplied",
+			"status": "True",
+		},
 		map[string]interface{}{
 			"type":   "SubmarinerGatewayNodesLabeled",
 			"status": "True",
@@ -507,6 +522,7 @@ func TestEnableWithoutGlobalnetHasNoGlobalCIDR(t *testing.T) {
 func TestWaitForReadyAlreadyConnected(t *testing.T) {
 	c1 := managedCluster("spoke1", "ready-set")
 	addon := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "True"},
 		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
 		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
 		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "True"},

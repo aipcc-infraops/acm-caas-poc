@@ -24,16 +24,21 @@ func buildSubmarinerAddOn(cluster string) *unstructured.Unstructured {
 }
 
 type SubmarinerConfigOpts struct {
-	GlobalCIDR string
+	GlobalCIDR        string
+	CredentialsSecret string
 }
 
 func buildSubmarinerConfig(cluster string, opts SubmarinerConfigOpts) *unstructured.Unstructured {
+	credsName := opts.CredentialsSecret
+	if credsName == "" {
+		credsName = cluster + "-cloud-creds"
+	}
 	spec := map[string]interface{}{
 		"IPSecNATTPort":     int64(4500),
 		"NATTEnable":        true,
 		"cableDriver":       "libreswan",
 		"gatewayConfig":     map[string]interface{}{"gateways": int64(1)},
-		"credentialsSecret": map[string]interface{}{"name": cluster + "-submariner-creds"},
+		"credentialsSecret": map[string]interface{}{"name": credsName},
 	}
 	if opts.GlobalCIDR != "" {
 		spec["globalCIDR"] = opts.GlobalCIDR
@@ -78,6 +83,8 @@ func parseClusterStatus(cluster string, obj map[string]interface{}) ClusterStatu
 		switch condType {
 		case "Available":
 			cs.AddonAvailable = condStatus == "True"
+		case "SubmarinerBrokerConfigApplied":
+			cs.BrokerConfigured = condStatus == "True"
 		case "SubmarinerGatewayNodesLabeled":
 			cs.GatewayReady = condStatus == "True"
 		case "SubmarinerAgentDegraded":
