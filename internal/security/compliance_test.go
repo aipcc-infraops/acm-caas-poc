@@ -222,12 +222,15 @@ func TestGetComplianceStatusWithScan(t *testing.T) {
 }
 
 func TestGetComplianceStatusWithResults(t *testing.T) {
+	scanName := complianceScanPolicyName("spoke1")
+	opName := complianceOperatorPolicyName("spoke1")
+
 	scanPolicy := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "policy.open-cluster-management.io/v1",
 			"kind":       "Policy",
 			"metadata": map[string]interface{}{
-				"name":      "compliance-scan-spoke1",
+				"name":      scanName,
 				"namespace": DefaultNamespace,
 				"labels": map[string]interface{}{
 					"acmlab.redhat.com/compliance-profile": "ocp4-cis",
@@ -249,7 +252,7 @@ func TestGetComplianceStatusWithResults(t *testing.T) {
 			"apiVersion": "policy.open-cluster-management.io/v1beta1",
 			"kind":       "OperatorPolicy",
 			"metadata": map[string]interface{}{
-				"name":      "compliance-operator-spoke1",
+				"name":      opName,
 				"namespace": DefaultNamespace,
 			},
 		},
@@ -275,12 +278,15 @@ func TestGetComplianceStatusWithResults(t *testing.T) {
 }
 
 func TestGetComplianceReport(t *testing.T) {
+	scanName := complianceScanPolicyName("spoke1")
+	opName := complianceOperatorPolicyName("spoke1")
+
 	scanPolicy := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "policy.open-cluster-management.io/v1",
 			"kind":       "Policy",
 			"metadata": map[string]interface{}{
-				"name":      "compliance-scan-spoke1",
+				"name":      scanName,
 				"namespace": DefaultNamespace,
 				"labels": map[string]interface{}{
 					"acmlab.redhat.com/compliance-profile": "ocp4-cis",
@@ -301,7 +307,7 @@ func TestGetComplianceReport(t *testing.T) {
 			"apiVersion": "policy.open-cluster-management.io/v1beta1",
 			"kind":       "OperatorPolicy",
 			"metadata": map[string]interface{}{
-				"name":      "compliance-operator-spoke1",
+				"name":      opName,
 				"namespace": DefaultNamespace,
 			},
 		},
@@ -375,8 +381,8 @@ func TestRemoveComplianceScanIdempotent(t *testing.T) {
 
 func TestBuildComplianceOperatorPolicy(t *testing.T) {
 	pol := buildComplianceOperatorPolicy("spoke1")
-	if pol.GetName() != "compliance-operator-spoke1" {
-		t.Errorf("Name = %q", pol.GetName())
+	if pol.GetName() != "co-spoke1" {
+		t.Errorf("Name = %q, want co-spoke1", pol.GetName())
 	}
 	labels := pol.GetLabels()
 	if labels["acmlab.redhat.com/compliance-operator"] != "true" {
@@ -391,8 +397,8 @@ func TestBuildComplianceOperatorPolicy(t *testing.T) {
 func TestBuildComplianceScanPolicy(t *testing.T) {
 	opts := ComplianceScanOpts{Cluster: "spoke1", Profile: "ocp4-moderate"}
 	pol := buildComplianceScanPolicy(opts)
-	if pol.GetName() != "compliance-scan-spoke1" {
-		t.Errorf("Name = %q", pol.GetName())
+	if pol.GetName() != "cs-spoke1" {
+		t.Errorf("Name = %q, want cs-spoke1", pol.GetName())
 	}
 	labels := pol.GetLabels()
 	if labels["acmlab.redhat.com/compliance-profile"] != "ocp4-moderate" {
@@ -494,13 +500,13 @@ func TestExtractComplianceResultsWithData(t *testing.T) {
 }
 
 func TestComplianceOperatorPolicyName(t *testing.T) {
-	if complianceOperatorPolicyName("spoke1") != "compliance-operator-spoke1" {
+	if complianceOperatorPolicyName("spoke1") != "co-spoke1" {
 		t.Error("unexpected name")
 	}
 }
 
 func TestComplianceScanPolicyName(t *testing.T) {
-	if complianceScanPolicyName("spoke1") != "compliance-scan-spoke1" {
+	if complianceScanPolicyName("spoke1") != "cs-spoke1" {
 		t.Error("unexpected name")
 	}
 }
@@ -613,7 +619,7 @@ func TestGetComplianceStatusScanWithoutOperator(t *testing.T) {
 			"apiVersion": "policy.open-cluster-management.io/v1",
 			"kind":       "Policy",
 			"metadata": map[string]interface{}{
-				"name":      "compliance-scan-spoke1",
+				"name":      complianceScanPolicyName("spoke1"),
 				"namespace": DefaultNamespace,
 				"labels": map[string]interface{}{
 					"acmlab.redhat.com/compliance-profile": "ocp4-cis",
@@ -635,5 +641,96 @@ func TestGetComplianceStatusScanWithoutOperator(t *testing.T) {
 	}
 	if status.Profile != "ocp4-cis" {
 		t.Errorf("Profile = %q, want ocp4-cis", status.Profile)
+	}
+}
+
+func TestComplianceNamesUnderACMLimit(t *testing.T) {
+	cluster := strings.Repeat("a", 20)
+	maxLen := 63
+
+	names := []string{
+		complianceOperatorPolicyName(cluster),
+		complianceOperatorPolicyName(cluster) + "-health",
+		complianceOperatorPolicyName(cluster) + "-health-config",
+		complianceOperatorPolicyName(cluster) + "-placement",
+		complianceOperatorPolicyName(cluster) + "-placement-binding",
+		complianceScanPolicyName(cluster),
+		complianceScanPolicyName(cluster) + "-config",
+		complianceScanPolicyName(cluster) + "-placement",
+		complianceScanPolicyName(cluster) + "-placement-binding",
+	}
+	for _, n := range names {
+		if len(n) > maxLen {
+			t.Errorf("name %q is %d chars, exceeds %d-char ACM limit", n, len(n), maxLen)
+		}
+	}
+}
+
+func TestDeployComplianceOperatorRollbackOnHealthPolicyError(t *testing.T) {
+	c := complianceFakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "policies", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated health policy error")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.DeployComplianceOperator(context.Background(), "spoke1", "")
+	if err == nil {
+		t.Fatal("expected error from health policy creation")
+	}
+
+	opName := complianceOperatorPolicyName("spoke1")
+	_, getErr := mgr.client.Get(context.Background(), client.GVROperatorPolicy, DefaultNamespace, opName)
+	if getErr == nil {
+		t.Error("OperatorPolicy should have been rolled back")
+	}
+}
+
+func TestDeployComplianceOperatorRollbackOnPlacementError(t *testing.T) {
+	c := complianceFakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "placements", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated placement error")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.DeployComplianceOperator(context.Background(), "spoke1", "")
+	if err == nil {
+		t.Fatal("expected error from placement creation")
+	}
+
+	opName := complianceOperatorPolicyName("spoke1")
+	_, getErr := mgr.client.Get(context.Background(), client.GVROperatorPolicy, DefaultNamespace, opName)
+	if getErr == nil {
+		t.Error("OperatorPolicy should have been rolled back")
+	}
+	_, getErr = mgr.client.Get(context.Background(), client.GVRPolicy, DefaultNamespace, opName+"-health")
+	if getErr == nil {
+		t.Error("Health policy should have been rolled back")
+	}
+}
+
+func TestDeployComplianceOperatorRollbackOnBindingError(t *testing.T) {
+	c := complianceFakeClient()
+	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "placementbindings", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated binding error")
+	})
+	mgr := New(c, config.Config{}, discardLogger)
+
+	err := mgr.DeployComplianceOperator(context.Background(), "spoke1", "")
+	if err == nil {
+		t.Fatal("expected error from binding creation")
+	}
+
+	opName := complianceOperatorPolicyName("spoke1")
+	_, getErr := mgr.client.Get(context.Background(), client.GVROperatorPolicy, DefaultNamespace, opName)
+	if getErr == nil {
+		t.Error("OperatorPolicy should have been rolled back")
+	}
+	_, getErr = mgr.client.Get(context.Background(), client.GVRPolicy, DefaultNamespace, opName+"-health")
+	if getErr == nil {
+		t.Error("Health policy should have been rolled back")
+	}
+	_, getErr = mgr.client.Get(context.Background(), client.GVRPlacement, DefaultNamespace, opName+"-placement")
+	if getErr == nil {
+		t.Error("Placement should have been rolled back")
 	}
 }

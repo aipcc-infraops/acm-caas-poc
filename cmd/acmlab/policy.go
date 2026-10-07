@@ -110,7 +110,8 @@ func policyStatusCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					if info.Compliant != "" || time.Now().After(deadline) {
+					settled := info.Compliant == "Compliant" || info.Compliant == "NonCompliant"
+					if settled || time.Now().After(deadline) {
 						break
 					}
 					fmt.Println("Waiting for compliance status...")
