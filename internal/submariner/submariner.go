@@ -19,10 +19,14 @@ type SubmarinerStatus struct {
 }
 
 type ClusterStatus struct {
-	Name         string `json:"name"`
-	GatewayReady bool   `json:"gatewayReady"`
-	AgentReady   bool   `json:"agentReady"`
-	Connections  int    `json:"connections"`
+	Name               string `json:"name"`
+	AddonAvailable     bool   `json:"addonAvailable"`
+	GatewayReady       bool   `json:"gatewayReady"`
+	AgentReady         bool   `json:"agentReady"`
+	Connections        int    `json:"connections"`
+	ConnectionDegraded bool   `json:"connectionDegraded"`
+	Reason             string `json:"reason,omitempty"`
+	Message            string `json:"message,omitempty"`
 }
 
 type SubmarinerInfo struct {
@@ -117,7 +121,7 @@ func (m *Manager) Status(ctx context.Context, clusterSet string) (*SubmarinerSta
 			continue
 		}
 		cs := parseClusterStatus(name, addOn.Object)
-		if !cs.GatewayReady || !cs.AgentReady {
+		if !cs.GatewayReady || !cs.AgentReady || cs.ConnectionDegraded || cs.Connections == 0 {
 			status.Connected = false
 		}
 		status.Clusters = append(status.Clusters, cs)
