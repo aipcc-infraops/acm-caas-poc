@@ -17,7 +17,11 @@ Feature: Cost tracking and chargeback via node metadata estimation (UC-11)
     Given multiple ManagedClusters exist with node metadata
     When I generate a cost report for the fleet
     Then I receive a report with per-cluster cost estimates
-    And the report can be exported as CSV or JSON
+    And the report defaults to human-readable text output
+    And "--format json" exports the report as JSON
+    And "--format csv" exports the report with header "name,nodes,cpuCores,memoryGiB,dailyEstimate,periodEstimate,days"
+    And "--json" is equivalent to "--format json"
+    And an unsupported "--format xml" returns a clear validation error
 
   Scenario: Identify clusters with no cost center
     Given a ManagedCluster "spoke-test" exists without a cost center label

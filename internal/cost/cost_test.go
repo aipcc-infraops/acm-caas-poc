@@ -226,16 +226,39 @@ func TestFormatCostCSV(t *testing.T) {
 		TotalCost: 414.72,
 		Days:      30,
 	}
-	csv := formatCostCSV(report)
-	if !contains(csv, "spoke1") {
-		t.Error("CSV missing cluster name")
+	csv := FormatCostCSV(report)
+	lines := splitLines(csv)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines (header+data+total), got %d", len(lines))
 	}
-	if !contains(csv, "TOTAL") {
+	expectedHeader := "name,nodes,cpuCores,memoryGiB,dailyEstimate,periodEstimate,days"
+	if lines[0] != expectedHeader {
+		t.Errorf("header = %q, want %q", lines[0], expectedHeader)
+	}
+	if !contains(lines[1], "spoke1") {
+		t.Error("data row missing cluster name")
+	}
+	if !contains(lines[1], "414.72") {
+		t.Error("data row missing period estimate")
+	}
+	if !contains(lines[2], "TOTAL") {
 		t.Error("CSV missing TOTAL row")
 	}
-	lines := len(splitLines(csv))
-	if lines != 3 {
-		t.Errorf("expected 3 lines (header+data+total), got %d", lines)
+}
+
+func TestFormatCostCSVMultipleClusters(t *testing.T) {
+	report := CostReport{
+		Clusters: []ClusterCost{
+			{Name: "spoke1", Nodes: 3, CPUCores: 12, MemoryGiB: 48, DailyEstimate: 13.82, PeriodEstimate: 414.72, Days: 30},
+			{Name: "spoke2", Nodes: 2, CPUCores: 8, MemoryGiB: 32, DailyEstimate: 9.22, PeriodEstimate: 276.48, Days: 30},
+		},
+		TotalCost: 691.20,
+		Days:      30,
+	}
+	csv := FormatCostCSV(report)
+	lines := splitLines(csv)
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines (header+2 data+total), got %d", len(lines))
 	}
 }
 
