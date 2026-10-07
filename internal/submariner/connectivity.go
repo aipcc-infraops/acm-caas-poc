@@ -11,24 +11,42 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 )
 
+const (
+	DefaultServerImage = "registry.redhat.io/ubi9/ubi:latest"
+	DefaultClientImage = "registry.redhat.io/ubi9/ubi:latest"
+
+	testServerName = "submariner-test-server"
+	testClientName = "submariner-test-client"
+	testSvcName    = "submariner-test-svc"
+)
+
 type ConnectivityTestOpts struct {
 	ClusterA    string
 	ClusterB    string
 	Namespace   string
 	Timeout     time.Duration
 	Cleanup     bool
-	Image       string
+	ServerImage string
+	ClientImage string
 	KubeconfigA string
 	KubeconfigB string
 }
 
 type ConnectivityResult struct {
-	ClusterA  string `json:"clusterA"`
-	ClusterB  string `json:"clusterB"`
-	Namespace string `json:"namespace"`
-	Phase     string `json:"phase"`
-	Success   bool   `json:"success"`
-	Message   string `json:"message"`
+	ClusterA  string        `json:"clusterA"`
+	ClusterB  string        `json:"clusterB"`
+	Namespace string        `json:"namespace"`
+	Phase     string        `json:"phase"`
+	Success   bool          `json:"success"`
+	Message   string        `json:"message"`
+	Details   *DebugDetails `json:"details,omitempty"`
+}
+
+type DebugDetails struct {
+	ServerPodPhase  string `json:"serverPodPhase,omitempty"`
+	ServerPodReason string `json:"serverPodReason,omitempty"`
+	ClientPodPhase  string `json:"clientPodPhase,omitempty"`
+	ClientPodReason string `json:"clientPodReason,omitempty"`
 }
 
 func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpts) (*ConnectivityResult, error) {
@@ -65,7 +83,7 @@ func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpt
 		result.Phase = "SpokeAccessRequired"
 		result.Message = fmt.Sprintf(
 			"Preflight passed: both clusters have Submariner add-on. "+
-				"To run cross-cluster connectivity test, provide spoke kubeconfigs: "+
+				"Provide spoke kubeconfigs: "+
 				"--kubeconfig-a /path/to/%s.kubeconfig --kubeconfig-b /path/to/%s.kubeconfig",
 			opts.ClusterA, opts.ClusterB)
 		return result, nil
@@ -77,99 +95,156 @@ func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpt
 func (m *Manager) runConnectivityTest(ctx context.Context, opts ConnectivityTestOpts, result *ConnectivityResult) (*ConnectivityResult, error) {
 	clientB, err := client.NewFromContext(opts.KubeconfigB, "")
 	if err != nil {
-		result.Phase = "Failed"
+		result.Phase = "HarnessFailed"
 		result.Message = fmt.Sprintf("Cannot connect to cluster %s: %v", opts.ClusterB, err)
-		return result, nil
-	}
-
-	result.Phase = "CreatingResources"
-
-	ns := buildTestNamespace(opts.Namespace)
-	if err := ensureNamespace(ctx, clientB, ns); err != nil {
-		result.Phase = "Failed"
-		result.Message = fmt.Sprintf("Cannot create namespace on %s: %v", opts.ClusterB, err)
-		return result, nil
-	}
-
-	svc := buildTestService(opts.Namespace)
-	pod := buildTestServerPod(opts.Namespace, opts.Image)
-
-	if _, err := clientB.Create(ctx, client.GVRService, opts.Namespace, svc); err != nil && !apierrors.IsAlreadyExists(err) {
-		result.Phase = "Failed"
-		result.Message = fmt.Sprintf("Cannot create test service on %s: %v", opts.ClusterB, err)
-		return result, nil
-	}
-
-	if err := clientB.CreateIfNotExists(ctx, client.GVRPod, opts.Namespace, pod); err != nil {
-		result.Phase = "Failed"
-		result.Message = fmt.Sprintf("Cannot create test pod on %s: %v", opts.ClusterB, err)
 		return result, nil
 	}
 
 	clientA, err := client.NewFromContext(opts.KubeconfigA, "")
 	if err != nil {
-		result.Phase = "Failed"
+		result.Phase = "HarnessFailed"
 		result.Message = fmt.Sprintf("Cannot connect to cluster %s: %v", opts.ClusterA, err)
 		return result, nil
 	}
 
-	nsA := buildTestNamespace(opts.Namespace)
-	if err := ensureNamespace(ctx, clientA, nsA); err != nil {
-		result.Phase = "Failed"
+	if err := ensureNamespace(ctx, clientB, buildTestNamespace(opts.Namespace)); err != nil {
+		result.Phase = "HarnessFailed"
+		result.Message = fmt.Sprintf("Cannot create namespace on %s: %v", opts.ClusterB, err)
+		return result, nil
+	}
+	if err := ensureNamespace(ctx, clientA, buildTestNamespace(opts.Namespace)); err != nil {
+		result.Phase = "HarnessFailed"
 		result.Message = fmt.Sprintf("Cannot create namespace on %s: %v", opts.ClusterA, err)
 		return result, nil
 	}
 
-	clientPod := buildTestClientPod(opts.Namespace, opts.Image, opts.ClusterB)
+	if opts.Cleanup {
+		defer m.cleanupTestResources(clientA, clientB, opts.Namespace)
+	}
+
+	svc := buildTestService(opts.Namespace)
+	if _, err := clientB.Create(ctx, client.GVRService, opts.Namespace, svc); err != nil && !apierrors.IsAlreadyExists(err) {
+		result.Phase = "HarnessFailed"
+		result.Message = fmt.Sprintf("Cannot create test service on %s: %v", opts.ClusterB, err)
+		return result, nil
+	}
+
+	svcExport := buildServiceExport(opts.Namespace)
+	if _, err := clientB.Create(ctx, client.GVRServiceExport, opts.Namespace, svcExport); err != nil && !apierrors.IsAlreadyExists(err) {
+		result.Phase = "HarnessFailed"
+		result.Message = fmt.Sprintf("Cannot create ServiceExport on %s: %v", opts.ClusterB, err)
+		return result, nil
+	}
+
+	serverPod := buildTestServerPod(opts.Namespace, opts.ServerImage)
+	if err := clientB.CreateIfNotExists(ctx, client.GVRPod, opts.Namespace, serverPod); err != nil {
+		result.Phase = "HarnessFailed"
+		result.Message = fmt.Sprintf("Cannot create server pod on %s: %v", opts.ClusterB, err)
+		return result, nil
+	}
+
+	if err := m.waitForServerReady(ctx, clientB, opts, result); err != nil {
+		return result, nil
+	}
+
+	clientPod := buildTestClientPod(opts.Namespace, opts.ClientImage)
 	if err := clientA.CreateIfNotExists(ctx, client.GVRPod, opts.Namespace, clientPod); err != nil {
-		result.Phase = "Failed"
+		result.Phase = "HarnessFailed"
 		result.Message = fmt.Sprintf("Cannot create client pod on %s: %v", opts.ClusterA, err)
 		return result, nil
 	}
 
-	result.Phase = "WaitingForResult"
-	result.Message = "Test resources created. Poll client pod status for result."
+	return m.waitForClientResult(ctx, clientA, clientB, opts, result), nil
+}
 
-	if opts.Cleanup {
-		defer func() {
-			cleanupCtx := context.Background()
-			_ = clientA.DeleteIfExists(cleanupCtx, client.GVRPod, opts.Namespace, "submariner-test-client")
-			_ = clientA.DeleteIfExists(cleanupCtx, client.GVRNamespace, "", opts.Namespace)
-			_ = clientB.DeleteIfExists(cleanupCtx, client.GVRPod, opts.Namespace, "submariner-test-server")
-			_ = clientB.DeleteIfExists(cleanupCtx, client.GVRService, opts.Namespace, "submariner-test-svc")
-			_ = clientB.DeleteIfExists(cleanupCtx, client.GVRNamespace, "", opts.Namespace)
-		}()
+func (m *Manager) waitForServerReady(ctx context.Context, spokeB *client.Client, opts ConnectivityTestOpts, result *ConnectivityResult) error {
+	deadline := time.Now().Add(opts.Timeout / 2)
+	for time.Now().Before(deadline) {
+		p, err := spokeB.Get(ctx, client.GVRPod, opts.Namespace, testServerName)
+		if err != nil {
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		phase := podPhase(p.Object)
+		switch phase {
+		case "Running":
+			return nil
+		case "Failed":
+			result.Phase = "HarnessFailed"
+			result.Message = fmt.Sprintf("Server pod failed before connectivity could be tested on %s.", opts.ClusterB)
+			result.Details = &DebugDetails{
+				ServerPodPhase:  phase,
+				ServerPodReason: podStatusReason(p.Object),
+			}
+			return fmt.Errorf("server pod failed")
+		}
+		time.Sleep(3 * time.Second)
 	}
+	result.Phase = "HarnessFailed"
+	result.Message = fmt.Sprintf("Server pod did not become ready within %s on %s.", opts.Timeout/2, opts.ClusterB)
+	return fmt.Errorf("server pod timeout")
+}
 
+func (m *Manager) waitForClientResult(ctx context.Context, spokeA, spokeB *client.Client, opts ConnectivityTestOpts, result *ConnectivityResult) *ConnectivityResult {
 	deadline := time.Now().Add(opts.Timeout)
 	for time.Now().Before(deadline) {
-		p, err := clientA.Get(ctx, client.GVRPod, opts.Namespace, "submariner-test-client")
+		p, err := spokeA.Get(ctx, client.GVRPod, opts.Namespace, testClientName)
 		if err != nil {
 			time.Sleep(5 * time.Second)
 			continue
 		}
 		phase := podPhase(p.Object)
-		if phase == "Succeeded" {
+		reason := podStatusReason(p.Object)
+		switch phase {
+		case "Succeeded":
 			result.Phase = "Passed"
 			result.Success = true
 			result.Message = fmt.Sprintf("Cross-cluster connectivity verified: %s -> %s", opts.ClusterA, opts.ClusterB)
-			return result, nil
-		}
-		if phase == "Failed" {
-			result.Phase = "Failed"
-			result.Message = fmt.Sprintf("Client pod failed. Cross-cluster connectivity not working: %s -> %s", opts.ClusterA, opts.ClusterB)
-			return result, nil
+			return result
+		case "Failed":
+			if isImagePullFailure(reason) {
+				result.Phase = "HarnessFailed"
+				result.Message = fmt.Sprintf("Client pod image pull failed on %s: %s", opts.ClusterA, reason)
+			} else {
+				result.Phase = "ConnectivityFailed"
+				result.Message = fmt.Sprintf("Cross-cluster connectivity test failed: %s -> %s", opts.ClusterA, opts.ClusterB)
+			}
+			result.Details = collectDebugDetails(ctx, spokeA, spokeB, opts.Namespace)
+			return result
 		}
 		time.Sleep(5 * time.Second)
 	}
-
 	result.Phase = "Timeout"
-	result.Message = fmt.Sprintf("Timed out waiting for connectivity test result after %s", opts.Timeout)
-	return result, nil
+	result.Message = fmt.Sprintf("Timed out after %s waiting for connectivity test result.", opts.Timeout)
+	result.Details = collectDebugDetails(ctx, spokeA, spokeB, opts.Namespace)
+	return result
 }
 
-func ensureNamespace(ctx context.Context, c *client.Client, ns *unstructured.Unstructured) error {
-	return c.CreateIfNotExists(ctx, client.GVRNamespace, "", ns)
+func (m *Manager) cleanupTestResources(spokeA, spokeB *client.Client, namespace string) {
+	ctx := context.Background()
+	_ = spokeA.DeleteIfExists(ctx, client.GVRPod, namespace, testClientName)
+	_ = spokeA.DeleteIfExists(ctx, client.GVRNamespace, "", namespace)
+	_ = spokeB.DeleteIfExists(ctx, client.GVRPod, namespace, testServerName)
+	_ = spokeB.DeleteIfExists(ctx, client.GVRServiceExport, namespace, testSvcName)
+	_ = spokeB.DeleteIfExists(ctx, client.GVRService, namespace, testSvcName)
+	_ = spokeB.DeleteIfExists(ctx, client.GVRNamespace, "", namespace)
+}
+
+func collectDebugDetails(ctx context.Context, spokeA, spokeB *client.Client, namespace string) *DebugDetails {
+	d := &DebugDetails{}
+	if p, err := spokeB.Get(ctx, client.GVRPod, namespace, testServerName); err == nil {
+		d.ServerPodPhase = podPhase(p.Object)
+		d.ServerPodReason = podStatusReason(p.Object)
+	}
+	if p, err := spokeA.Get(ctx, client.GVRPod, namespace, testClientName); err == nil {
+		d.ClientPodPhase = podPhase(p.Object)
+		d.ClientPodReason = podStatusReason(p.Object)
+	}
+	return d
+}
+
+func isImagePullFailure(reason string) bool {
+	return reason == "ImagePullBackOff" || reason == "ErrImagePull" || reason == "SignatureValidationFailed"
 }
 
 func podPhase(obj map[string]interface{}) string {
@@ -181,6 +256,50 @@ func podPhase(obj map[string]interface{}) string {
 	return phase
 }
 
+func podStatusReason(obj map[string]interface{}) string {
+	status, _ := obj["status"].(map[string]interface{})
+	if status == nil {
+		return ""
+	}
+	containers, _ := status["containerStatuses"].([]interface{})
+	for _, c := range containers {
+		cs, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, stateKey := range []string{"waiting", "terminated"} {
+			state, ok := cs[stateKey].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if reason, ok := state["reason"].(string); ok && reason != "" {
+				return reason
+			}
+		}
+	}
+	if reason, ok := status["reason"].(string); ok {
+		return reason
+	}
+	return ""
+}
+
+func ensureNamespace(ctx context.Context, c *client.Client, ns *unstructured.Unstructured) error {
+	return c.CreateIfNotExists(ctx, client.GVRNamespace, "", ns)
+}
+
+// --- Resource builders ---
+
+var restrictedSecurityContext = map[string]interface{}{
+	"runAsNonRoot":             true,
+	"allowPrivilegeEscalation": false,
+	"capabilities": map[string]interface{}{
+		"drop": []interface{}{"ALL"},
+	},
+	"seccompProfile": map[string]interface{}{
+		"type": "RuntimeDefault",
+	},
+}
+
 func buildTestNamespace(name string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -189,7 +308,7 @@ func buildTestNamespace(name string) *unstructured.Unstructured {
 			"metadata": map[string]interface{}{
 				"name": name,
 				"labels": map[string]interface{}{
-					"acmlab.redhat.com/managed":        "true",
+					"acmlab.redhat.com/managed":         "true",
 					"acmlab.redhat.com/submariner-test": "true",
 				},
 			},
@@ -203,7 +322,7 @@ func buildTestService(namespace string) *unstructured.Unstructured {
 			"apiVersion": "v1",
 			"kind":       "Service",
 			"metadata": map[string]interface{}{
-				"name":      "submariner-test-svc",
+				"name":      testSvcName,
 				"namespace": namespace,
 				"labels": map[string]interface{}{
 					"acmlab.redhat.com/managed": "true",
@@ -225,13 +344,29 @@ func buildTestService(namespace string) *unstructured.Unstructured {
 	}
 }
 
+func buildServiceExport(namespace string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "multicluster.x-k8s.io/v1alpha1",
+			"kind":       "ServiceExport",
+			"metadata": map[string]interface{}{
+				"name":      testSvcName,
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed": "true",
+				},
+			},
+		},
+	}
+}
+
 func buildTestServerPod(namespace, image string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
 			"kind":       "Pod",
 			"metadata": map[string]interface{}{
-				"name":      "submariner-test-server",
+				"name":      testServerName,
 				"namespace": namespace,
 				"labels": map[string]interface{}{
 					"app":                       "submariner-test-server",
@@ -244,13 +379,22 @@ func buildTestServerPod(namespace, image string) *unstructured.Unstructured {
 						"name":  "server",
 						"image": image,
 						"command": []interface{}{
-							"sh", "-c", "echo 'submariner-test-ok' | nc -l -p 8080",
+							"python3", "-c",
+							"from http.server import HTTPServer, BaseHTTPRequestHandler\n" +
+								"class H(BaseHTTPRequestHandler):\n" +
+								"    def do_GET(self):\n" +
+								"        self.send_response(200)\n" +
+								"        self.end_headers()\n" +
+								"        self.wfile.write(b'submariner-test-ok')\n" +
+								"    def log_message(self, *a): pass\n" +
+								"HTTPServer(('',8080),H).serve_forever()\n",
 						},
 						"ports": []interface{}{
 							map[string]interface{}{
 								"containerPort": int64(8080),
 							},
 						},
+						"securityContext": restrictedSecurityContext,
 					},
 				},
 				"restartPolicy": "Never",
@@ -259,20 +403,17 @@ func buildTestServerPod(namespace, image string) *unstructured.Unstructured {
 	}
 }
 
-func buildTestClientPod(namespace, image, targetCluster string) *unstructured.Unstructured {
-	svcHost := fmt.Sprintf("submariner-test-svc.%s.svc.clusterset.local", namespace)
+func buildTestClientPod(namespace, image string) *unstructured.Unstructured {
+	svcHost := fmt.Sprintf("%s.%s.svc.clusterset.local", testSvcName, namespace)
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
 			"kind":       "Pod",
 			"metadata": map[string]interface{}{
-				"name":      "submariner-test-client",
+				"name":      testClientName,
 				"namespace": namespace,
 				"labels": map[string]interface{}{
 					"acmlab.redhat.com/managed": "true",
-				},
-				"annotations": map[string]interface{}{
-					"acmlab.redhat.com/target-cluster": targetCluster,
 				},
 			},
 			"spec": map[string]interface{}{
@@ -281,8 +422,14 @@ func buildTestClientPod(namespace, image, targetCluster string) *unstructured.Un
 						"name":  "client",
 						"image": image,
 						"command": []interface{}{
-							"sh", "-c", fmt.Sprintf("for i in $(seq 1 30); do if curl -s --connect-timeout 5 http://%s:80 | grep -q submariner-test-ok; then exit 0; fi; sleep 2; done; exit 1", svcHost),
+							"sh", "-c",
+							fmt.Sprintf(
+								"for i in $(seq 1 30); do "+
+									"if curl -sf --connect-timeout 5 http://%s:80 | grep -q submariner-test-ok; then exit 0; fi; "+
+									"sleep 2; done; exit 1",
+								svcHost),
 						},
+						"securityContext": restrictedSecurityContext,
 					},
 				},
 				"restartPolicy": "Never",

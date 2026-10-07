@@ -48,3 +48,56 @@ Feature: UC-26 Multi-cluster networking via Submariner
     When I enable Submariner for ClusterSet "multi-set"
     Then a ManagedClusterAddOn "submariner" is created in each of the 3 cluster namespaces
     And a SubmarinerConfig is created in each of the 3 cluster namespaces
+
+  Scenario: Status shows connection degraded details
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And the add-on condition SubmarinerConnectionDegraded is True with reason "ConnectionsNotEstablished"
+    When I run "acmlab submariner status prod-set"
+    Then the status shows "DISCONNECTED"
+    And each cluster shows connectionDegraded true with reason and message
+
+  Scenario: Diagnose identifies missing gateway connections
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And gateway nodes are labelled but no connections are established
+    When I run "acmlab submariner diagnose prod-set"
+    Then a check "addon/spoke1/connections" reports "fail"
+    And the message includes "CIDR overlap, Globalnet, firewall"
+
+  Scenario: Diagnose warns about local-cluster in set
+    Given ClusterSet "default" contains "spoke1", "spoke2", and "local-cluster"
+    When I run "acmlab submariner diagnose default"
+    Then a check "cluster-set" reports "warn"
+    And the message includes "local-cluster (hub) is in this set"
+
+  Scenario: Test connectivity without spoke kubeconfigs
+    Given Submariner add-ons exist on "spoke1" and "spoke2"
+    When I run "acmlab submariner test-connectivity spoke1 spoke2"
+    Then the phase is "SpokeAccessRequired"
+    And the message includes "--kubeconfig-a" and "--kubeconfig-b"
+
+  Scenario: Test connectivity reports harness failure on image pull error
+    Given Submariner add-ons exist on "spoke1" and "spoke2"
+    And the server pod fails with reason "SignatureValidationFailed"
+    When I run "acmlab submariner test-connectivity spoke1 spoke2 --kubeconfig-a /tmp/a.kc --kubeconfig-b /tmp/b.kc"
+    Then the phase is "HarnessFailed"
+    And the message distinguishes harness failure from connectivity failure
+
+  Scenario: Test connectivity creates ServiceExport
+    Given Submariner add-ons exist on "spoke1" and "spoke2"
+    When I run a connectivity test with spoke kubeconfigs
+    Then a ServiceExport "submariner-test-svc" is created on cluster B
+    And the client pod resolves the service via clusterset.local DNS
+
+  Scenario: Test connectivity with cleanup disabled
+    Given a connectivity test completes with "--cleanup=false"
+    Then the output includes manual cleanup instructions
+    And test resources remain in the namespace on both clusters
+
+  Scenario: Create a dedicated test ClusterSet
+    When I run "acmlab submariner create-test-set uc26-test --clusters caas-pool-1,caas-pool-2 --confirm"
+    Then a ManagedClusterSet "uc26-test" is created
+    And clusters "caas-pool-1" and "caas-pool-2" are relabelled to set "uc26-test"
+
+  Scenario: Create test set requires confirmation
+    When I run "acmlab submariner create-test-set uc26-test --clusters caas-pool-1,caas-pool-2"
+    Then the operation fails with "pass --confirm to proceed"

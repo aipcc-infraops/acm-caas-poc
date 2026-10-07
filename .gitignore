@@ -1,5 +1,6 @@
 .env
 style.md
+claude-work
 *.exe
 vendor/
 bin/
