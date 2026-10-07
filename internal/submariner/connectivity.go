@@ -3,6 +3,7 @@ package submariner
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -71,10 +72,21 @@ func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpt
 	}
 
 	for _, cluster := range []string{opts.ClusterA, opts.ClusterB} {
-		_, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, cluster, "submariner")
+		addOn, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, cluster, "submariner")
 		if err != nil {
 			result.Phase = "PreflightFailed"
 			result.Message = fmt.Sprintf("ManagedClusterAddOn/submariner not found on %s. Enable Submariner first.", cluster)
+			return result, nil
+		}
+		conditions := extractConditions(addOn.Object)
+		if len(conditions) == 0 {
+			result.Phase = "PreflightFailed"
+			result.Message = fmt.Sprintf("ManagedClusterAddOn/submariner on %s has no conditions yet — add-on is still initializing.", cluster)
+			return result, nil
+		}
+		if msg := checkSubmarinerReadiness(conditions, cluster); msg != "" {
+			result.Phase = "PreflightFailed"
+			result.Message = msg + " Run 'acmlab submariner diagnose' for details."
 			return result, nil
 		}
 	}
@@ -82,7 +94,7 @@ func (m *Manager) TestConnectivity(ctx context.Context, opts ConnectivityTestOpt
 	if opts.KubeconfigA == "" || opts.KubeconfigB == "" {
 		result.Phase = "SpokeAccessRequired"
 		result.Message = fmt.Sprintf(
-			"Preflight passed: both clusters have Submariner add-on. "+
+			"Preflight passed: Submariner is healthy on both clusters. "+
 				"Provide spoke kubeconfigs: "+
 				"--kubeconfig-a /path/to/%s.kubeconfig --kubeconfig-b /path/to/%s.kubeconfig",
 			opts.ClusterA, opts.ClusterB)
@@ -131,6 +143,11 @@ func (m *Manager) runConnectivityTest(ctx context.Context, opts ConnectivityTest
 
 	svcExport := buildServiceExport(opts.Namespace)
 	if _, err := clientB.Create(ctx, client.GVRServiceExport, opts.Namespace, svcExport); err != nil && !apierrors.IsAlreadyExists(err) {
+		if isResourceNotAvailable(err) {
+			result.Phase = "PreflightFailed"
+			result.Message = fmt.Sprintf("ServiceExport API not available on %s. Submariner may not be fully deployed or the cluster does not support multi-cluster services.", opts.ClusterB)
+			return result, nil
+		}
 		result.Phase = "HarnessFailed"
 		result.Message = fmt.Sprintf("Cannot create ServiceExport on %s: %v", opts.ClusterB, err)
 		return result, nil
@@ -281,6 +298,42 @@ func podStatusReason(obj map[string]interface{}) string {
 		return reason
 	}
 	return ""
+}
+
+func checkSubmarinerReadiness(conditions []condition, cluster string) string {
+	if !conditionIsTrue(conditions, "Available") {
+		return fmt.Sprintf("Submariner add-on on %s is not Available.", cluster)
+	}
+	if !conditionIsTrue(conditions, "SubmarinerBrokerConfigApplied") {
+		return fmt.Sprintf("Broker config not applied on %s — check cloud credentials in SubmarinerConfig.", cluster)
+	}
+	if !conditionIsTrue(conditions, "SubmarinerGatewayNodesLabeled") {
+		return fmt.Sprintf("No gateway node labelled on %s — the add-on controller may lack credentials to provision a gateway.", cluster)
+	}
+	for _, c := range conditions {
+		if c.condType == "SubmarinerAgentDegraded" && c.status == "True" {
+			msg := fmt.Sprintf("Submariner agent is degraded on %s.", cluster)
+			if c.message != "" {
+				msg += " Detail: " + c.message
+			}
+			return msg
+		}
+	}
+	for _, c := range conditions {
+		if c.condType == "SubmarinerConnectionDegraded" && c.status == "True" {
+			return fmt.Sprintf("No gateway connections established on %s — check CIDR overlap and firewall/NAT-T ports.", cluster)
+		}
+	}
+	return ""
+}
+
+func isResourceNotAvailable(err error) bool {
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "the server could not find the requested resource") ||
+		strings.Contains(msg, "no matches for kind")
 }
 
 func ensureNamespace(ctx context.Context, c *client.Client, ns *unstructured.Unstructured) error {

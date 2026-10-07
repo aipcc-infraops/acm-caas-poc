@@ -19,7 +19,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-08 | Legacy cluster decommissioning | ✅ Implemented | `internal/decommission/` |
 | UC-09 | Cluster upgrades (Day-2 operations) | ✅ Implemented | `internal/upgrade/` |
 | UC-10 | Cluster scaling (add/remove workers) | ✅ Implemented | `internal/scaling/` |
-| UC-11 | Cost tracking and chargeback | ✅ Implemented | `internal/cost/` |
+| UC-11 | Cost tracking, Grafana dashboard, and chargeback | ✅ Implemented | `internal/cost/` |
 | UC-12 | Identity Provider management (GitHub, Google, htpasswd, LDAP, OIDC) | ✅ Implemented | `internal/idp/` |
 | UC-14 | Automatic cluster reclamation (idle/expired) | ✅ Implemented | `internal/reclamation/` |
 | UC-15 | Resource quota gates via governance policy | ✅ Implemented | `internal/policy/` |
@@ -33,7 +33,7 @@ Full use case documentation with Gherkin scenarios: [docs/acm-use-cases-caas-poc
 | UC-23 | Multi-architecture cluster matrix (QA) | ✅ Implemented | `internal/matrix/` |
 | UC-24 | Per-team compliance reporting | ✅ Implemented | `internal/policy/` |
 | UC-25 | ClusterPool + ClusterClaim (pre-warmed clusters) | ✅ Implemented | `internal/pool/` |
-| UC-26 | Multi-cluster networking (Submariner) | ✅ Implemented | `internal/submariner/` |
+| UC-26 | Multi-cluster networking (Submariner, Globalnet, --wait) | ✅ Implemented | `internal/submariner/` |
 | UC-27 | Operator version pinning (OperatorPolicy) | ✅ Implemented | `internal/policy/` |
 | UC-28 | Certificate expiry detection fleet-wide | ✅ Implemented | `internal/policy/` |
 | UC-29 | Security baseline enforcement (Gatekeeper/OPA) | ✅ Implemented | `internal/security/` |

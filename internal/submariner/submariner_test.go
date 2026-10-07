@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -83,12 +84,23 @@ func addOnWithStatus(cluster string, conditions []interface{}) *unstructured.Uns
 	}
 }
 
+func healthyAddon(cluster string) *unstructured.Unstructured {
+	return addOnWithStatus(cluster, []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+		map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "False"},
+		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "True"},
+	})
+}
+
 func TestEnable(t *testing.T) {
 	c1 := managedCluster("spoke1", "prod-set")
 	c2 := managedCluster("spoke2", "prod-set")
 	mgr := newTestManager(c1, c2)
 
-	err := mgr.Enable(context.Background(), "prod-set")
+	err := mgr.Enable(context.Background(), "prod-set", EnableOpts{})
 	if err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
@@ -115,7 +127,7 @@ func TestEnable(t *testing.T) {
 func TestEnableEmptyClusterSet(t *testing.T) {
 	mgr := newTestManager()
 
-	err := mgr.Enable(context.Background(), "empty-set")
+	err := mgr.Enable(context.Background(), "empty-set", EnableOpts{})
 	if err == nil {
 		t.Fatal("expected error for empty cluster set")
 	}
@@ -124,7 +136,7 @@ func TestEnableEmptyClusterSet(t *testing.T) {
 func TestDisable(t *testing.T) {
 	c1 := managedCluster("spoke1", "prod-set")
 	addon := buildSubmarinerAddOn("spoke1")
-	cfg := buildSubmarinerConfig("spoke1")
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
 	mgr := newTestManager(c1, addon, cfg)
 
 	err := mgr.Disable(context.Background(), "prod-set")
@@ -141,6 +153,10 @@ func TestDisable(t *testing.T) {
 func TestStatusConnected(t *testing.T) {
 	c1 := managedCluster("spoke1", "prod-set")
 	addon := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{
+			"type":   "SubmarinerBrokerConfigApplied",
+			"status": "True",
+		},
 		map[string]interface{}{
 			"type":   "SubmarinerGatewayNodesLabeled",
 			"status": "True",
@@ -232,7 +248,7 @@ func TestBuildSubmarinerAddOn(t *testing.T) {
 }
 
 func TestBuildSubmarinerConfig(t *testing.T) {
-	cfg := buildSubmarinerConfig("spoke1")
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
 	driver, _, _ := unstructured.NestedString(cfg.Object, "spec", "cableDriver")
 	if driver != "libreswan" {
 		t.Errorf("expected cableDriver=libreswan, got %s", driver)
@@ -443,7 +459,7 @@ func TestEnableMultipleClusters(t *testing.T) {
 	c3 := managedCluster("spoke3", "multi-set")
 	mgr := newTestManager(c1, c2, c3)
 
-	err := mgr.Enable(context.Background(), "multi-set")
+	err := mgr.Enable(context.Background(), "multi-set", EnableOpts{})
 	if err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
@@ -457,5 +473,110 @@ func TestEnableMultipleClusters(t *testing.T) {
 		if err != nil {
 			t.Errorf("config not created for %s: %v", name, err)
 		}
+	}
+}
+
+func TestEnableWithGlobalnet(t *testing.T) {
+	c1 := managedCluster("spoke1", "gn-set")
+	c2 := managedCluster("spoke2", "gn-set")
+	mgr := newTestManager(c1, c2)
+
+	err := mgr.Enable(context.Background(), "gn-set", EnableOpts{Globalnet: true})
+	if err != nil {
+		t.Fatalf("Enable with Globalnet: %v", err)
+	}
+
+	for i, name := range []string{"spoke1", "spoke2"} {
+		cfg, err := mgr.client.Get(context.Background(), client.GVRSubmarinerConfig, name, "submariner")
+		if err != nil {
+			t.Fatalf("config not created for %s: %v", name, err)
+		}
+		globalCIDR, _, _ := unstructured.NestedString(cfg.Object, "spec", "globalCIDR")
+		expected := defaultGlobalCIDR(i)
+		if globalCIDR != expected {
+			t.Errorf("%s: globalCIDR = %q, want %q", name, globalCIDR, expected)
+		}
+	}
+}
+
+func TestEnableWithoutGlobalnetHasNoGlobalCIDR(t *testing.T) {
+	c1 := managedCluster("spoke1", "std-set")
+	c2 := managedCluster("spoke2", "std-set")
+	mgr := newTestManager(c1, c2)
+
+	err := mgr.Enable(context.Background(), "std-set", EnableOpts{})
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	cfg, err := mgr.client.Get(context.Background(), client.GVRSubmarinerConfig, "spoke1", "submariner")
+	if err != nil {
+		t.Fatalf("config not created: %v", err)
+	}
+	globalCIDR, exists, _ := unstructured.NestedString(cfg.Object, "spec", "globalCIDR")
+	if exists && globalCIDR != "" {
+		t.Errorf("expected no globalCIDR without --globalnet, got %q", globalCIDR)
+	}
+}
+
+func TestWaitForReadyAlreadyConnected(t *testing.T) {
+	c1 := managedCluster("spoke1", "ready-set")
+	addon := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "True"},
+	})
+	mgr := newTestManager(c1, addon)
+
+	status, err := mgr.WaitForReady(context.Background(), "ready-set", 5*time.Second)
+	if err != nil {
+		t.Fatalf("WaitForReady: %v", err)
+	}
+	if !status.Connected {
+		t.Error("expected Connected=true")
+	}
+}
+
+func TestWaitForReadyTimeout(t *testing.T) {
+	c1 := managedCluster("spoke1", "slow-set")
+	mgr := newTestManager(c1)
+
+	_, err := mgr.WaitForReady(context.Background(), "slow-set", 1*time.Second)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+}
+
+func TestDefaultGlobalCIDR(t *testing.T) {
+	tests := []struct {
+		index int
+		want  string
+	}{
+		{0, "242.0.0.0/16"},
+		{1, "242.1.0.0/16"},
+		{255, "242.255.0.0/16"},
+	}
+	for _, tt := range tests {
+		got := defaultGlobalCIDR(tt.index)
+		if got != tt.want {
+			t.Errorf("defaultGlobalCIDR(%d) = %q, want %q", tt.index, got, tt.want)
+		}
+	}
+}
+
+func TestBuildSubmarinerConfigGlobalnet(t *testing.T) {
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{GlobalCIDR: "242.0.0.0/16"})
+	globalCIDR, _, _ := unstructured.NestedString(cfg.Object, "spec", "globalCIDR")
+	if globalCIDR != "242.0.0.0/16" {
+		t.Errorf("expected globalCIDR=242.0.0.0/16, got %s", globalCIDR)
+	}
+}
+
+func TestBuildSubmarinerConfigNoGlobalnet(t *testing.T) {
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
+	_, exists, _ := unstructured.NestedString(cfg.Object, "spec", "globalCIDR")
+	if exists {
+		t.Error("expected no globalCIDR in spec without opts")
 	}
 }

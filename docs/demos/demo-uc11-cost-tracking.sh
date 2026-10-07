@@ -37,10 +37,21 @@ acmlab cost by-center --json
 
 echo ""
 echo "8. Deploy cost dashboard to Grafana (requires ACM observability)"
+echo "   - Configures metrics allowlist (kube_node_status_capacity, kube_node_info, kube_node_labels, kube_node_role)"
+echo "   - Deploys recording rules using kube_node_role{role=\"worker\"} for accurate worker filtering"
+echo "   - Creates Grafana dashboard with 7 panels: estimate, avg rate, daily trend, etc."
 acmlab cost dashboard
 
 echo ""
-echo "9. Remove cost dashboard from Grafana"
+echo "9. Set budget for a cost center"
+acmlab cost budget engineering 5000
+
+echo ""
+echo "10. Check all budgets for overages"
+acmlab cost check-budgets
+
+echo ""
+echo "11. Remove cost dashboard (only removes cost rule group, preserves other custom rules)"
 acmlab cost remove-dashboard
 
 echo ""

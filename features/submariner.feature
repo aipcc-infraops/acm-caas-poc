@@ -101,3 +101,90 @@ Feature: UC-26 Multi-cluster networking via Submariner
   Scenario: Create test set requires confirmation
     When I run "acmlab submariner create-test-set uc26-test --clusters caas-pool-1,caas-pool-2"
     Then the operation fails with "pass --confirm to proceed"
+
+  Scenario: Enable Submariner with wait for readiness
+    Given a ManagedClusterSet "prod-set" with clusters "spoke1" and "spoke2"
+    When I run "acmlab submariner enable prod-set --wait --timeout 10m"
+    Then Submariner resources are created for all clusters in the set
+    And the command polls until all clusters show connected status
+    And the command reports "Submariner is connected and ready"
+
+  Scenario: Enable Submariner with Globalnet for overlapping CIDRs
+    Given a ManagedClusterSet "overlap-set" with clusters using identical Pod/Service CIDRs
+    When I run "acmlab submariner enable overlap-set --globalnet"
+    Then each SubmarinerConfig includes a unique globalCIDR from the 242.0.0.0/8 range
+    And Submariner uses Globalnet to route traffic between clusters
+
+  Scenario: Diagnose warns about default ClusterSet
+    Given Submariner is enabled for ClusterSet "default"
+    When I run "acmlab submariner diagnose default"
+    Then a check "cluster-set/naming" reports "warn"
+    And the message suggests creating a dedicated ClusterSet
+
+  Scenario: Diagnose recommends Globalnet when connections fail
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And connections are degraded with reason "ConnectionsNotEstablished"
+    And no SubmarinerConfig has a globalCIDR set
+    When I run "acmlab submariner diagnose prod-set"
+    Then a check "globalnet" reports "warn"
+    And the message recommends enabling Globalnet or reprovisioning with non-overlapping CIDRs
+
+  Scenario: Test connectivity fails preflight when addon not available
+    Given Submariner add-ons exist on "spoke1" and "spoke2"
+    And the add-on on "spoke2" has Available=False
+    When I run "acmlab submariner test-connectivity spoke1 spoke2"
+    Then the phase is "PreflightFailed"
+    And the message suggests running "acmlab submariner diagnose"
+
+  Scenario: Test connectivity fails preflight when ServiceExport API missing
+    Given Submariner add-ons exist on "spoke1" and "spoke2"
+    And cluster "spoke2" does not have the ServiceExport CRD installed
+    When I run a connectivity test with spoke kubeconfigs
+    Then the phase is "PreflightFailed"
+    And the message explains the ServiceExport API is not available
+
+  Scenario: Test connectivity fails preflight when broker config not applied
+    Given Submariner add-ons exist on "spoke1" and "spoke2"
+    And the add-on on "spoke1" has SubmarinerBrokerConfigApplied=False
+    When I run "acmlab submariner test-connectivity spoke1 spoke2"
+    Then the phase is "PreflightFailed"
+    And the message mentions broker config and cloud credentials
+
+  Scenario: Test connectivity fails preflight when agent degraded
+    Given Submariner add-ons exist on "spoke1" and "spoke2"
+    And the add-on on "spoke1" has SubmarinerAgentDegraded=True
+    When I run "acmlab submariner test-connectivity spoke1 spoke2"
+    Then the phase is "PreflightFailed"
+    And the message mentions degraded agent
+
+  Scenario: Enable Submariner looks up cloud credentials from ClusterDeployment
+    Given a ClusterDeployment exists for "spoke1" with IBM Cloud credentials secret "spoke1-ibm-creds"
+    When I enable Submariner for ClusterSet "prod-set"
+    Then the SubmarinerConfig credentialsSecret references "spoke1-ibm-creds"
+    And the add-on controller can provision gateway nodes and configure the broker
+
+  Scenario: Re-enable with Globalnet updates existing SubmarinerConfig
+    Given Submariner is enabled for ClusterSet "prod-set" without Globalnet
+    When I run "acmlab submariner enable prod-set --globalnet"
+    Then the SubmarinerConfig is updated with a globalCIDR
+    And the existing SubmarinerConfig is not silently skipped
+
+  Scenario: Disable waits for addon cleanup before returning
+    Given Submariner is enabled for ClusterSet "prod-set"
+    When I disable Submariner for ClusterSet "prod-set"
+    Then the command waits until all ManagedClusterAddOn resources are deleted
+    And re-enabling immediately after disable does not encounter stale state
+
+  Scenario: Disable warns when addon cleanup times out
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And the ManagedClusterAddOn resources are slow to delete
+    When I disable Submariner for ClusterSet "prod-set"
+    Then the command returns an error about cleanup timeout
+    And the message advises waiting before re-enabling
+
+  Scenario: Diagnose checks credentials secret existence
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And the SubmarinerConfig on "spoke1" references a credentials secret that does not exist
+    When I run "acmlab submariner diagnose prod-set"
+    Then a check "config/spoke1/credentials" reports "fail"
+    And the message explains the add-on controller needs cloud credentials

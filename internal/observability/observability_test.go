@@ -547,6 +547,46 @@ func TestGrafanaURL(t *testing.T) {
 	}
 }
 
+func TestGrafanaURLSkipsNonGrafanaRoutes(t *testing.T) {
+	nonGrafana := &unstructured.Unstructured{}
+	nonGrafana.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "route.openshift.io", Version: "v1", Kind: "Route",
+	})
+	nonGrafana.SetName("other-app")
+	nonGrafana.SetNamespace(Namespace)
+	nonGrafana.Object["spec"] = map[string]interface{}{
+		"host": "other.apps.example.com",
+	}
+
+	grafanaNoSpec := &unstructured.Unstructured{}
+	grafanaNoSpec.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "route.openshift.io", Version: "v1", Kind: "Route",
+	})
+	grafanaNoSpec.SetName("grafana-no-spec")
+	grafanaNoSpec.SetNamespace(Namespace)
+
+	grafana := &unstructured.Unstructured{}
+	grafana.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "route.openshift.io", Version: "v1", Kind: "Route",
+	})
+	grafana.SetName("grafana")
+	grafana.SetNamespace(Namespace)
+	grafana.Object["spec"] = map[string]interface{}{
+		"host": "grafana.apps.example.com",
+	}
+
+	c := fakeClient(nonGrafana, grafanaNoSpec, grafana)
+	mgr := New(c, config.Config{}, discardLogger)
+
+	url, err := mgr.GrafanaURL(context.Background())
+	if err != nil {
+		t.Fatalf("GrafanaURL failed: %v", err)
+	}
+	if url != "https://grafana.apps.example.com" {
+		t.Errorf("url = %q, want https://grafana.apps.example.com", url)
+	}
+}
+
 func TestGrafanaURLNotFound(t *testing.T) {
 	c := fakeClient()
 	mgr := New(c, config.Config{}, discardLogger)
@@ -581,6 +621,24 @@ func TestValidateRulesYAMLMissingGroups(t *testing.T) {
 func TestValidateRulesYAMLInvalidYAML(t *testing.T) {
 	if err := ValidateRulesYAML(":::bad yaml"); err == nil {
 		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestValidateRulesYAMLGroupsNotList(t *testing.T) {
+	if err := ValidateRulesYAML("groups: not-a-list"); err == nil {
+		t.Fatal("expected error when groups is not a list")
+	}
+}
+
+func TestValidateRulesYAMLGroupMissingName(t *testing.T) {
+	if err := ValidateRulesYAML("groups:\n- rules:\n  - alert: A\n    expr: up"); err == nil {
+		t.Fatal("expected error when group missing name")
+	}
+}
+
+func TestValidateRulesYAMLGroupNotMap(t *testing.T) {
+	if err := ValidateRulesYAML("groups:\n- just-a-string"); err == nil {
+		t.Fatal("expected error when group is not a map")
 	}
 }
 
@@ -1125,5 +1183,276 @@ func TestReviewInvalidDashboardRejectedByDeploy(t *testing.T) {
 	err := New(fakeClient(), config.Config{}, discardLogger).DeployDashboard(context.Background(), DashboardOpts{Name: "bad-dashboard", JSON: "not json"})
 	if err == nil {
 		t.Fatal("DeployDashboard accepted invalid JSON")
+	}
+}
+
+func TestRemoveCustomRuleGroupOnlyRemovesTarget(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	rules := "groups:\n- name: keep-this\n  rules:\n  - alert: A\n    expr: up\n- name: remove-this\n  rules:\n  - alert: B\n    expr: down"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: rules}); err != nil {
+		t.Fatalf("DeployCustomRules: %v", err)
+	}
+
+	if err := mgr.RemoveCustomRuleGroup(context.Background(), "remove-this"); err != nil {
+		t.Fatalf("RemoveCustomRuleGroup: %v", err)
+	}
+
+	cm, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err != nil {
+		t.Fatalf("ConfigMap missing after group removal: %v", err)
+	}
+	data := cm.Object["data"].(map[string]interface{})
+	rulesYAML := data["custom_rules.yaml"].(string)
+	if !strings.Contains(rulesYAML, "keep-this") {
+		t.Error("expected keep-this group to be preserved")
+	}
+	if strings.Contains(rulesYAML, "remove-this") {
+		t.Error("expected remove-this group to be removed")
+	}
+}
+
+func TestRemoveCustomRuleGroupDeletesCMWhenEmpty(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	rules := "groups:\n- name: only-group\n  rules:\n  - alert: A\n    expr: up"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: rules}); err != nil {
+		t.Fatalf("DeployCustomRules: %v", err)
+	}
+
+	if err := mgr.RemoveCustomRuleGroup(context.Background(), "only-group"); err != nil {
+		t.Fatalf("RemoveCustomRuleGroup: %v", err)
+	}
+
+	_, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err == nil {
+		t.Error("expected ConfigMap to be deleted when last group removed")
+	}
+}
+
+func TestRemoveCustomRuleGroupNotFoundIsNoop(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	if err := mgr.RemoveCustomRuleGroup(context.Background(), "nonexistent"); err != nil {
+		t.Fatalf("RemoveCustomRuleGroup on nonexistent CM should be a no-op: %v", err)
+	}
+}
+
+func TestDeployCustomRulesMergesGroups(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	first := "groups:\n- name: alpha\n  rules:\n  - alert: A\n    expr: up"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: first}); err != nil {
+		t.Fatalf("first deploy: %v", err)
+	}
+
+	second := "groups:\n- name: beta\n  rules:\n  - alert: B\n    expr: down"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: second}); err != nil {
+		t.Fatalf("second deploy: %v", err)
+	}
+
+	cm, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err != nil {
+		t.Fatalf("get CM: %v", err)
+	}
+	data := cm.Object["data"].(map[string]interface{})
+	rulesYAML := data["custom_rules.yaml"].(string)
+	if !strings.Contains(rulesYAML, "alpha") {
+		t.Error("expected alpha group to be preserved after merge")
+	}
+	if !strings.Contains(rulesYAML, "beta") {
+		t.Error("expected beta group to be present after merge")
+	}
+}
+
+func TestRemoveCustomRuleGroupWithEmptyData(t *testing.T) {
+	c := fakeClient()
+	cm := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      CustomRulesCM,
+			"namespace": Namespace,
+		},
+		"data": map[string]interface{}{},
+	}}
+	if _, err := c.Create(context.Background(), client.GVRConfigMap, Namespace, cm); err != nil {
+		t.Fatalf("seed CM: %v", err)
+	}
+	mgr := New(c, config.Config{}, discardLogger)
+	if err := mgr.RemoveCustomRuleGroup(context.Background(), "anything"); err != nil {
+		t.Fatalf("RemoveCustomRuleGroup on empty data: %v", err)
+	}
+}
+
+func TestRemoveCustomRuleGroupWithEmptyRulesYAML(t *testing.T) {
+	c := fakeClient()
+	cm := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      CustomRulesCM,
+			"namespace": Namespace,
+		},
+		"data": map[string]interface{}{
+			"custom_rules.yaml": "",
+		},
+	}}
+	if _, err := c.Create(context.Background(), client.GVRConfigMap, Namespace, cm); err != nil {
+		t.Fatalf("seed CM: %v", err)
+	}
+	mgr := New(c, config.Config{}, discardLogger)
+	if err := mgr.RemoveCustomRuleGroup(context.Background(), "anything"); err != nil {
+		t.Fatalf("RemoveCustomRuleGroup on empty YAML: %v", err)
+	}
+}
+
+func TestDeployCustomRulesMergesWithEmptyExistingData(t *testing.T) {
+	c := fakeClient()
+	cm := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      CustomRulesCM,
+			"namespace": Namespace,
+		},
+		"data": map[string]interface{}{},
+	}}
+	if _, err := c.Create(context.Background(), client.GVRConfigMap, Namespace, cm); err != nil {
+		t.Fatalf("seed CM: %v", err)
+	}
+	mgr := New(c, config.Config{}, discardLogger)
+	rules := "groups:\n- name: new-group\n  rules:\n  - alert: A\n    expr: up"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: rules}); err != nil {
+		t.Fatalf("DeployCustomRules: %v", err)
+	}
+	result, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err != nil {
+		t.Fatalf("get CM: %v", err)
+	}
+	data := result.Object["data"].(map[string]interface{})
+	rulesYAML := data["custom_rules.yaml"].(string)
+	if !strings.Contains(rulesYAML, "new-group") {
+		t.Error("expected new-group to be present")
+	}
+}
+
+func TestDeployCustomRulesMergesWithEmptyRulesYAML(t *testing.T) {
+	c := fakeClient()
+	cm := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      CustomRulesCM,
+			"namespace": Namespace,
+		},
+		"data": map[string]interface{}{
+			"custom_rules.yaml": "",
+		},
+	}}
+	if _, err := c.Create(context.Background(), client.GVRConfigMap, Namespace, cm); err != nil {
+		t.Fatalf("seed CM: %v", err)
+	}
+	mgr := New(c, config.Config{}, discardLogger)
+	rules := "groups:\n- name: new-group\n  rules:\n  - alert: A\n    expr: up"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: rules}); err != nil {
+		t.Fatalf("DeployCustomRules: %v", err)
+	}
+}
+
+func TestDeployCustomRulesMergesWithCorruptExisting(t *testing.T) {
+	c := fakeClient()
+	cm := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      CustomRulesCM,
+			"namespace": Namespace,
+		},
+		"data": map[string]interface{}{
+			"custom_rules.yaml": "not: [valid: yaml: {{",
+		},
+	}}
+	if _, err := c.Create(context.Background(), client.GVRConfigMap, Namespace, cm); err != nil {
+		t.Fatalf("seed CM: %v", err)
+	}
+	mgr := New(c, config.Config{}, discardLogger)
+	rules := "groups:\n- name: fresh\n  rules:\n  - alert: A\n    expr: up"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: rules}); err != nil {
+		t.Fatalf("DeployCustomRules with corrupt existing should succeed: %v", err)
+	}
+}
+
+func TestRemoveCustomRuleGroupWithCorruptYAML(t *testing.T) {
+	c := fakeClient()
+	cm := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      CustomRulesCM,
+			"namespace": Namespace,
+		},
+		"data": map[string]interface{}{
+			"custom_rules.yaml": "not: [valid: yaml: {{",
+		},
+	}}
+	if _, err := c.Create(context.Background(), client.GVRConfigMap, Namespace, cm); err != nil {
+		t.Fatalf("seed CM: %v", err)
+	}
+	mgr := New(c, config.Config{}, discardLogger)
+	err := mgr.RemoveCustomRuleGroup(context.Background(), "anything")
+	if err == nil {
+		t.Fatal("RemoveCustomRuleGroup with corrupt YAML should return error")
+	}
+}
+
+func TestRemoveCustomRuleGroupWithNilData(t *testing.T) {
+	c := fakeClient()
+	cm := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]interface{}{
+			"name":      CustomRulesCM,
+			"namespace": Namespace,
+		},
+	}}
+	if _, err := c.Create(context.Background(), client.GVRConfigMap, Namespace, cm); err != nil {
+		t.Fatalf("seed CM: %v", err)
+	}
+	mgr := New(c, config.Config{}, discardLogger)
+	if err := mgr.RemoveCustomRuleGroup(context.Background(), "anything"); err != nil {
+		t.Fatalf("RemoveCustomRuleGroup with nil data should be noop: %v", err)
+	}
+}
+
+func TestDeployCustomRulesReplacesExistingGroup(t *testing.T) {
+	c := fakeClient()
+	mgr := New(c, config.Config{}, discardLogger)
+
+	first := "groups:\n- name: cost\n  rules:\n  - alert: OldRule\n    expr: old"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: first}); err != nil {
+		t.Fatalf("first deploy: %v", err)
+	}
+
+	second := "groups:\n- name: cost\n  rules:\n  - alert: NewRule\n    expr: new"
+	if err := mgr.DeployCustomRules(context.Background(), CustomRuleOpts{Rules: second}); err != nil {
+		t.Fatalf("second deploy: %v", err)
+	}
+
+	cm, err := c.Get(context.Background(), client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err != nil {
+		t.Fatalf("get CM: %v", err)
+	}
+	data := cm.Object["data"].(map[string]interface{})
+	rulesYAML := data["custom_rules.yaml"].(string)
+	if strings.Contains(rulesYAML, "OldRule") {
+		t.Error("expected OldRule to be replaced")
+	}
+	if !strings.Contains(rulesYAML, "NewRule") {
+		t.Error("expected NewRule to be present")
 	}
 }

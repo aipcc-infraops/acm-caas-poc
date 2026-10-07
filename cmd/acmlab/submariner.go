@@ -30,7 +30,13 @@ func submarinerCmd() *cobra.Command {
 }
 
 func submarinerEnableCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		wait       bool
+		timeout    time.Duration
+		globalnet  bool
+	)
+
+	cmd := &cobra.Command{
 		Use:   "enable <cluster-set>",
 		Short: "Enable Submariner connectivity for a ClusterSet",
 		Args:  cobra.ExactArgs(1),
@@ -40,14 +46,44 @@ func submarinerEnableCmd() *cobra.Command {
 				return err
 			}
 			mgr := submariner.New(c, cfg, logger)
-			fmt.Printf("Enabling Submariner for ClusterSet %s...\n", args[0])
-			if err := mgr.Enable(context.Background(), args[0]); err != nil {
+
+			opts := submariner.EnableOpts{Globalnet: globalnet}
+			if globalnet {
+				fmt.Printf("Enabling Submariner with Globalnet for ClusterSet %s...\n", args[0])
+			} else {
+				fmt.Printf("Enabling Submariner for ClusterSet %s...\n", args[0])
+			}
+			if err := mgr.Enable(context.Background(), args[0], opts); err != nil {
 				return err
 			}
 			fmt.Println("Submariner enabled. ManagedClusterAddOn + SubmarinerConfig created for all clusters in set.")
+
+			if !wait {
+				return nil
+			}
+
+			fmt.Printf("Waiting up to %s for Submariner readiness...\n", timeout)
+			status, err := mgr.WaitForReady(context.Background(), args[0], timeout)
+			if err != nil {
+				if status != nil {
+					for _, cs := range status.Clusters {
+						state := "ready"
+						if !cs.GatewayReady || !cs.AgentReady || cs.ConnectionDegraded || cs.Connections == 0 {
+							state = "not ready"
+						}
+						fmt.Printf("  %s: %s\n", cs.Name, state)
+					}
+				}
+				return err
+			}
+			fmt.Println("Submariner is connected and ready.")
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&wait, "wait", false, "Wait for Submariner to become fully connected")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Timeout when waiting for readiness")
+	cmd.Flags().BoolVar(&globalnet, "globalnet", false, "Enable Globalnet for overlapping Pod/Service CIDRs")
+	return cmd
 }
 
 func submarinerDisableCmd() *cobra.Command {

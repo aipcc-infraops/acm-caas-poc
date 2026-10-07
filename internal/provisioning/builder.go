@@ -124,14 +124,15 @@ compute:
 networking:
   networkType: OVNKubernetes
   clusterNetwork:
-  - cidr: 10.128.0.0/14
-    hostPrefix: 23
+  - cidr: %s
+    hostPrefix: %d
   serviceNetwork:
-  - 172.30.0.0/16
+  - %s
 %spullSecret: ""
 sshKey: %s
 `, opts.Name, opts.BaseDomain, platformBlock, opts.MasterReplicas, controlPlanePlatform,
-		opts.WorkerReplicas, computePlatform, credentialsMode, opts.SSHKey)
+		opts.WorkerReplicas, computePlatform, opts.ClusterNetworkCIDR, opts.ClusterNetworkHostPrefix,
+		opts.ServiceNetworkCIDR, credentialsMode, opts.SSHKey)
 }
 
 func buildClusterDeployment(opts ClusterOpts) *unstructured.Unstructured {
