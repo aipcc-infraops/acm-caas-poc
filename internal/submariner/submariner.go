@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -45,8 +46,12 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 	return &Manager{client: c, cfg: cfg, logger: logger}
 }
 
-func (m *Manager) Enable(ctx context.Context, clusterSet string) error {
-	m.logger.Info("submariner.Enable", "clusterSet", clusterSet)
+type EnableOpts struct {
+	Globalnet bool
+}
+
+func (m *Manager) Enable(ctx context.Context, clusterSet string, opts EnableOpts) error {
+	m.logger.Info("submariner.Enable", "clusterSet", clusterSet, "globalnet", opts.Globalnet)
 
 	clusters, err := m.clustersInSet(ctx, clusterSet)
 	if err != nil {
@@ -56,13 +61,17 @@ func (m *Manager) Enable(ctx context.Context, clusterSet string) error {
 		return fmt.Errorf("no clusters found in ClusterSet %q", clusterSet)
 	}
 
-	for _, name := range clusters {
+	for i, name := range clusters {
 		addOn := buildSubmarinerAddOn(name)
 		if err := m.client.CreateIfNotExists(ctx, client.GVRManagedClusterAddOn, name, addOn); err != nil {
 			return fmt.Errorf("creating submariner addon for %s: %w", name, err)
 		}
 
-		cfg := buildSubmarinerConfig(name)
+		cfgOpts := SubmarinerConfigOpts{}
+		if opts.Globalnet {
+			cfgOpts.GlobalCIDR = defaultGlobalCIDR(i)
+		}
+		cfg := buildSubmarinerConfig(name, cfgOpts)
 		if err := m.client.CreateIfNotExists(ctx, client.GVRSubmarinerConfig, name, cfg); err != nil {
 			return fmt.Errorf("creating submariner config for %s: %w", name, err)
 		}
@@ -77,6 +86,38 @@ func (m *Manager) Enable(ctx context.Context, clusterSet string) error {
 		}
 	}
 	return nil
+}
+
+func (m *Manager) WaitForReady(ctx context.Context, clusterSet string, timeout time.Duration) (*SubmarinerStatus, error) {
+	m.logger.Info("submariner.WaitForReady", "clusterSet", clusterSet, "timeout", timeout)
+	deadline := time.Now().Add(timeout)
+	var lastStatus *SubmarinerStatus
+
+	for {
+		if time.Now().After(deadline) {
+			return lastStatus, fmt.Errorf("timed out after %s waiting for Submariner readiness on %q", timeout, clusterSet)
+		}
+
+		status, err := m.Status(ctx, clusterSet)
+		if err != nil {
+			m.logger.Info("submariner.WaitForReady", "poll_error", err.Error())
+		} else {
+			lastStatus = status
+			if status.Connected {
+				return status, nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return lastStatus, ctx.Err()
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+func defaultGlobalCIDR(index int) string {
+	return fmt.Sprintf("242.%d.0.0/16", index)
 }
 
 func (m *Manager) Disable(ctx context.Context, clusterSet string) error {
