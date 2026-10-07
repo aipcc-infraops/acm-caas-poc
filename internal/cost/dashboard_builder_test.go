@@ -2,6 +2,7 @@ package cost
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -35,8 +36,11 @@ func TestCostRecordingRulesYAML(t *testing.T) {
 		"acmlab_cost:cluster_cpu_cores:sum",
 		"acmlab_cost:cluster_memory_gib:sum",
 		"acmlab_cost:cluster_worker_nodes:sum",
+		"acmlab_cost:node_hourly_price",
+		"acmlab_cost:cluster_hourly_rate:sum",
 		"acmlab_cost:cluster_daily_estimate:sum",
 		"acmlab_cost:cluster_monthly_estimate:sum",
+		"acmlab_cost:cluster_monthly_actual:sum",
 	}
 	for _, rec := range expectedRecords {
 		if !strings.Contains(rules, rec) {
@@ -45,6 +49,29 @@ func TestCostRecordingRulesYAML(t *testing.T) {
 	}
 	if !strings.Contains(rules, "0.048") {
 		t.Error("rules YAML should contain the fallback price per CPU hour")
+	}
+}
+
+func TestCostRecordingRulesContainInstancePricing(t *testing.T) {
+	rules := CostRecordingRulesYAML(0.048)
+	for instanceType, pricing := range DefaultPricing {
+		if !strings.Contains(rules, instanceType) {
+			t.Errorf("rules YAML missing instance type %q", instanceType)
+		}
+		priceStr := fmt.Sprintf("%.3f", pricing.PricePerHr)
+		if !strings.Contains(rules, priceStr) {
+			t.Errorf("rules YAML missing price %s for %s", priceStr, instanceType)
+		}
+	}
+}
+
+func TestCostRecordingRulesActualUsesAvgOverTime(t *testing.T) {
+	rules := CostRecordingRulesYAML(0.048)
+	if !strings.Contains(rules, "avg_over_time") {
+		t.Error("actual cost rule should use avg_over_time for real usage tracking")
+	}
+	if !strings.Contains(rules, "[30d]") {
+		t.Error("actual cost rule should look back 30 days")
 	}
 }
 
@@ -107,8 +134,8 @@ func TestCostDashboardPanelsContainCostMetrics(t *testing.T) {
 	dashJSON := CostDashboardJSON()
 	requiredExprs := []string{
 		"acmlab_cost:cluster_monthly_estimate:sum",
+		"acmlab_cost:cluster_monthly_actual:sum",
 		"acmlab_cost:cluster_daily_estimate:sum",
-		"acmlab_cost:cluster_worker_nodes:sum",
 		"acmlab_cost:cluster_cpu_cores:sum",
 		"acmlab_cost:cluster_memory_gib:sum",
 	}

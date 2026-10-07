@@ -3,6 +3,7 @@ package cost
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -21,6 +22,10 @@ func CostMetricsAllowlist() []string {
 }
 
 func CostRecordingRulesYAML(fallbackPricePerCPUHr float64) string {
+	return costRecordingRules(DefaultPricing, fallbackPricePerCPUHr)
+}
+
+func costRecordingRules(pricing map[string]InstancePricing, fallbackPricePerCPUHr float64) string {
 	var sb strings.Builder
 	sb.WriteString("groups:\n")
 	sb.WriteString(fmt.Sprintf("- name: %s\n", CostRulesGroup))
@@ -49,15 +54,63 @@ func CostRecordingRulesYAML(fallbackPricePerCPUHr float64) string {
 	sb.WriteString("        kube_node_labels{label_node_role_kubernetes_io_worker=\"\"}\n")
 	sb.WriteString("      )\n")
 
+	sb.WriteString("  - record: acmlab_cost:node_hourly_price\n")
+	sb.WriteString("    expr: |\n")
+	sb.WriteString(instancePricingExpr(pricing, fallbackPricePerCPUHr))
+
+	sb.WriteString("  - record: acmlab_cost:cluster_hourly_rate:sum\n")
+	sb.WriteString("    expr: |\n")
+	sb.WriteString("      sum by (cluster) (acmlab_cost:node_hourly_price)\n")
+
 	sb.WriteString("  - record: acmlab_cost:cluster_daily_estimate:sum\n")
 	sb.WriteString("    expr: |\n")
-	sb.WriteString(fmt.Sprintf("      acmlab_cost:cluster_cpu_cores:sum * %.3f * 24\n", fallbackPricePerCPUHr))
+	sb.WriteString("      acmlab_cost:cluster_hourly_rate:sum * 24\n")
 
 	sb.WriteString("  - record: acmlab_cost:cluster_monthly_estimate:sum\n")
 	sb.WriteString("    expr: |\n")
 	sb.WriteString("      acmlab_cost:cluster_daily_estimate:sum * 30\n")
 
+	sb.WriteString("  - record: acmlab_cost:cluster_monthly_actual:sum\n")
+	sb.WriteString("    expr: |\n")
+	sb.WriteString("      avg_over_time(acmlab_cost:cluster_hourly_rate:sum[30d]) * 24 * 30\n")
+
 	return sb.String()
+}
+
+func instancePricingExpr(pricing map[string]InstancePricing, fallback float64) string {
+	var sb strings.Builder
+
+	types := sortedPricingKeys(pricing)
+
+	for i, t := range types {
+		p := pricing[t]
+		if i == 0 {
+			sb.WriteString(fmt.Sprintf("      (\n"))
+		} else {
+			sb.WriteString(fmt.Sprintf("      or\n      (\n"))
+		}
+		sb.WriteString(fmt.Sprintf("        kube_node_labels{label_node_kubernetes_io_instance_type=\"%s\",label_node_role_kubernetes_io_worker=\"\"} * 0\n", t))
+		sb.WriteString(fmt.Sprintf("        + %.3f\n", p.PricePerHr))
+		sb.WriteString("      )\n")
+	}
+
+	sb.WriteString("      or\n")
+	sb.WriteString("      (\n")
+	sb.WriteString("        kube_node_labels{label_node_role_kubernetes_io_worker=\"\"} * 0\n")
+	sb.WriteString(fmt.Sprintf("        + on(node,cluster) group_left()\n"))
+	sb.WriteString(fmt.Sprintf("        kube_node_status_capacity{resource=\"cpu\",unit=\"core\"} * %.3f\n", fallback))
+	sb.WriteString("      )\n")
+
+	return sb.String()
+}
+
+func sortedPricingKeys(pricing map[string]InstancePricing) []string {
+	keys := make([]string, 0, len(pricing))
+	for k := range pricing {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func CostDashboardJSON() string {
@@ -88,20 +141,21 @@ func CostDashboardJSON() string {
 
 func costDashboardPanels() []interface{} {
 	return []interface{}{
-		statPanel(1, "Fleet Monthly Estimate", 0, 0, 6, 4,
+		statPanel(1, "Monthly Estimate (if always on)", 0, 0, 6, 4,
 			"sum(acmlab_cost:cluster_monthly_estimate:sum)",
 			"$", "currencyUSD"),
-		statPanel(2, "Fleet Daily Estimate", 6, 0, 6, 4,
-			"sum(acmlab_cost:cluster_daily_estimate:sum)",
+		statPanel(2, "Monthly Actual (30d)", 6, 0, 6, 4,
+			"sum(acmlab_cost:cluster_monthly_actual:sum)",
 			"$", "currencyUSD"),
-		statPanel(3, "Total Worker Nodes", 12, 0, 6, 4,
-			"sum(acmlab_cost:cluster_worker_nodes:sum)",
-			"", "short"),
+		statPanel(3, "Saved by Hibernation", 12, 0, 6, 4,
+			"sum(acmlab_cost:cluster_monthly_estimate:sum) - sum(acmlab_cost:cluster_monthly_actual:sum)",
+			"$", "currencyUSD"),
 		statPanel(4, "Total CPU Cores", 18, 0, 6, 4,
 			"sum(acmlab_cost:cluster_cpu_cores:sum)",
 			"", "short"),
 		tablePanel(5, "Cost per Cluster", 0, 4, 24, 8, []tableQuery{
-			{expr: "acmlab_cost:cluster_monthly_estimate:sum", legend: "Monthly $"},
+			{expr: "acmlab_cost:cluster_monthly_estimate:sum", legend: "Estimate $/mo"},
+			{expr: "acmlab_cost:cluster_monthly_actual:sum", legend: "Actual $/mo"},
 			{expr: "acmlab_cost:cluster_daily_estimate:sum", legend: "Daily $"},
 			{expr: "acmlab_cost:cluster_worker_nodes:sum", legend: "Nodes"},
 			{expr: "acmlab_cost:cluster_cpu_cores:sum", legend: "CPU Cores"},
@@ -109,8 +163,8 @@ func costDashboardPanels() []interface{} {
 		}),
 		timeseriesPanel(6, "Daily Cost Trend per Cluster", 0, 12, 24, 8,
 			"acmlab_cost:cluster_daily_estimate:sum", "{{cluster}}"),
-		barGaugePanel(7, "Monthly Estimate by Cluster", 0, 20, 24, 6,
-			"acmlab_cost:cluster_monthly_estimate:sum"),
+		barGaugePanel(7, "Estimate vs Actual by Cluster", 0, 20, 24, 6,
+			"acmlab_cost:cluster_monthly_actual:sum"),
 	}
 }
 
