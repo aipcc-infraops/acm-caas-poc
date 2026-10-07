@@ -18,6 +18,7 @@ func CostMetricsAllowlist() []string {
 		"kube_node_status_capacity",
 		"kube_node_info",
 		"kube_node_labels",
+		"kube_node_role",
 	}
 }
 
@@ -37,7 +38,7 @@ func costRecordingRules(pricing map[string]InstancePricing, fallbackPricePerCPUH
 	sb.WriteString("      sum by (cluster) (\n")
 	sb.WriteString("        kube_node_status_capacity{resource=\"cpu\",unit=\"core\"}\n")
 	sb.WriteString("        * on(node,cluster) group_left()\n")
-	sb.WriteString("        kube_node_labels{label_node_role_kubernetes_io_worker=\"\"}\n")
+	sb.WriteString("        kube_node_role{role=\"worker\"}\n")
 	sb.WriteString("      )\n")
 
 	sb.WriteString("  - record: acmlab_cost:cluster_memory_gib:sum\n")
@@ -45,13 +46,13 @@ func costRecordingRules(pricing map[string]InstancePricing, fallbackPricePerCPUH
 	sb.WriteString("      sum by (cluster) (\n")
 	sb.WriteString("        kube_node_status_capacity{resource=\"memory\",unit=\"byte\"}\n")
 	sb.WriteString("        * on(node,cluster) group_left()\n")
-	sb.WriteString("        kube_node_labels{label_node_role_kubernetes_io_worker=\"\"}\n")
+	sb.WriteString("        kube_node_role{role=\"worker\"}\n")
 	sb.WriteString("      ) / 1073741824\n")
 
 	sb.WriteString("  - record: acmlab_cost:cluster_worker_nodes:sum\n")
 	sb.WriteString("    expr: |\n")
 	sb.WriteString("      count by (cluster) (\n")
-	sb.WriteString("        kube_node_labels{label_node_role_kubernetes_io_worker=\"\"}\n")
+	sb.WriteString("        kube_node_role{role=\"worker\"}\n")
 	sb.WriteString("      )\n")
 
 	sb.WriteString("  - record: acmlab_cost:node_hourly_price\n")
@@ -89,15 +90,17 @@ func instancePricingExpr(pricing map[string]InstancePricing, fallback float64) s
 		} else {
 			sb.WriteString(fmt.Sprintf("      or\n      (\n"))
 		}
-		sb.WriteString(fmt.Sprintf("        kube_node_labels{label_node_kubernetes_io_instance_type=\"%s\",label_node_role_kubernetes_io_worker=\"\"} * 0\n", t))
+		sb.WriteString(fmt.Sprintf("        kube_node_labels{label_node_kubernetes_io_instance_type=\"%s\"}\n", t))
+		sb.WriteString("        * on(node,cluster) group_left()\n")
+		sb.WriteString("        kube_node_role{role=\"worker\"} * 0\n")
 		sb.WriteString(fmt.Sprintf("        + %.3f\n", p.PricePerHr))
 		sb.WriteString("      )\n")
 	}
 
 	sb.WriteString("      or\n")
 	sb.WriteString("      (\n")
-	sb.WriteString("        kube_node_labels{label_node_role_kubernetes_io_worker=\"\"} * 0\n")
-	sb.WriteString(fmt.Sprintf("        + on(node,cluster) group_left()\n"))
+	sb.WriteString("        kube_node_role{role=\"worker\"} * 0\n")
+	sb.WriteString("        + on(node,cluster) group_left()\n")
 	sb.WriteString(fmt.Sprintf("        kube_node_status_capacity{resource=\"cpu\",unit=\"core\"} * %.3f\n", fallback))
 	sb.WriteString("      )\n")
 
@@ -144,10 +147,10 @@ func costDashboardPanels() []interface{} {
 		statPanel(1, "Monthly Estimate (if always on)", 0, 0, 6, 4,
 			"sum(acmlab_cost:cluster_monthly_estimate:sum)",
 			"$", "currencyUSD"),
-		statPanel(2, "Monthly Actual (30d)", 6, 0, 6, 4,
+		statPanel(2, "Monthly Avg Rate (30d)", 6, 0, 6, 4,
 			"sum(acmlab_cost:cluster_monthly_actual:sum)",
 			"$", "currencyUSD"),
-		statPanel(3, "Saved by Hibernation", 12, 0, 6, 4,
+		statPanel(3, "Estimate vs Avg Rate", 12, 0, 6, 4,
 			"sum(acmlab_cost:cluster_monthly_estimate:sum) - sum(acmlab_cost:cluster_monthly_actual:sum)",
 			"$", "currencyUSD"),
 		statPanel(4, "Total CPU Cores", 18, 0, 6, 4,

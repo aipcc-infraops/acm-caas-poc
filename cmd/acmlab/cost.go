@@ -367,7 +367,7 @@ func costRemoveDashboardCmd() *cobra.Command {
 			if err := obsMgr.RemoveDashboard(context.Background(), cost.DashboardName); err != nil {
 				return fmt.Errorf("removing dashboard: %w", err)
 			}
-			if err := obsMgr.RemoveCustomRules(context.Background()); err != nil {
+			if err := obsMgr.RemoveCustomRuleGroup(context.Background(), cost.CostRulesGroup); err != nil {
 				return fmt.Errorf("removing recording rules: %w", err)
 			}
 			fmt.Println("Cost tracking dashboard and recording rules removed.")

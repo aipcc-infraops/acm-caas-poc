@@ -759,11 +759,28 @@ So that the CaaS platform can charge teams for actual usage
 **Then** I get a list of idle tenants with their last activity timestamp  
 **And** these tenants are flagged as candidates for decommissioning (links to UC-08)
 
+### Scenario: Deploy Grafana cost dashboard with accurate worker filtering
+
+**Given** ACM multicluster observability is installed on the hub
+**When** I run "acmlab cost dashboard"
+**Then** custom metrics allowlist includes kube_node_role for worker identification
+**And** recording rules use `kube_node_role{role="worker"}` to filter only worker nodes
+**And** known instance types are priced individually with a configurable fallback rate
+**And** a Grafana dashboard "acmlab-cost-tracking" is deployed
+
+### Scenario: Remove cost dashboard without affecting other custom rules
+
+**Given** other custom Thanos rule groups exist alongside cost rules
+**When** I run "acmlab cost remove-dashboard"
+**Then** only the "acmlab-cost-estimation" rule group is removed
+**And** other custom rule groups are preserved
+
 ### Data sources
 
 - Thanos/Prometheus via MCO (CPU, memory metrics over time)
 - ManagedClusterInfo (node capacity, instance types for cost calculation)
 - ResourceQuota per tenant (allocated vs actual usage)
+- kube_node_role metric (worker node identification for cost calculation)
 
 ### ComputeRequest controller equivalent
 
