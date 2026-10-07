@@ -43,4 +43,17 @@ echo "   Node count:    3"
 echo "   Monthly est:   3 * \$0.192 * 730 = \$420.48"
 
 echo ""
+echo "7. Check Prometheus recording rules (if observability is enabled)"
+echo "   Worker filtering uses kube_node_role{role=\"worker\"} (not node role labels)"
+oc get configmap thanos-ruler-custom-rules \
+  -n open-cluster-management-observability \
+  -o jsonpath='{.data.custom_rules\.yaml}' 2>/dev/null || echo "No custom rules deployed"
+
+echo ""
+echo "8. Verify cost metrics allowlist includes kube_node_role"
+oc get configmap observability-metrics-allowlist \
+  -n open-cluster-management-observability \
+  -o yaml 2>/dev/null | grep "kube_node_role" || echo "kube_node_role not in allowlist"
+
+echo ""
 echo "=== Done ==="

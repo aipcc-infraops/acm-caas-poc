@@ -27,6 +27,7 @@ Feature: Cost tracking and chargeback via node metadata estimation (UC-11)
     Given ACM multicluster observability is installed on the hub
     When I run "acmlab cost dashboard"
     Then a custom metrics allowlist is configured for cost-related metrics
+    And recording rules use kube_node_role to filter worker nodes only
     And Prometheus recording rules compute per-cluster daily and monthly estimates
     And a Grafana dashboard "acmlab-cost-tracking" is deployed as a ConfigMap
     And the Grafana URL is printed for direct access
@@ -35,7 +36,8 @@ Feature: Cost tracking and chargeback via node metadata estimation (UC-11)
     Given the cost tracking dashboard has been deployed
     When I run "acmlab cost remove-dashboard"
     Then the Grafana dashboard ConfigMap is removed
-    And the custom recording rules are removed
+    And only the acmlab cost recording rule group is removed
+    And other custom rule groups are preserved
 
   Scenario: Identify clusters with no cost center
     Given a ManagedCluster "spoke-test" exists without a cost center label

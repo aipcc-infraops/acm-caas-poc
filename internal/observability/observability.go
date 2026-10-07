@@ -199,17 +199,130 @@ func (m *Manager) ConfigureOBCStorage(ctx context.Context, opts StorageOpts) err
 }
 
 func (m *Manager) DeployCustomRules(ctx context.Context, opts CustomRuleOpts) error {
-	m.logger.Info("observability.DeployCustomRules")
+	m.logger.Info("observability.DeployCustomRules", "name", opts.Name)
 	if err := ValidateRulesYAML(opts.Rules); err != nil {
 		return fmt.Errorf("rules validation: %w", err)
 	}
-	cm := buildCustomRulesConfigMap(Namespace, opts.Rules)
+	merged, err := m.mergeRuleGroups(ctx, opts.Rules)
+	if err != nil {
+		return fmt.Errorf("merging rule groups: %w", err)
+	}
+	cm := buildCustomRulesConfigMap(Namespace, merged)
 	return m.createOrUpdate(ctx, client.GVRConfigMap, Namespace, cm)
 }
 
 func (m *Manager) RemoveCustomRules(ctx context.Context) error {
 	m.logger.Info("observability.RemoveCustomRules")
 	return m.client.DeleteIfExists(ctx, client.GVRConfigMap, Namespace, CustomRulesCM)
+}
+
+func (m *Manager) RemoveCustomRuleGroup(ctx context.Context, groupName string) error {
+	m.logger.Info("observability.RemoveCustomRuleGroup", "group", groupName)
+	existing, err := m.client.Get(ctx, client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	data, _ := existing.Object["data"].(map[string]interface{})
+	if data == nil {
+		return nil
+	}
+	rulesStr, _ := data["custom_rules.yaml"].(string)
+	if rulesStr == "" {
+		return nil
+	}
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(rulesStr), &parsed); err != nil {
+		return fmt.Errorf("parsing existing rules: %w", err)
+	}
+	groups, _ := parsed["groups"].([]interface{})
+	var kept []interface{}
+	for _, g := range groups {
+		gm, ok := g.(map[string]interface{})
+		if !ok {
+			kept = append(kept, g)
+			continue
+		}
+		name, _ := gm["name"].(string)
+		if name != groupName {
+			kept = append(kept, g)
+		}
+	}
+	if len(kept) == 0 {
+		return m.client.DeleteIfExists(ctx, client.GVRConfigMap, Namespace, CustomRulesCM)
+	}
+	parsed["groups"] = kept
+	out, err := yaml.Marshal(parsed)
+	if err != nil {
+		return fmt.Errorf("marshalling rules: %w", err)
+	}
+	data["custom_rules.yaml"] = string(out)
+	existing.Object["data"] = data
+	_, err = m.client.Update(ctx, client.GVRConfigMap, Namespace, existing)
+	return err
+}
+
+func (m *Manager) mergeRuleGroups(ctx context.Context, newRulesYAML string) (string, error) {
+	existing, err := m.client.Get(ctx, client.GVRConfigMap, Namespace, CustomRulesCM)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return newRulesYAML, nil
+		}
+		return "", err
+	}
+	data, _ := existing.Object["data"].(map[string]interface{})
+	if data == nil {
+		return newRulesYAML, nil
+	}
+	existingStr, _ := data["custom_rules.yaml"].(string)
+	if existingStr == "" {
+		return newRulesYAML, nil
+	}
+
+	var existingParsed, newParsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(existingStr), &existingParsed); err != nil {
+		return newRulesYAML, nil
+	}
+	if err := yaml.Unmarshal([]byte(newRulesYAML), &newParsed); err != nil {
+		return "", fmt.Errorf("parsing new rules: %w", err)
+	}
+
+	existingGroups, _ := existingParsed["groups"].([]interface{})
+	newGroups, _ := newParsed["groups"].([]interface{})
+
+	newNames := map[string]interface{}{}
+	for _, g := range newGroups {
+		gm, ok := g.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := gm["name"].(string)
+		newNames[name] = g
+	}
+
+	var merged []interface{}
+	for _, g := range existingGroups {
+		gm, ok := g.(map[string]interface{})
+		if !ok {
+			merged = append(merged, g)
+			continue
+		}
+		name, _ := gm["name"].(string)
+		if _, replaced := newNames[name]; replaced {
+			continue
+		}
+		merged = append(merged, g)
+	}
+	merged = append(merged, newGroups...)
+
+	existingParsed["groups"] = merged
+	out, err := yaml.Marshal(existingParsed)
+	if err != nil {
+		return "", fmt.Errorf("marshalling merged rules: %w", err)
+	}
+	return string(out), nil
 }
 
 func (m *Manager) DeployDashboard(ctx context.Context, opts DashboardOpts) error {
