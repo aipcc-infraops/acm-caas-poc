@@ -2,7 +2,6 @@ package idp
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"math/big"
 	"sort"
@@ -47,11 +46,11 @@ func buildSecretManifest(opts IdPOpts) map[string]interface{} {
 
 	switch opts.Type {
 	case IdPGitHub, IdPGoogle, IdPOIDC:
-		secretData["clientSecret"] = base64.StdEncoding.EncodeToString([]byte(opts.ClientSecret))
+		secretData["clientSecret"] = opts.ClientSecret
 	case IdPHTPasswd:
-		secretData["htpasswd"] = base64.StdEncoding.EncodeToString([]byte(buildHTPasswdData(opts.Users)))
+		secretData["htpasswd"] = buildHTPasswdData(opts.Users)
 	case IdPLDAP:
-		secretData["bindPassword"] = base64.StdEncoding.EncodeToString([]byte(opts.BindPassword))
+		secretData["bindPassword"] = opts.BindPassword
 	}
 
 	return map[string]interface{}{
@@ -61,8 +60,8 @@ func buildSecretManifest(opts IdPOpts) map[string]interface{} {
 			"name":      secretName(opts.Name),
 			"namespace": "openshift-config",
 		},
-		"type": "Opaque",
-		"data": secretData,
+		"type":       "Opaque",
+		"stringData": secretData,
 	}
 }
 
@@ -240,5 +239,5 @@ func buildHTPasswdData(users map[string]string) string {
 		}
 		lines = append(lines, fmt.Sprintf("%s:%s", k, string(hash)))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n") + "\n"
 }

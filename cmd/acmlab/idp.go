@@ -86,6 +86,8 @@ func idpConfigureCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("IdP %s (%s) configured on cluster %s\n", args[0], idpType, cluster)
+			fmt.Println("Note: the authentication operator will roll out new oauth-server pods.")
+			fmt.Println("Wait ~60 seconds before attempting login.")
 			return nil
 		},
 	}
@@ -122,6 +124,15 @@ func idpRemoveCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("IdP %s removed from cluster %s\n", args[0], cluster)
+			remaining, _ := mgr.List(context.Background(), cluster)
+			if len(remaining) == 0 {
+				if err := mgr.CleanupRBAC(context.Background(), cluster); err != nil {
+					fmt.Printf("Warning: could not clean up RBAC ManifestWork: %v\n", err)
+				} else {
+					fmt.Println("No remaining IdPs — RBAC ManifestWork cleaned up.")
+				}
+			}
+			fmt.Println("Note: the authentication operator will roll out changes. Wait ~60 seconds.")
 			return nil
 		},
 	}
@@ -244,7 +255,8 @@ func idpConfigureUniqueCmd() *cobra.Command {
 			fmt.Printf("Unique emergency IdP deployed to cluster %s\n", cluster)
 			fmt.Printf("  User:     %s\n", adminUser)
 			fmt.Printf("  Password: %s\n", password)
-			fmt.Println("  (save this password — it will not be shown again)")
+			fmt.Println("  SENSITIVE: save this password securely — it will not be shown again.")
+			fmt.Println("Note: wait ~60 seconds for the authentication rollout before login.")
 			return nil
 		},
 	}

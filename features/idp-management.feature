@@ -11,7 +11,8 @@ Feature: Identity Provider management across clusters via ManifestWork
     When I configure IdP "corp-github" on cluster "spoke1" with type "github"
     Then a ManifestWork "idp-corp-github" exists in namespace "spoke1"
     And it contains an OAuth CR with a GitHub identity provider
-    And it contains a Secret in "openshift-config" with the client credentials
+    And it contains a Secret in "openshift-config" using stringData for credentials
+    And an RBAC ManifestWork "idp-oauth-rbac" is created for klusterlet permissions
 
   Scenario: Configure Google Identity Provider
     When I configure IdP "corp-google" on cluster "spoke1" with type "google"
@@ -19,7 +20,9 @@ Feature: Identity Provider management across clusters via ManifestWork
 
   Scenario: Configure htpasswd Identity Provider
     When I configure IdP "local-users" on cluster "spoke1" with type "htpasswd"
-    Then the Secret contains htpasswd-formatted user entries
+    Then the Secret uses stringData with plain-text values
+    And the htpasswd content ends with a trailing newline
+    And a rollout wait message advises ~60 seconds before login
 
   Scenario: Configure LDAP Identity Provider
     When I configure IdP "corp-ldap" on cluster "spoke1" with type "ldap"
@@ -49,3 +52,5 @@ Feature: Identity Provider management across clusters via ManifestWork
     Given IdP "corp-github" is configured on cluster "spoke1"
     When I remove IdP "corp-github" from cluster "spoke1"
     Then the ManifestWork is deleted
+    And if no IdPs remain, the RBAC ManifestWork is cleaned up
+    And a rollout wait message advises ~60 seconds
