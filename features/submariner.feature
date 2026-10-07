@@ -175,6 +175,13 @@ Feature: UC-26 Multi-cluster networking via Submariner
     Then the command waits until all ManagedClusterAddOn resources are deleted
     And re-enabling immediately after disable does not encounter stale state
 
+  Scenario: Disable warns when addon cleanup times out
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And the ManagedClusterAddOn resources are slow to delete
+    When I disable Submariner for ClusterSet "prod-set"
+    Then the command returns an error about cleanup timeout
+    And the message advises waiting before re-enabling
+
   Scenario: Diagnose checks credentials secret existence
     Given Submariner is enabled for ClusterSet "prod-set"
     And the SubmarinerConfig on "spoke1" references a credentials secret that does not exist

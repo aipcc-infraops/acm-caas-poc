@@ -91,6 +91,9 @@ Options:
 - `--ssh-key`: path to SSH public key file
 - `--ssh-private-key`: path to SSH private key file
 - `--manifests-dir`: path to ccoctl-generated manifests (optional for IBM Cloud: auto-generated if omitted)
+- `--cluster-network-cidr`: pod network CIDR (default: 10.128.0.0/14). Set non-overlapping CIDRs for Submariner
+- `--cluster-network-host-prefix`: per-node host prefix length (default: 23)
+- `--service-network-cidr`: service network CIDR (default: 172.30.0.0/16). Set non-overlapping CIDRs for Submariner
 
 ```
 $ acmlab provision create spoke1 --pull-secret ~/pull-secret.json --region us-south
@@ -2170,11 +2173,15 @@ Tolerant placement ml-pipeline created
 Create a ClusterDeploymentCustomization with installConfigPatches for standardised cluster profiles.
 
 Options:
-- `--patch`: JSON patch entries (required, repeatable)
+- `--namespace`: namespace for the resource (required)
+- `--patch`: string patch entries as `op:path:value` (repeatable)
+- `--patch-json`: typed JSON patch entries as `op:path:jsonValue` (repeatable). Use for numeric values, objects, and arrays
 
 ```
-$ acmlab provision template-create small-profile --patch '{"op":"replace","path":"/compute/0/replicas","value":"2"}'
-Template small-profile created
+$ acmlab provision template-create small-profile --namespace hive \
+    --patch-json 'replace:/compute/0/replicas:2' \
+    --patch replace:/metadata/name:my-cluster
+Template small-profile created in namespace hive with 2 patches
 ```
 
 #### `acmlab provision template-get <name>`

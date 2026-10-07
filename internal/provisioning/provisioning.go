@@ -32,6 +32,10 @@ type ClusterOpts struct {
 	AWSSecretAccessKey string
 	PullSecret         string
 	ManifestsDir       string
+
+	ClusterNetworkCIDR       string
+	ClusterNetworkHostPrefix int64
+	ServiceNetworkCIDR       string
 }
 
 type ClusterInfo struct {
@@ -63,6 +67,12 @@ type Manager struct {
 func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 	return &Manager{client: c, cfg: cfg, logger: logger}
 }
+
+const (
+	DefaultClusterNetworkCIDR       = "10.128.0.0/14"
+	DefaultClusterNetworkHostPrefix = 23
+	DefaultServiceNetworkCIDR       = "172.30.0.0/16"
+)
 
 var supportedPlatforms = map[string]bool{
 	"ibmcloud": true,
@@ -114,6 +124,15 @@ func (m *Manager) applyDefaults(opts *ClusterOpts) {
 	}
 	if opts.IBMCloudAPIKey == "" {
 		opts.IBMCloudAPIKey = m.cfg.IBMCloudAPIKey
+	}
+	if opts.ClusterNetworkCIDR == "" {
+		opts.ClusterNetworkCIDR = DefaultClusterNetworkCIDR
+	}
+	if opts.ClusterNetworkHostPrefix == 0 {
+		opts.ClusterNetworkHostPrefix = DefaultClusterNetworkHostPrefix
+	}
+	if opts.ServiceNetworkCIDR == "" {
+		opts.ServiceNetworkCIDR = DefaultServiceNetworkCIDR
 	}
 }
 

@@ -40,6 +40,9 @@ func gitopsDiagnoseCmd() *cobra.Command {
 			if outputJSON {
 				data, _ := json.MarshalIndent(result, "", "  ")
 				fmt.Println(string(data))
+				if !result.Healthy {
+					return fmt.Errorf("GitOps prerequisites are not met")
+				}
 				return nil
 			}
 			fmt.Printf("GitOps Diagnostics (namespace: %s)\n\n", result.Namespace)

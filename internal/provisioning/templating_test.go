@@ -217,3 +217,35 @@ func TestBuildClusterDeploymentCustomization(t *testing.T) {
 		t.Error("expected cluster-template label")
 	}
 }
+
+func TestBuildClusterDeploymentCustomizationTypedValues(t *testing.T) {
+	patches := []TemplatePatch{
+		{Op: "replace", Path: "/compute/0/replicas", Value: float64(2)},
+		{Op: "replace", Path: "/networking/clusterNetwork/0", Value: map[string]interface{}{"cidr": "10.132.0.0/14", "hostPrefix": float64(23)}},
+		{Op: "replace", Path: "/metadata/name", Value: "my-cluster"},
+	}
+	obj := buildClusterDeploymentCustomization("typed-test", "ns", patches)
+
+	spec, _ := obj.Object["spec"].(map[string]interface{})
+	patchList, _ := spec["installConfigPatches"].([]interface{})
+	if len(patchList) != 3 {
+		t.Fatalf("expected 3 patches, got %d", len(patchList))
+	}
+
+	p0 := patchList[0].(map[string]interface{})
+	if v, ok := p0["value"].(float64); !ok || v != 2 {
+		t.Errorf("expected numeric value 2, got %v (%T)", p0["value"], p0["value"])
+	}
+
+	p1 := patchList[1].(map[string]interface{})
+	if m, ok := p1["value"].(map[string]interface{}); !ok {
+		t.Errorf("expected map value, got %T", p1["value"])
+	} else if m["cidr"] != "10.132.0.0/14" {
+		t.Errorf("expected cidr=10.132.0.0/14, got %v", m["cidr"])
+	}
+
+	p2 := patchList[2].(map[string]interface{})
+	if v, ok := p2["value"].(string); !ok || v != "my-cluster" {
+		t.Errorf("expected string value 'my-cluster', got %v (%T)", p2["value"], p2["value"])
+	}
+}
