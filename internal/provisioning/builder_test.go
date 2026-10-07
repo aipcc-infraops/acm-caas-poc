@@ -219,15 +219,18 @@ func TestBuildClusterDeployment_IBMCloudPlatform(t *testing.T) {
 
 func TestGenerateInstallConfig_IBMCloud(t *testing.T) {
 	opts := ClusterOpts{
-		Name:           "test",
-		Platform:       "ibmcloud",
-		BaseDomain:     "example.com",
-		Region:         "us-south",
-		MasterType:     "bx2-8x32",
-		WorkerType:     "bx2-4x16",
-		MasterReplicas: 3,
-		WorkerReplicas: 2,
-		SSHKey:         "ssh-rsa AAAA",
+		Name:                     "test",
+		Platform:                 "ibmcloud",
+		BaseDomain:               "example.com",
+		Region:                   "us-south",
+		MasterType:               "bx2-8x32",
+		WorkerType:               "bx2-4x16",
+		MasterReplicas:           3,
+		WorkerReplicas:           2,
+		SSHKey:                   "ssh-rsa AAAA",
+		ClusterNetworkCIDR:       DefaultClusterNetworkCIDR,
+		ClusterNetworkHostPrefix: DefaultClusterNetworkHostPrefix,
+		ServiceNetworkCIDR:       DefaultServiceNetworkCIDR,
 	}
 	cfg := generateInstallConfig(opts)
 	if !strings.Contains(cfg, "credentialsMode: Manual") {
@@ -240,19 +243,105 @@ func TestGenerateInstallConfig_IBMCloud(t *testing.T) {
 
 func TestGenerateInstallConfig_NonIBMCloud(t *testing.T) {
 	opts := ClusterOpts{
-		Name:           "test",
-		Platform:       "aws",
-		BaseDomain:     "example.com",
-		Region:         "us-east-1",
-		MasterType:     "m5.2xlarge",
-		WorkerType:     "m5.xlarge",
-		MasterReplicas: 3,
-		WorkerReplicas: 3,
-		SSHKey:         "ssh-rsa AAAA",
+		Name:                     "test",
+		Platform:                 "aws",
+		BaseDomain:               "example.com",
+		Region:                   "us-east-1",
+		MasterType:               "m5.2xlarge",
+		WorkerType:               "m5.xlarge",
+		MasterReplicas:           3,
+		WorkerReplicas:           3,
+		SSHKey:                   "ssh-rsa AAAA",
+		ClusterNetworkCIDR:       DefaultClusterNetworkCIDR,
+		ClusterNetworkHostPrefix: DefaultClusterNetworkHostPrefix,
+		ServiceNetworkCIDR:       DefaultServiceNetworkCIDR,
 	}
 	cfg := generateInstallConfig(opts)
 	if strings.Contains(cfg, "credentialsMode") {
 		t.Error("non-ibmcloud should not have credentialsMode")
+	}
+}
+
+func TestGenerateInstallConfig_DefaultNetworkCIDRs(t *testing.T) {
+	opts := ClusterOpts{
+		Name:                     "test",
+		Platform:                 "aws",
+		BaseDomain:               "example.com",
+		Region:                   "us-east-1",
+		MasterType:               "m5.xlarge",
+		WorkerType:               "m5.large",
+		MasterReplicas:           3,
+		WorkerReplicas:           2,
+		SSHKey:                   "ssh-rsa AAAA",
+		ClusterNetworkCIDR:       DefaultClusterNetworkCIDR,
+		ClusterNetworkHostPrefix: DefaultClusterNetworkHostPrefix,
+		ServiceNetworkCIDR:       DefaultServiceNetworkCIDR,
+	}
+	cfg := generateInstallConfig(opts)
+	if !strings.Contains(cfg, "cidr: 10.128.0.0/14") {
+		t.Error("expected default clusterNetwork CIDR 10.128.0.0/14")
+	}
+	if !strings.Contains(cfg, "hostPrefix: 23") {
+		t.Error("expected default hostPrefix 23")
+	}
+	if !strings.Contains(cfg, "- 172.30.0.0/16") {
+		t.Error("expected default serviceNetwork CIDR 172.30.0.0/16")
+	}
+}
+
+func TestGenerateInstallConfig_CustomNetworkCIDRs(t *testing.T) {
+	opts := ClusterOpts{
+		Name:                     "subm-test",
+		Platform:                 "ibmcloud",
+		BaseDomain:               "example.com",
+		Region:                   "us-south",
+		MasterType:               "bx2-8x32",
+		WorkerType:               "bx2-4x16",
+		MasterReplicas:           3,
+		WorkerReplicas:           2,
+		SSHKey:                   "ssh-rsa AAAA",
+		ClusterNetworkCIDR:       "10.132.0.0/14",
+		ClusterNetworkHostPrefix: 24,
+		ServiceNetworkCIDR:       "172.31.0.0/16",
+	}
+	cfg := generateInstallConfig(opts)
+	if !strings.Contains(cfg, "cidr: 10.132.0.0/14") {
+		t.Error("expected custom clusterNetwork CIDR 10.132.0.0/14")
+	}
+	if !strings.Contains(cfg, "hostPrefix: 24") {
+		t.Error("expected custom hostPrefix 24")
+	}
+	if !strings.Contains(cfg, "- 172.31.0.0/16") {
+		t.Error("expected custom serviceNetwork CIDR 172.31.0.0/16")
+	}
+	if strings.Contains(cfg, "10.128.0.0/14") {
+		t.Error("should not contain default clusterNetwork CIDR when custom is set")
+	}
+	if strings.Contains(cfg, "172.30.0.0/16") {
+		t.Error("should not contain default serviceNetwork CIDR when custom is set")
+	}
+}
+
+func TestGenerateInstallConfig_CustomCIDRs_AWS(t *testing.T) {
+	opts := ClusterOpts{
+		Name:               "aws-subm",
+		Platform:           "aws",
+		BaseDomain:         "example.com",
+		Region:             "us-east-1",
+		MasterType:         "m5.xlarge",
+		WorkerType:         "m5.large",
+		MasterReplicas:     3,
+		WorkerReplicas:     3,
+		SSHKey:             "ssh-rsa AAAA",
+		ClusterNetworkCIDR: "10.136.0.0/14",
+		ServiceNetworkCIDR: "172.32.0.0/16",
+	}
+	cfg := generateInstallConfig(opts)
+	if !strings.Contains(cfg, "cidr: 10.136.0.0/14") {
+		t.Error("expected custom clusterNetwork CIDR for AWS")
+	}
+	if !strings.Contains(cfg, "- 172.32.0.0/16") {
+		t.Error("expected custom serviceNetwork CIDR for AWS")
 	}
 }
 

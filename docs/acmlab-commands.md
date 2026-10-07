@@ -91,6 +91,9 @@ Options:
 - `--ssh-key`: path to SSH public key file
 - `--ssh-private-key`: path to SSH private key file
 - `--manifests-dir`: path to ccoctl-generated manifests (optional for IBM Cloud: auto-generated if omitted)
+- `--cluster-network-cidr`: pod network CIDR (default: 10.128.0.0/14). Set non-overlapping CIDRs for Submariner
+- `--cluster-network-host-prefix`: per-node host prefix length (default: 23)
+- `--service-network-cidr`: service network CIDR (default: 172.30.0.0/16). Set non-overlapping CIDRs for Submariner
 
 ```
 $ acmlab provision create spoke1 --pull-secret ~/pull-secret.json --region us-south
@@ -593,6 +596,95 @@ Removes the observability stack and all associated resources.
 
 Shows the MultiClusterObservability CR status and spoke collection state.
 
+### Cost Tracking (UC-11)
+
+#### `acmlab cost cluster <name>`
+
+Get cost estimate for a single cluster based on node instance types.
+
+Options:
+- `--json`: output as JSON
+- `--days`: estimation period in days (default: 30)
+
+```
+$ acmlab cost cluster spoke1
+Cluster: spoke1
+  Nodes: 3 (bx2-4x16)
+  Hourly: $0.576
+  Daily:  $13.82
+  Monthly (30d): $414.72
+```
+
+#### `acmlab cost report`
+
+Generate a fleet-wide cost report across all managed clusters.
+
+Options:
+- `--format`: output format — text (default), json, csv
+- `--json`: shorthand for `--format json`
+- `--days`: estimation period in days (default: 30)
+
+```
+$ acmlab cost report --format csv
+name,nodes,cpuCores,memoryGiB,dailyEstimate,periodEstimate,days
+spoke1,3,12,48,13.82,414.72,30
+spoke2,2,8,32,9.22,276.48,30
+```
+
+#### `acmlab cost stamp <cluster> <cost-center>`
+
+Stamp a cost center label on a managed cluster for chargeback attribution.
+
+```
+$ acmlab cost stamp spoke1 engineering
+Cost center "engineering" stamped on spoke1
+```
+
+#### `acmlab cost by-center`
+
+Aggregate costs grouped by cost center label.
+
+Options:
+- `--json`: output as JSON
+- `--days`: estimation period in days (default: 30)
+
+#### `acmlab cost dashboard`
+
+Deploy a Grafana cost dashboard via ACM multicluster observability. Configures custom metrics allowlist, Prometheus recording rules (using `kube_node_role` for worker filtering), and a Grafana dashboard ConfigMap.
+
+Recording rules filter worker nodes via `kube_node_role{role="worker"}` and use known instance-type pricing with a configurable fallback rate.
+
+```
+$ acmlab cost dashboard
+Metrics allowlist configured (4 metrics)
+Recording rules deployed (group: acmlab-cost-estimation)
+Dashboard deployed: acmlab-cost-tracking
+Grafana URL: https://grafana-open-cluster-management-observability.apps.hub.example.com/d/acmlab-cost-tracking
+```
+
+#### `acmlab cost remove-dashboard`
+
+Remove the cost tracking dashboard and its recording rule group. Only removes the `acmlab-cost-estimation` rule group — other custom rule groups are preserved.
+
+```
+$ acmlab cost remove-dashboard
+Cost tracking dashboard and recording rules removed.
+```
+
+#### `acmlab cost budget <cost-center> <amount>`
+
+Set a monthly budget for a cost center. Creates a Policy that alerts when the cost center exceeds the budget.
+
+Options:
+- `--action`: what to do on overage — alert (default), enforce
+
+#### `acmlab cost check-budgets`
+
+Check all cost center budgets and report overages.
+
+Options:
+- `--json`: output as JSON
+
 ### Lifecycle
 
 #### `acmlab lifecycle hibernate <cluster-name>`
@@ -900,6 +992,78 @@ VERSION      STATE        STARTED                  COMPLETED
 4.22.9       Completed    2026-09-01T10:00:00Z     2026-09-01T11:30:00Z
 4.22.8       Completed    2026-08-15T08:00:00Z     2026-08-15T09:45:00Z
 ```
+
+### Submariner (UC-26)
+
+#### `acmlab submariner list`
+
+Lists all ManagedClusterSets with Submariner status: enabled/disabled, connection state, and gateway counts.
+
+Options:
+- `--json`: output as JSON
+
+```
+$ acmlab submariner list
+CLUSTERSET       SUBMARINER   GATEWAYS   CONNECTIONS
+prod-set         enabled      2          2/2 connected
+dev-set          disabled     -          -
+```
+
+#### `acmlab submariner enable <clusterset>`
+
+Enables Submariner on a ManagedClusterSet by deploying the Submariner addon and SubmarinerConfig to each member cluster.
+
+Options:
+- `--globalnet`: enable Globalnet for overlapping Pod/Service CIDRs (auto-assigns 242.{i}.0.0/16 per cluster)
+- `--wait`: block until all connections are established
+- `--timeout`: maximum wait duration (default: 5m, requires `--wait`)
+
+```
+$ acmlab submariner enable prod-set --globalnet --wait --timeout 10m
+Enabling Submariner for ClusterSet prod-set...
+  caas-pool-1: addon created, SubmarinerConfig created (GlobalCIDR: 242.0.0.0/16)
+  caas-pool-2: addon created, SubmarinerConfig created (GlobalCIDR: 242.1.0.0/16)
+Waiting for connections (timeout: 10m0s)...
+All connections established.
+```
+
+#### `acmlab submariner disable <clusterset>`
+
+Disables Submariner on a ManagedClusterSet by removing addons and SubmarinerConfigs.
+
+#### `acmlab submariner status <clusterset>`
+
+Shows Submariner connection status for each member cluster: gateway, connections, and agent conditions.
+
+Options:
+- `--json`: output as JSON
+
+#### `acmlab submariner diagnose <clusterset>`
+
+Runs connectivity diagnostics: checks addon health, SubmarinerConfig presence, gateway conditions, connection status, and recommends Globalnet if overlapping CIDRs detected.
+
+Options:
+- `--json`: output as JSON
+
+```
+$ acmlab submariner diagnose prod-set
+=== Submariner Diagnostics for prod-set ===
+Checks:
+  ✓ Addon installed on all clusters
+  ✓ SubmarinerConfig present on all clusters
+  ✓ Gateway nodes healthy
+  ⚠ Overlapping Pod CIDRs detected — consider enabling Globalnet
+Connections: 2/2 established
+```
+
+#### `acmlab submariner test-connectivity <cluster-a> <cluster-b>`
+
+Tests cross-cluster connectivity by deploying nginx on cluster-a and curling from cluster-b via ServiceExport/ServiceImport.
+
+Options:
+- `--kubeconfig-a`: kubeconfig for cluster-a (required)
+- `--kubeconfig-b`: kubeconfig for cluster-b (required)
+- `--timeout`: test timeout (default: 2m)
 
 ### Decommission
 
@@ -2009,11 +2173,15 @@ Tolerant placement ml-pipeline created
 Create a ClusterDeploymentCustomization with installConfigPatches for standardised cluster profiles.
 
 Options:
-- `--patch`: JSON patch entries (required, repeatable)
+- `--namespace`: namespace for the resource (required)
+- `--patch`: string patch entries as `op:path:value` (repeatable)
+- `--patch-json`: typed JSON patch entries as `op:path:jsonValue` (repeatable). Use for numeric values, objects, and arrays
 
 ```
-$ acmlab provision template-create small-profile --patch '{"op":"replace","path":"/compute/0/replicas","value":"2"}'
-Template small-profile created
+$ acmlab provision template-create small-profile --namespace hive \
+    --patch-json 'replace:/compute/0/replicas:2' \
+    --patch replace:/metadata/name:my-cluster
+Template small-profile created in namespace hive with 2 patches
 ```
 
 #### `acmlab provision template-get <name>`

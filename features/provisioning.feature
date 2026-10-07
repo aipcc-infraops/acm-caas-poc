@@ -61,3 +61,27 @@ Feature: Cluster provisioning via Hive ClusterDeployment
     And ClusterDeployment "spoke1" exists
     When I run "acmlab provision template-apply spoke1 --template small-profile --template-namespace spoke1"
     Then the ClusterDeployment is annotated with the template name
+
+  Scenario: Provision cluster with custom network CIDRs for Submariner
+    Given cloud credentials exist as a Secret in namespace "subm-test"
+    And a ClusterImageSet for the target OCP version exists
+    When I run "acmlab provision create subm-test --platform ibmcloud --cluster-network-cidr 10.132.0.0/14 --service-network-cidr 172.31.0.0/16"
+    Then the install-config Secret contains clusterNetwork CIDR "10.132.0.0/14"
+    And the install-config Secret contains serviceNetwork CIDR "172.31.0.0/16"
+    And the default CIDRs are not present in the install-config
+
+  Scenario: Default CIDRs used when network flags are omitted
+    Given cloud credentials exist as a Secret in namespace "default-net"
+    When I run "acmlab provision create default-net --platform aws"
+    Then the install-config Secret contains clusterNetwork CIDR "10.128.0.0/14"
+    And the install-config Secret contains serviceNetwork CIDR "172.30.0.0/16"
+
+  Scenario: Create template with typed JSON patch values
+    Given the Hive ClusterDeploymentCustomization CRD exists
+    When I run "acmlab provision template-create numeric-tmpl --namespace hive --patch-json replace:/compute/0/replicas:2"
+    Then the ClusterDeploymentCustomization stores replicas as a number, not a string
+
+  Scenario: Create template with structured JSON patch value
+    Given the Hive ClusterDeploymentCustomization CRD exists
+    When I run 'acmlab provision template-create net-tmpl --namespace hive --patch-json replace:/networking/clusterNetwork/0:{"cidr":"10.132.0.0/14","hostPrefix":23}'
+    Then the ClusterDeploymentCustomization stores the network config as a nested object

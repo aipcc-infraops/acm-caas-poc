@@ -3,6 +3,9 @@ package submariner
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 )
@@ -43,11 +46,14 @@ func (m *Manager) Diagnose(ctx context.Context, clusterSet string) (*DiagnoseRes
 	}
 
 	m.checkClusterSetMembers(clusters, result)
+	m.checkDefaultClusterSet(clusterSet, result)
 
 	for _, name := range clusters {
 		m.checkClusterAddOn(ctx, name, result)
 		m.checkClusterConfig(ctx, name, result)
 	}
+
+	m.checkGlobalnetRecommendation(ctx, clusters, result)
 
 	return result, nil
 }
@@ -167,7 +173,7 @@ func (m *Manager) checkCondition(conditions []condition, checkName, cluster, con
 
 func (m *Manager) checkClusterConfig(ctx context.Context, cluster string, result *DiagnoseResult) {
 	checkName := fmt.Sprintf("config/%s", cluster)
-	_, err := m.client.Get(ctx, client.GVRSubmarinerConfig, cluster, "submariner")
+	cfg, err := m.client.Get(ctx, client.GVRSubmarinerConfig, cluster, "submariner")
 	if err != nil {
 		result.addCheck(checkName, "warn",
 			fmt.Sprintf("No SubmarinerConfig on %s. Submariner may use defaults.", cluster))
@@ -175,6 +181,59 @@ func (m *Manager) checkClusterConfig(ctx context.Context, cluster string, result
 	}
 	result.addCheck(checkName, "pass",
 		fmt.Sprintf("SubmarinerConfig present on %s.", cluster))
+
+	credsName, found, _ := unstructured.NestedString(cfg.Object, "spec", "credentialsSecret", "name")
+	credsCheckName := fmt.Sprintf("config/%s/credentials", cluster)
+	if !found || credsName == "" {
+		result.addCheck(credsCheckName, "fail",
+			fmt.Sprintf("SubmarinerConfig on %s has no credentialsSecret. The add-on controller needs cloud credentials to label gateway nodes and configure the broker.", cluster))
+		return
+	}
+	_, err = m.client.Get(ctx, client.GVRSecret, cluster, credsName)
+	if err != nil {
+		result.addCheck(credsCheckName, "fail",
+			fmt.Sprintf("Credentials secret %q not found in namespace %s. The add-on controller cannot configure the broker or label gateway nodes without valid cloud credentials.", credsName, cluster))
+		return
+	}
+	result.addCheck(credsCheckName, "pass",
+		fmt.Sprintf("Credentials secret %q exists in %s.", credsName, cluster))
+}
+
+func (m *Manager) checkDefaultClusterSet(clusterSet string, result *DiagnoseResult) {
+	if clusterSet == "default" {
+		result.addCheck("cluster-set/naming", "warn",
+			"Using the 'default' ClusterSet. Create a dedicated ClusterSet with 'acmlab submariner create-test-set' to avoid affecting unrelated placements.")
+	}
+}
+
+func (m *Manager) checkGlobalnetRecommendation(ctx context.Context, clusters []string, result *DiagnoseResult) {
+	hasConnectionFail := false
+	for _, ch := range result.Checks {
+		if strings.Contains(ch.Name, "/connections") && ch.Status == "fail" {
+			hasConnectionFail = true
+			break
+		}
+	}
+	if !hasConnectionFail {
+		return
+	}
+
+	hasGlobalnet := false
+	for _, cluster := range clusters {
+		cfg, err := m.client.Get(ctx, client.GVRSubmarinerConfig, cluster, "submariner")
+		if err != nil {
+			continue
+		}
+		globalCIDR, _, _ := unstructured.NestedString(cfg.Object, "spec", "globalCIDR")
+		if globalCIDR != "" {
+			hasGlobalnet = true
+			break
+		}
+	}
+	if !hasGlobalnet {
+		result.addCheck("globalnet", "warn",
+			"Globalnet is not enabled. If clusters have overlapping Pod/Service CIDRs, re-enable with 'acmlab submariner enable <set> --globalnet' or reprovision clusters with non-overlapping CIDRs.")
+	}
 }
 
 type condition struct {
@@ -182,6 +241,15 @@ type condition struct {
 	status   string
 	reason   string
 	message  string
+}
+
+func conditionIsTrue(conditions []condition, condType string) bool {
+	for _, c := range conditions {
+		if c.condType == condType {
+			return c.status == "True"
+		}
+	}
+	return false
 }
 
 func extractConditions(obj map[string]interface{}) []condition {

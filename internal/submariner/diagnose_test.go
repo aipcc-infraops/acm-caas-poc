@@ -3,7 +3,22 @@ package submariner
 import (
 	"context"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+func testSecret(name, namespace string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+		},
+	}
+}
 
 func TestDiagnoseEmptyClusterSet(t *testing.T) {
 	mgr := newTestManager()
@@ -31,7 +46,7 @@ func TestDiagnoseSingleClusterWarning(t *testing.T) {
 		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
 		map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "False"},
 	})
-	cfg := buildSubmarinerConfig("spoke1")
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
 	mgr := newTestManager(c1, addon, cfg)
 
 	result, err := mgr.Diagnose(context.Background(), "solo-set")
@@ -129,8 +144,8 @@ func TestDiagnoseConnectionDegradedWithReason(t *testing.T) {
 			"message": "There are no connections on gateways",
 		},
 	})
-	cfg1 := buildSubmarinerConfig("spoke1")
-	cfg2 := buildSubmarinerConfig("spoke2")
+	cfg1 := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
+	cfg2 := buildSubmarinerConfig("spoke2", SubmarinerConfigOpts{})
 	mgr := newTestManager(c1, c2, addon1, addon2, cfg1, cfg2)
 
 	result, err := mgr.Diagnose(context.Background(), "test-set")
@@ -175,9 +190,11 @@ func TestDiagnoseHealthyClusterSet(t *testing.T) {
 		map[string]interface{}{"type": "ManifestApplied", "status": "True"},
 		map[string]interface{}{"type": "RouteAgentConnectionDegraded", "status": "False"},
 	})
-	cfg1 := buildSubmarinerConfig("spoke1")
-	cfg2 := buildSubmarinerConfig("spoke2")
-	mgr := newTestManager(c1, c2, addon1, addon2, cfg1, cfg2)
+	cfg1 := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
+	cfg2 := buildSubmarinerConfig("spoke2", SubmarinerConfigOpts{})
+	sec1 := testSecret("spoke1-cloud-creds", "spoke1")
+	sec2 := testSecret("spoke2-cloud-creds", "spoke2")
+	mgr := newTestManager(c1, c2, addon1, addon2, cfg1, cfg2, sec1, sec2)
 
 	result, err := mgr.Diagnose(context.Background(), "healthy-set")
 	if err != nil {
@@ -307,5 +324,145 @@ func TestExtractConditionsNoConditions(t *testing.T) {
 	})
 	if len(conds) != 0 {
 		t.Errorf("expected 0 conditions, got %d", len(conds))
+	}
+}
+
+func TestDiagnoseDefaultClusterSetWarning(t *testing.T) {
+	c1 := managedCluster("spoke1", "default")
+	c2 := managedCluster("spoke2", "default")
+	addon1 := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+	})
+	addon2 := addOnWithStatus("spoke2", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+	})
+	mgr := newTestManager(c1, c2, addon1, addon2)
+
+	result, err := mgr.Diagnose(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, ch := range result.Checks {
+		if ch.Name == "cluster-set/naming" && ch.Status == "warn" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warn about using default ClusterSet")
+	}
+}
+
+func TestDiagnoseGlobalnetRecommendation(t *testing.T) {
+	c1 := managedCluster("spoke1", "test-set")
+	c2 := managedCluster("spoke2", "test-set")
+	addon1 := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+		map[string]interface{}{
+			"type":   "SubmarinerConnectionDegraded",
+			"status": "True",
+			"reason": "ConnectionsNotEstablished",
+		},
+	})
+	addon2 := addOnWithStatus("spoke2", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+		map[string]interface{}{
+			"type":   "SubmarinerConnectionDegraded",
+			"status": "True",
+			"reason": "ConnectionsNotEstablished",
+		},
+	})
+	cfg1 := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
+	cfg2 := buildSubmarinerConfig("spoke2", SubmarinerConfigOpts{})
+	mgr := newTestManager(c1, c2, addon1, addon2, cfg1, cfg2)
+
+	result, err := mgr.Diagnose(context.Background(), "test-set")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, ch := range result.Checks {
+		if ch.Name == "globalnet" && ch.Status == "warn" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected globalnet recommendation when connections fail without globalnet")
+	}
+}
+
+func TestDiagnoseNoGlobalnetWarningWhenGlobalnetEnabled(t *testing.T) {
+	c1 := managedCluster("spoke1", "gn-set")
+	c2 := managedCluster("spoke2", "gn-set")
+	addon1 := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{
+			"type":   "SubmarinerConnectionDegraded",
+			"status": "True",
+			"reason": "ConnectionsNotEstablished",
+		},
+	})
+	addon2 := addOnWithStatus("spoke2", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+		map[string]interface{}{
+			"type":   "SubmarinerConnectionDegraded",
+			"status": "True",
+			"reason": "ConnectionsNotEstablished",
+		},
+	})
+	cfg1 := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{GlobalCIDR: "242.0.0.0/16"})
+	cfg2 := buildSubmarinerConfig("spoke2", SubmarinerConfigOpts{GlobalCIDR: "242.1.0.0/16"})
+	mgr := newTestManager(c1, c2, addon1, addon2, cfg1, cfg2)
+
+	result, err := mgr.Diagnose(context.Background(), "gn-set")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, ch := range result.Checks {
+		if ch.Name == "globalnet" {
+			t.Error("should not recommend globalnet when already enabled")
+		}
+	}
+}
+
+func TestDiagnoseNonDefaultClusterSetNoNamingWarning(t *testing.T) {
+	c1 := managedCluster("spoke1", "prod-set")
+	c2 := managedCluster("spoke2", "prod-set")
+	addon1 := addOnWithStatus("spoke1", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+	})
+	addon2 := addOnWithStatus("spoke2", []interface{}{
+		map[string]interface{}{"type": "Available", "status": "True"},
+	})
+	mgr := newTestManager(c1, c2, addon1, addon2)
+
+	result, err := mgr.Diagnose(context.Background(), "prod-set")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, ch := range result.Checks {
+		if ch.Name == "cluster-set/naming" {
+			t.Error("should not warn about ClusterSet naming for non-default set")
+		}
+	}
+}
+
+func TestConditionIsTrue(t *testing.T) {
+	conds := []condition{
+		{condType: "Available", status: "True"},
+		{condType: "Degraded", status: "False"},
+	}
+	if !conditionIsTrue(conds, "Available") {
+		t.Error("expected Available=true")
+	}
+	if conditionIsTrue(conds, "Degraded") {
+		t.Error("expected Degraded=false")
+	}
+	if conditionIsTrue(conds, "NonExistent") {
+		t.Error("expected false for missing condition")
 	}
 }

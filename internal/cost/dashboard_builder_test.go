@@ -16,11 +16,15 @@ func TestCostMetricsAllowlist(t *testing.T) {
 		"kube_node_status_capacity": true,
 		"kube_node_info":            true,
 		"kube_node_labels":          true,
+		"kube_node_role":            true,
 	}
 	for _, m := range metrics {
 		if !expected[m] {
 			t.Errorf("unexpected metric %q in allowlist", m)
 		}
+	}
+	if len(metrics) != len(expected) {
+		t.Errorf("expected %d metrics, got %d", len(expected), len(metrics))
 	}
 }
 
@@ -143,6 +147,16 @@ func TestCostDashboardPanelsContainCostMetrics(t *testing.T) {
 		if !strings.Contains(dashJSON, expr) {
 			t.Errorf("dashboard JSON missing metric expression %q", expr)
 		}
+	}
+}
+
+func TestCostRecordingRulesUseKubeNodeRole(t *testing.T) {
+	rules := CostRecordingRulesYAML(0.048)
+	if !strings.Contains(rules, `kube_node_role{role="worker"}`) {
+		t.Error("rules should use kube_node_role{role=\"worker\"} for worker node filtering")
+	}
+	if strings.Contains(rules, "label_node_role_kubernetes_io_worker") {
+		t.Error("rules must not use label_node_role_kubernetes_io_worker (matches masters too)")
 	}
 }
 
