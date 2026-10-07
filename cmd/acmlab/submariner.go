@@ -211,6 +211,8 @@ func submarinerTestConnectivityCmd() *cobra.Command {
 		timeout     time.Duration
 		cleanup     bool
 		image       string
+		serverImage string
+		clientImage string
 		kubeconfigA string
 		kubeconfigB string
 	)
@@ -220,6 +222,21 @@ func submarinerTestConnectivityCmd() *cobra.Command {
 		Short: "Test cross-cluster connectivity via Submariner",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			si, ci := serverImage, clientImage
+			if image != "" {
+				if si == "" {
+					si = image
+				}
+				if ci == "" {
+					ci = image
+				}
+			}
+			if si == "" {
+				si = submariner.DefaultServerImage
+			}
+			if ci == "" {
+				ci = submariner.DefaultClientImage
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
@@ -231,7 +248,8 @@ func submarinerTestConnectivityCmd() *cobra.Command {
 				Namespace:   namespace,
 				Timeout:     timeout,
 				Cleanup:     cleanup,
-				Image:       image,
+				ServerImage: si,
+				ClientImage: ci,
 				KubeconfigA: kubeconfigA,
 				KubeconfigB: kubeconfigB,
 			})
@@ -252,6 +270,20 @@ func submarinerTestConnectivityCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "  clusterB: %s\n", result.ClusterB)
 			fmt.Fprintf(cmd.OutOrStdout(), "  phase: %s\n", result.Phase)
 			fmt.Fprintf(cmd.OutOrStdout(), "  message: %s\n", result.Message)
+			if result.Details != nil {
+				if result.Details.ServerPodPhase != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  serverPod: phase=%s reason=%s\n", result.Details.ServerPodPhase, result.Details.ServerPodReason)
+				}
+				if result.Details.ClientPodPhase != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  clientPod: phase=%s reason=%s\n", result.Details.ClientPodPhase, result.Details.ClientPodReason)
+				}
+			}
+			if !cleanup {
+				fmt.Fprintf(cmd.OutOrStdout(), "\nCleanup disabled. Resources left in namespace %q on both clusters.\n", namespace)
+				fmt.Fprintf(cmd.OutOrStdout(), "To clean up manually:\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "  kubectl --kubeconfig=<A> delete ns %s\n", namespace)
+				fmt.Fprintf(cmd.OutOrStdout(), "  kubectl --kubeconfig=<B> delete ns %s\n", namespace)
+			}
 			return nil
 		},
 	}
@@ -259,7 +291,9 @@ func submarinerTestConnectivityCmd() *cobra.Command {
 	cmd.Flags().StringVar(&namespace, "namespace", "acmlab-submariner-test", "test namespace")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "timeout for connectivity test")
 	cmd.Flags().BoolVar(&cleanup, "cleanup", true, "clean up test resources after test")
-	cmd.Flags().StringVar(&image, "image", "registry.access.redhat.com/ubi9/ubi-minimal", "container image for test pods")
+	cmd.Flags().StringVar(&image, "image", "", "container image for both server and client pods")
+	cmd.Flags().StringVar(&serverImage, "server-image", "", "container image for server pod (overrides --image)")
+	cmd.Flags().StringVar(&clientImage, "client-image", "", "container image for client pod (overrides --image)")
 	cmd.Flags().StringVar(&kubeconfigA, "kubeconfig-a", "", "kubeconfig path for cluster A")
 	cmd.Flags().StringVar(&kubeconfigB, "kubeconfig-b", "", "kubeconfig path for cluster B")
 	return cmd
