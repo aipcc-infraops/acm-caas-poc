@@ -90,10 +90,10 @@ func costDashboardPanels() []interface{} {
 	return []interface{}{
 		statPanel(1, "Fleet Monthly Estimate", 0, 0, 6, 4,
 			"sum(acmlab_cost:cluster_monthly_estimate:sum)",
-			"$", "currency"),
+			"$", "currencyUSD"),
 		statPanel(2, "Fleet Daily Estimate", 6, 0, 6, 4,
 			"sum(acmlab_cost:cluster_daily_estimate:sum)",
-			"$", "currency"),
+			"$", "currencyUSD"),
 		statPanel(3, "Total Worker Nodes", 12, 0, 6, 4,
 			"sum(acmlab_cost:cluster_worker_nodes:sum)",
 			"", "short"),
@@ -196,7 +196,7 @@ func timeseriesPanel(id int, title string, x, y, w, h int, expr, legend string) 
 		},
 		"fieldConfig": map[string]interface{}{
 			"defaults": map[string]interface{}{
-				"unit":  "currency",
+				"unit":  "currencyUSD",
 				"custom": map[string]interface{}{
 					"fillOpacity": 10,
 					"lineWidth":   2,
@@ -224,7 +224,7 @@ func barGaugePanel(id int, title string, x, y, w, h int, expr string) map[string
 		},
 		"fieldConfig": map[string]interface{}{
 			"defaults": map[string]interface{}{
-				"unit": "currency",
+				"unit": "currencyUSD",
 			},
 		},
 		"options": map[string]interface{}{
