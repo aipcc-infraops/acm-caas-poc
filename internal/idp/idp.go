@@ -322,6 +322,11 @@ func (m *Manager) EnforceSSO(ctx context.Context, namespace string) error {
 	return nil
 }
 
+func (m *Manager) CleanupRBAC(ctx context.Context, cluster string) error {
+	m.logger.Info("idp.CleanupRBAC", "cluster", cluster)
+	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, "idp-oauth-rbac")
+}
+
 func manifestWorkName(idpName string) string {
 	return "idp-" + idpName
 }

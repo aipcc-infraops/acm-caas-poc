@@ -2,7 +2,6 @@ package idp
 
 import (
 	"context"
-	"encoding/base64"
 	"io"
 	"log/slog"
 	"strings"
@@ -85,10 +84,9 @@ func TestConfigureGitHub(t *testing.T) {
 	if secret["kind"] != "Secret" {
 		t.Errorf("first manifest kind = %q, want Secret", secret["kind"])
 	}
-	data, _ := secret["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["clientSecret"].(string))
-	if string(decoded) != "my-secret" {
-		t.Errorf("clientSecret = %q, want my-secret", string(decoded))
+	sdata, _ := secret["stringData"].(map[string]interface{})
+	if sdata["clientSecret"] != "my-secret" {
+		t.Errorf("clientSecret = %q, want my-secret", sdata["clientSecret"])
 	}
 
 	oauth, _ := manifests[1].(map[string]interface{})
@@ -152,10 +150,12 @@ func TestConfigureHTPasswd(t *testing.T) {
 
 	manifests := getManifests(t, c, "spoke1", "idp-local-users")
 	secret, _ := manifests[0].(map[string]interface{})
-	data, _ := secret["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["htpasswd"].(string))
-	content := string(decoded)
-	lines := strings.Split(content, "\n")
+	sdata, _ := secret["stringData"].(map[string]interface{})
+	content := sdata["htpasswd"].(string)
+	if !strings.HasSuffix(content, "\n") {
+		t.Error("htpasswd content should end with trailing newline")
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "admin:$2a$") || !strings.HasPrefix(lines[1], "dev:$2a$") {
 		t.Errorf("htpasswd should have bcrypt hashes for admin and dev, got %q", content)
 	}
@@ -190,10 +190,9 @@ func TestConfigureLDAP(t *testing.T) {
 
 	manifests := getManifests(t, c, "spoke1", "idp-corp-ldap")
 	secret, _ := manifests[0].(map[string]interface{})
-	data, _ := secret["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["bindPassword"].(string))
-	if string(decoded) != "ldap-secret" {
-		t.Errorf("bindPassword = %q, want ldap-secret", string(decoded))
+	sdata, _ := secret["stringData"].(map[string]interface{})
+	if sdata["bindPassword"] != "ldap-secret" {
+		t.Errorf("bindPassword = %q, want ldap-secret", sdata["bindPassword"])
 	}
 
 	oauth, _ := manifests[1].(map[string]interface{})
@@ -389,10 +388,9 @@ func TestRotate(t *testing.T) {
 
 	manifests := getManifests(t, c, "spoke1", "idp-rotate-me")
 	secret, _ := manifests[0].(map[string]interface{})
-	data, _ := secret["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["clientSecret"].(string))
-	if string(decoded) != "new-secret" {
-		t.Errorf("rotated clientSecret = %q, want new-secret", string(decoded))
+	sdata, _ := secret["stringData"].(map[string]interface{})
+	if sdata["clientSecret"] != "new-secret" {
+		t.Errorf("rotated clientSecret = %q, want new-secret", sdata["clientSecret"])
 	}
 }
 
@@ -505,20 +503,21 @@ func TestBuildSecretGitHub(t *testing.T) {
 	if meta["name"] != "gh-secret" {
 		t.Errorf("name = %q, want gh-secret", meta["name"])
 	}
-	data, _ := s["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["clientSecret"].(string))
-	if string(decoded) != "mysecret" {
-		t.Errorf("clientSecret = %q", string(decoded))
+	sdata, _ := s["stringData"].(map[string]interface{})
+	if sdata["clientSecret"] != "mysecret" {
+		t.Errorf("clientSecret = %q", sdata["clientSecret"])
 	}
 }
 
 func TestBuildSecretHTPasswd(t *testing.T) {
 	opts := IdPOpts{Name: "ht", Type: IdPHTPasswd, Users: map[string]string{"bob": "pw1", "alice": "pw2"}}
 	s := buildSecretManifest(opts)
-	data, _ := s["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["htpasswd"].(string))
-	content := string(decoded)
-	lines := strings.Split(content, "\n")
+	sdata, _ := s["stringData"].(map[string]interface{})
+	content := sdata["htpasswd"].(string)
+	if !strings.HasSuffix(content, "\n") {
+		t.Error("htpasswd content should end with trailing newline")
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "alice:$2a$") || !strings.HasPrefix(lines[1], "bob:$2a$") {
 		t.Errorf("htpasswd should have sorted bcrypt entries for alice and bob, got %q", content)
 	}
@@ -527,27 +526,28 @@ func TestBuildSecretHTPasswd(t *testing.T) {
 func TestBuildSecretHTPasswdEmpty(t *testing.T) {
 	opts := IdPOpts{Name: "ht", Type: IdPHTPasswd, Users: map[string]string{}}
 	s := buildSecretManifest(opts)
-	data, _ := s["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["htpasswd"].(string))
-	if string(decoded) != "" {
-		t.Errorf("htpasswd should be empty for no users, got %q", string(decoded))
+	sdata, _ := s["stringData"].(map[string]interface{})
+	if sdata["htpasswd"] != "" {
+		t.Errorf("htpasswd should be empty for no users, got %q", sdata["htpasswd"])
 	}
 }
 
 func TestBuildSecretLDAP(t *testing.T) {
 	opts := IdPOpts{Name: "ld", Type: IdPLDAP, BindPassword: "ldappw"}
 	s := buildSecretManifest(opts)
-	data, _ := s["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["bindPassword"].(string))
-	if string(decoded) != "ldappw" {
-		t.Errorf("bindPassword = %q", string(decoded))
+	sdata, _ := s["stringData"].(map[string]interface{})
+	if sdata["bindPassword"] != "ldappw" {
+		t.Errorf("bindPassword = %q, want ldappw", sdata["bindPassword"])
 	}
 }
 
 func TestBuildHTPasswdData(t *testing.T) {
 	users := map[string]string{"charlie": "pw3", "alice": "pw1", "bob": "pw2"}
 	result := buildHTPasswdData(users)
-	lines := strings.Split(result, "\n")
+	if !strings.HasSuffix(result, "\n") {
+		t.Error("htpasswd data should end with trailing newline")
+	}
+	lines := strings.Split(strings.TrimSuffix(result, "\n"), "\n")
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines, got %d", len(lines))
 	}
@@ -616,10 +616,9 @@ func TestBuildOAuthDefaultType(t *testing.T) {
 func TestBuildSecretOIDC(t *testing.T) {
 	opts := IdPOpts{Name: "kc", Type: IdPOIDC, ClientSecret: "oidcsecret"}
 	s := buildSecretManifest(opts)
-	data, _ := s["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["clientSecret"].(string))
-	if string(decoded) != "oidcsecret" {
-		t.Errorf("clientSecret = %q, want oidcsecret", string(decoded))
+	sdata, _ := s["stringData"].(map[string]interface{})
+	if sdata["clientSecret"] != "oidcsecret" {
+		t.Errorf("clientSecret = %q, want oidcsecret", sdata["clientSecret"])
 	}
 }
 
@@ -699,9 +698,8 @@ func TestConfigureUniqueCreatesManifestWork(t *testing.T) {
 
 	manifests := getManifests(t, c, "spoke1", "idp-emergency-spoke1")
 	secret, _ := manifests[0].(map[string]interface{})
-	data, _ := secret["data"].(map[string]interface{})
-	decoded, _ := base64.StdEncoding.DecodeString(data["htpasswd"].(string))
-	content := string(decoded)
+	sdata, _ := secret["stringData"].(map[string]interface{})
+	content, _ := sdata["htpasswd"].(string)
 	if !strings.HasPrefix(content, "cluster-admin:$2a$") {
 		t.Errorf("htpasswd should contain bcrypt hash for cluster-admin, got %q", content)
 	}
@@ -743,6 +741,32 @@ func TestConfigureUniqueSetsRotationAnnotation(t *testing.T) {
 	}
 	if rotation == "" {
 		t.Error("last-rotation annotation is empty")
+	}
+}
+
+func TestCleanupRBACDeletesManifestWork(t *testing.T) {
+	mgr, c := newManager()
+	opts := IdPOpts{Name: "gh", Cluster: "spoke1", Type: IdPGitHub, ClientID: "cid", ClientSecret: "sec"}
+	if err := mgr.Configure(context.Background(), opts); err != nil {
+		t.Fatalf("Configure failed: %v", err)
+	}
+	_, err := c.Get(context.Background(), client.GVRManifestWork, "spoke1", "idp-oauth-rbac")
+	if err != nil {
+		t.Fatalf("RBAC ManifestWork should exist after Configure: %v", err)
+	}
+	if err := mgr.CleanupRBAC(context.Background(), "spoke1"); err != nil {
+		t.Fatalf("CleanupRBAC failed: %v", err)
+	}
+	_, err = c.Get(context.Background(), client.GVRManifestWork, "spoke1", "idp-oauth-rbac")
+	if err == nil {
+		t.Error("RBAC ManifestWork should be deleted after CleanupRBAC")
+	}
+}
+
+func TestCleanupRBACIdempotent(t *testing.T) {
+	mgr, _ := newManager()
+	if err := mgr.CleanupRBAC(context.Background(), "nonexistent"); err != nil {
+		t.Fatalf("CleanupRBAC on nonexistent should not error: %v", err)
 	}
 }
 

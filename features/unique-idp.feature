@@ -8,8 +8,11 @@ Feature: Unique identity provider per cluster (UC-16)
     Given a cluster "spoke1" is registered in ACM
     When I run "acmlab idp configure-unique --cluster spoke1 --admin-user cluster-admin"
     Then a ManifestWork "idp-emergency-spoke1" is created in namespace "spoke1"
-    And the htpasswd secret contains bcrypt-hashed credentials
+    And the htpasswd secret uses stringData with bcrypt-hashed credentials
+    And the htpasswd content ends with a trailing newline
     And the generated password is unique to spoke1
+    And a sensitive-password warning is displayed
+    And a rollout wait message advises ~60 seconds before login
 
   Scenario: Credentials differ between clusters
     Given clusters "spoke1" and "spoke2" are registered
