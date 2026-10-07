@@ -72,11 +72,22 @@ func costClusterCmd() *cobra.Command {
 func costReportCmd() *cobra.Command {
 	var days int
 	var outputJSON bool
+	var format string
 
 	cmd := &cobra.Command{
 		Use:   "report",
 		Short: "Generate cost report for all managed clusters",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if outputJSON {
+				format = "json"
+			}
+			if format == "" {
+				format = "text"
+			}
+			if format != "text" && format != "json" && format != "csv" {
+				return fmt.Errorf("unsupported format %q; valid values are text, json, csv", format)
+			}
+
 			c, err := buildClient()
 			if err != nil {
 				return err
@@ -88,22 +99,26 @@ func costReportCmd() *cobra.Command {
 				return err
 			}
 
-			if outputJSON {
+			switch format {
+			case "json":
 				data, _ := json.MarshalIndent(report, "", "  ")
 				fmt.Println(string(data))
-				return nil
+			case "csv":
+				fmt.Print(cost.FormatCostCSV(*report))
+			default:
+				fmt.Printf("%-20s %-6s %-6s %-10s %-12s %-12s\n", "CLUSTER", "NODES", "CPU", "MEMORY", "DAILY", fmt.Sprintf("%dD TOTAL", days))
+				for _, cl := range report.Clusters {
+					fmt.Printf("%-20s %-6d %-6d %-10.1f $%-11.2f $%-11.2f\n",
+						cl.Name, cl.Nodes, cl.CPUCores, cl.MemoryGiB, cl.DailyEstimate, cl.PeriodEstimate)
+				}
+				fmt.Printf("\nTotal %d-day estimate: $%.2f\n", days, report.TotalCost)
 			}
-			fmt.Printf("%-20s %-6s %-6s %-10s %-12s %-12s\n", "CLUSTER", "NODES", "CPU", "MEMORY", "DAILY", fmt.Sprintf("%dD TOTAL", days))
-			for _, cl := range report.Clusters {
-				fmt.Printf("%-20s %-6d %-6d %-10.1f $%-11.2f $%-11.2f\n",
-					cl.Name, cl.Nodes, cl.CPUCores, cl.MemoryGiB, cl.DailyEstimate, cl.PeriodEstimate)
-			}
-			fmt.Printf("\nTotal %d-day estimate: $%.2f\n", days, report.TotalCost)
 			return nil
 		},
 	}
 	cmd.Flags().IntVar(&days, "days", 30, "Cost estimation period in days")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	cmd.Flags().StringVar(&format, "format", "", "Output format: text, json, csv (default: text)")
 	return cmd
 }
 
