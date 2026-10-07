@@ -12,10 +12,9 @@ func buildOrderedManifestWork(cluster, name string, manifests []OrderedManifest)
 		gvk := extractGVK(m.Object)
 		manifestConfigs[i] = map[string]interface{}{
 			"resourceIdentifier": map[string]interface{}{
-				"ordinal": int64(m.Ordinal),
-				"group":   gvk.group,
-				"resource": gvk.resource,
-				"name":    gvk.name,
+				"group":     gvk.group,
+				"resource":  gvk.resource,
+				"name":      gvk.name,
 				"namespace": gvk.namespace,
 			},
 			"updateStrategy": map[string]interface{}{
