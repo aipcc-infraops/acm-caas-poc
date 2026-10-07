@@ -23,6 +23,20 @@ Feature: Cost tracking and chargeback via node metadata estimation (UC-11)
     And "--json" is equivalent to "--format json"
     And an unsupported "--format xml" returns a clear validation error
 
+  Scenario: Deploy cost dashboard to Grafana via ACM observability
+    Given ACM multicluster observability is installed on the hub
+    When I run "acmlab cost dashboard"
+    Then a custom metrics allowlist is configured for cost-related metrics
+    And Prometheus recording rules compute per-cluster daily and monthly estimates
+    And a Grafana dashboard "acmlab-cost-tracking" is deployed as a ConfigMap
+    And the Grafana URL is printed for direct access
+
+  Scenario: Remove cost dashboard from Grafana
+    Given the cost tracking dashboard has been deployed
+    When I run "acmlab cost remove-dashboard"
+    Then the Grafana dashboard ConfigMap is removed
+    And the custom recording rules are removed
+
   Scenario: Identify clusters with no cost center
     Given a ManagedCluster "spoke-test" exists without a cost center label
     When I generate a cost report
