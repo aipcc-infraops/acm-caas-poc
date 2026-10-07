@@ -96,31 +96,41 @@ func (m *Manager) GetComplianceStatus(ctx context.Context, cluster string) (*Com
 		Phase:   "Pending",
 	}
 
+	operatorDeployed := false
 	opName := complianceOperatorPolicyName(cluster)
 	opObj, err := m.client.Get(ctx, client.GVROperatorPolicy, DefaultNamespace, opName)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			status.Phase = "NotDeployed"
-			return status, nil
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("getting compliance operator policy: %w", err)
 		}
-		return nil, fmt.Errorf("getting compliance operator policy: %w", err)
+	} else {
+		operatorDeployed = true
+		opConditions := extractPolicyConditions(opObj.Object)
+		status.Conditions = append(status.Conditions, opConditions...)
 	}
-
-	opConditions := extractPolicyConditions(opObj.Object)
-	status.Conditions = append(status.Conditions, opConditions...)
 
 	scanName := complianceScanPolicyName(cluster)
 	scanObj, err := m.client.Get(ctx, client.GVRPolicy, DefaultNamespace, scanName)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			status.Phase = "OperatorDeployed"
-			return status, nil
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("getting compliance scan policy: %w", err)
 		}
-		return nil, fmt.Errorf("getting compliance scan policy: %w", err)
+		if operatorDeployed {
+			status.Phase = "OperatorDeployed"
+		} else {
+			status.Phase = "NotDeployed"
+		}
+		return status, nil
+	}
+
+	if !operatorDeployed {
+		status.Phase = "ScanWithoutOperator"
 	}
 
 	scanStatus := parseComplianceScanStatus(cluster, scanObj.Object)
-	status.Phase = scanStatus.Phase
+	if operatorDeployed {
+		status.Phase = scanStatus.Phase
+	}
 	status.Profile = scanStatus.Profile
 	status.Compliant = scanStatus.Compliant
 	status.NonCompliant = scanStatus.NonCompliant

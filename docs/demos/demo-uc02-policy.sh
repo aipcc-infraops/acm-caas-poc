@@ -16,20 +16,16 @@ acmlab policy apply "$POLICY_NAME" \
   --registries "registry.redhat.io,quay.io,registry.access.redhat.com" \
   --remediation inform
 
-echo "--- Step 3: Wait for compliance propagation (~${PROPAGATION_WAIT}s) ---"
-sleep "$PROPAGATION_WAIT"
+echo "--- Step 3: Check compliance status (waits for propagation) ---"
+acmlab policy status "$POLICY_NAME" --wait --timeout 2m
 
-echo "--- Step 4: Check compliance status ---"
-acmlab policy status "$POLICY_NAME"
-
-echo "--- Step 5: Switch to enforce mode ---"
+echo "--- Step 4: Switch to enforce mode ---"
 acmlab policy apply "$POLICY_NAME" \
   --registries "registry.redhat.io,quay.io,registry.access.redhat.com" \
   --remediation enforce
 
-echo "--- Step 6: Wait and verify enforcement ---"
-sleep "$PROPAGATION_WAIT"
-acmlab policy status "$POLICY_NAME"
+echo "--- Step 5: Verify enforcement ---"
+acmlab policy status "$POLICY_NAME" --wait --timeout 2m
 
 echo "--- Cleanup ---"
 echo "To remove: acmlab policy remove $POLICY_NAME"

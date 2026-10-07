@@ -13,7 +13,7 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/config"
 )
 
-const DefaultNamespace = "open-cluster-management-policies"
+const DefaultNamespace = "open-cluster-management-global-set"
 
 type BaselineStatus struct {
 	Cluster    string `json:"cluster"`
