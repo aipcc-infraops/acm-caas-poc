@@ -21,7 +21,10 @@ import (
 var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 var gvrKinds = map[schema.GroupVersionResource]string{
-	client.GVRApplicationSet: "ApplicationSetList",
+	client.GVRApplicationSet:          "ApplicationSetList",
+	client.GVRCustomResourceDefinition: "CustomResourceDefinitionList",
+	client.GVRNamespace:                "NamespaceList",
+	client.GVRClusterServiceVersion:    "ClusterServiceVersionList",
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -32,6 +35,38 @@ func fakeClient(objs ...runtime.Object) *client.Client {
 
 func newManager(objs ...runtime.Object) *Manager {
 	return New(fakeClient(objs...), config.Config{}, discardLogger)
+}
+
+func crdObj(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apiextensions.k8s.io/v1",
+			"kind":       "CustomResourceDefinition",
+			"metadata":   map[string]interface{}{"name": name},
+		},
+	}
+}
+
+func namespaceObj(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata":   map[string]interface{}{"name": name},
+		},
+	}
+}
+
+func prereqObjs(namespace string) []runtime.Object {
+	return []runtime.Object{
+		crdObj("applicationsets.argoproj.io"),
+		namespaceObj(namespace),
+	}
+}
+
+func newManagerWithPrereqs(namespace string, objs ...runtime.Object) *Manager {
+	all := append(prereqObjs(namespace), objs...)
+	return newManager(all...)
 }
 
 func sampleAppSet(name, ns string) *unstructured.Unstructured {
@@ -92,7 +127,7 @@ func TestNewReturnsManager(t *testing.T) {
 }
 
 func TestCreate(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	err := mgr.Create(context.Background(), AppSetOpts{
 		Name:    "my-app",
 		RepoURL: "https://github.com/example/repo.git",
@@ -112,7 +147,7 @@ func TestCreate(t *testing.T) {
 }
 
 func TestCreateIdempotent(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	opts := AppSetOpts{
 		Name:    "my-app",
 		RepoURL: "https://github.com/example/repo.git",
@@ -127,10 +162,13 @@ func TestCreateIdempotent(t *testing.T) {
 }
 
 func TestCreateError(t *testing.T) {
-	c := fakeClient()
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	scheme := runtime.NewScheme()
+	objs := append(prereqObjs(DefaultNamespace))
+	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, gvrKinds, objs...)
+	fake.PrependReactor("create", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("forbidden")
 	})
+	c := &client.Client{Dynamic: fake}
 	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.Create(context.Background(), AppSetOpts{
@@ -148,7 +186,7 @@ func TestCreateError(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	appSet := sampleAppSet("my-app", DefaultNamespace)
-	mgr := newManager(appSet)
+	mgr := newManagerWithPrereqs(DefaultNamespace, appSet)
 
 	info, err := mgr.Get(context.Background(), "my-app", "")
 	if err != nil {
@@ -175,7 +213,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestGetNotFound(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	_, err := mgr.Get(context.Background(), "missing", "")
 	if err == nil {
 		t.Fatal("expected error for missing ApplicationSet")
@@ -185,7 +223,7 @@ func TestGetNotFound(t *testing.T) {
 func TestList(t *testing.T) {
 	a1 := sampleAppSet("app1", DefaultNamespace)
 	a2 := sampleAppSet("app2", DefaultNamespace)
-	mgr := newManager(a1, a2)
+	mgr := newManagerWithPrereqs(DefaultNamespace, a1, a2)
 
 	infos, err := mgr.List(context.Background(), "")
 	if err != nil {
@@ -197,7 +235,7 @@ func TestList(t *testing.T) {
 }
 
 func TestListEmpty(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	infos, err := mgr.List(context.Background(), "")
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
@@ -208,10 +246,13 @@ func TestListEmpty(t *testing.T) {
 }
 
 func TestListError(t *testing.T) {
-	c := fakeClient()
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("list", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	scheme := runtime.NewScheme()
+	objs := append(prereqObjs(DefaultNamespace))
+	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, gvrKinds, objs...)
+	fake.PrependReactor("list", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("timeout")
 	})
+	c := &client.Client{Dynamic: fake}
 	mgr := New(c, config.Config{}, discardLogger)
 
 	_, err := mgr.List(context.Background(), "")
@@ -272,7 +313,7 @@ func TestDeleteError(t *testing.T) {
 
 func TestSync(t *testing.T) {
 	appSet := sampleAppSet("my-app", DefaultNamespace)
-	mgr := newManager(appSet)
+	mgr := newManagerWithPrereqs(DefaultNamespace, appSet)
 
 	err := mgr.Sync(context.Background(), "my-app", "")
 	if err != nil {
@@ -287,7 +328,7 @@ func TestSync(t *testing.T) {
 }
 
 func TestSyncNotFound(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	err := mgr.Sync(context.Background(), "missing", "")
 	if err == nil {
 		t.Fatal("expected error for missing ApplicationSet")
@@ -296,7 +337,7 @@ func TestSyncNotFound(t *testing.T) {
 
 func TestSyncPatchError(t *testing.T) {
 	appSet := sampleAppSet("my-app", DefaultNamespace)
-	mgr := newManager(appSet)
+	mgr := newManagerWithPrereqs(DefaultNamespace, appSet)
 
 	fake := mgr.client.Dynamic.(*dynamicfake.FakeDynamicClient)
 	fake.PrependReactor("patch", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
@@ -313,7 +354,7 @@ func TestSyncPatchError(t *testing.T) {
 }
 
 func TestCreateDefaults(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	err := mgr.Create(context.Background(), AppSetOpts{
 		Name:    "defaults-test",
 		RepoURL: "https://github.com/example/repo.git",
@@ -344,7 +385,7 @@ func TestCreateDefaults(t *testing.T) {
 }
 
 func TestCreateClusterGenerator(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	err := mgr.Create(context.Background(), AppSetOpts{
 		Name:      "cluster-gen",
 		RepoURL:   "https://github.com/example/repo.git",
@@ -375,7 +416,7 @@ func TestCreateClusterGenerator(t *testing.T) {
 }
 
 func TestCreateWithCustomNamespace(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs("argocd")
 	err := mgr.Create(context.Background(), AppSetOpts{
 		Name:      "custom-ns",
 		Namespace: "argocd",
@@ -573,7 +614,7 @@ func TestApplyDefaultsPreservesExisting(t *testing.T) {
 
 func TestGetWithCustomNamespace(t *testing.T) {
 	appSet := sampleAppSet("my-app", "argocd")
-	mgr := newManager(appSet)
+	mgr := newManagerWithPrereqs("argocd", appSet)
 
 	info, err := mgr.Get(context.Background(), "my-app", "argocd")
 	if err != nil {
@@ -641,7 +682,7 @@ func agentAppSet(name, ns string) *unstructured.Unstructured {
 }
 
 func TestEnableAgentMode(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	err := mgr.EnableAgentMode(context.Background(), AgentModeOpts{
 		Name:     "edge-apps",
 		RepoURL:  "https://github.com/example/repo.git",
@@ -663,7 +704,7 @@ func TestEnableAgentMode(t *testing.T) {
 }
 
 func TestEnableAgentModeIdempotent(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	opts := AgentModeOpts{
 		Name:     "edge-apps",
 		RepoURL:  "https://github.com/example/repo.git",
@@ -679,10 +720,13 @@ func TestEnableAgentModeIdempotent(t *testing.T) {
 }
 
 func TestEnableAgentModeError(t *testing.T) {
-	c := fakeClient()
-	c.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("create", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+	scheme := runtime.NewScheme()
+	objs := append(prereqObjs(DefaultNamespace))
+	fake := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, gvrKinds, objs...)
+	fake.PrependReactor("create", "applicationsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("forbidden")
 	})
+	c := &client.Client{Dynamic: fake}
 	mgr := New(c, config.Config{}, discardLogger)
 
 	err := mgr.EnableAgentMode(context.Background(), AgentModeOpts{
@@ -738,7 +782,7 @@ func TestDisableAgentModeNotAgentMode(t *testing.T) {
 
 func TestAgentModeStatus(t *testing.T) {
 	appSet := agentAppSet("edge-apps", DefaultNamespace)
-	mgr := newManager(appSet)
+	mgr := newManagerWithPrereqs(DefaultNamespace, appSet)
 
 	info, err := mgr.AgentModeStatus(context.Background(), "edge-apps", "")
 	if err != nil {
@@ -756,7 +800,7 @@ func TestAgentModeStatus(t *testing.T) {
 }
 
 func TestAgentModeStatusNotFound(t *testing.T) {
-	mgr := newManager()
+	mgr := newManagerWithPrereqs(DefaultNamespace)
 	_, err := mgr.AgentModeStatus(context.Background(), "nonexistent", "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent")
@@ -805,5 +849,174 @@ func TestBuildAgentModeApplicationSet(t *testing.T) {
 	annotations, _, _ := unstructured.NestedString(appSet.Object, "spec", "template", "metadata", "annotations", "argocd.argoproj.io/sync-options")
 	if annotations != "PullMode=true" {
 		t.Errorf("PullMode annotation = %q, want PullMode=true", annotations)
+	}
+}
+
+func TestDiagnoseHealthy(t *testing.T) {
+	crd := crdObj("applicationsets.argoproj.io")
+	ns := namespaceObj("openshift-gitops")
+	mgr := newManager(crd, ns)
+	result, err := mgr.Diagnose(context.Background(), "openshift-gitops")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if !result.Healthy {
+		t.Error("expected healthy")
+	}
+	passCount := 0
+	for _, c := range result.Checks {
+		if c.Status == "pass" {
+			passCount++
+		}
+	}
+	if passCount < 2 {
+		t.Errorf("expected at least 2 passing checks, got %d", passCount)
+	}
+}
+
+func TestDiagnoseMissingCRD(t *testing.T) {
+	ns := namespaceObj("openshift-gitops")
+	mgr := newManager(ns)
+	result, err := mgr.Diagnose(context.Background(), "openshift-gitops")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if result.Healthy {
+		t.Error("expected unhealthy when CRD missing")
+	}
+	found := false
+	for _, c := range result.Checks {
+		if c.Name == "applicationset-crd" && c.Status == "fail" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected applicationset-crd fail check")
+	}
+}
+
+func TestDiagnoseMissingNamespace(t *testing.T) {
+	crd := crdObj("applicationsets.argoproj.io")
+	mgr := newManager(crd)
+	result, err := mgr.Diagnose(context.Background(), "openshift-gitops")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if result.Healthy {
+		t.Error("expected unhealthy when namespace missing")
+	}
+	found := false
+	for _, c := range result.Checks {
+		if c.Name == "namespace" && c.Status == "fail" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected namespace fail check")
+	}
+}
+
+func TestDiagnoseDefaultNamespace(t *testing.T) {
+	crd := crdObj("applicationsets.argoproj.io")
+	ns := namespaceObj(DefaultNamespace)
+	mgr := newManager(crd, ns)
+	result, err := mgr.Diagnose(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if result.Namespace != DefaultNamespace {
+		t.Errorf("Namespace = %q, want %s", result.Namespace, DefaultNamespace)
+	}
+}
+
+func TestCheckPrerequisitesPass(t *testing.T) {
+	crd := crdObj("applicationsets.argoproj.io")
+	ns := namespaceObj("openshift-gitops")
+	mgr := newManager(crd, ns)
+	err := mgr.CheckPrerequisites(context.Background(), "openshift-gitops")
+	if err != nil {
+		t.Fatalf("CheckPrerequisites should pass: %v", err)
+	}
+}
+
+func TestCheckPrerequisitesNoCRD(t *testing.T) {
+	ns := namespaceObj("openshift-gitops")
+	mgr := newManager(ns)
+	err := mgr.CheckPrerequisites(context.Background(), "openshift-gitops")
+	if err == nil {
+		t.Fatal("expected error when CRD missing")
+	}
+	if !strings.Contains(err.Error(), "ApplicationSet CRD") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCheckPrerequisitesNoNamespace(t *testing.T) {
+	crd := crdObj("applicationsets.argoproj.io")
+	mgr := newManager(crd)
+	err := mgr.CheckPrerequisites(context.Background(), "openshift-gitops")
+	if err == nil {
+		t.Fatal("expected error when namespace missing")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCheckPrerequisitesDefaultNamespace(t *testing.T) {
+	crd := crdObj("applicationsets.argoproj.io")
+	ns := namespaceObj(DefaultNamespace)
+	mgr := newManager(crd, ns)
+	err := mgr.CheckPrerequisites(context.Background(), "")
+	if err != nil {
+		t.Fatalf("CheckPrerequisites should default to %s: %v", DefaultNamespace, err)
+	}
+}
+
+func TestListWithMissingCRD(t *testing.T) {
+	mgr := newManager()
+	_, err := mgr.List(context.Background(), "openshift-gitops")
+	if err == nil {
+		t.Fatal("expected preflight error")
+	}
+	if !strings.Contains(err.Error(), "prerequisites") {
+		t.Errorf("expected prerequisites error, got: %v", err)
+	}
+}
+
+func TestCreateWithMissingPrereqs(t *testing.T) {
+	mgr := newManager()
+	err := mgr.Create(context.Background(), AppSetOpts{
+		Name:    "test",
+		RepoURL: "https://github.com/example/repo.git",
+		Path:    "k8s",
+	})
+	if err == nil {
+		t.Fatal("expected preflight error")
+	}
+	if !strings.Contains(err.Error(), "prerequisites") {
+		t.Errorf("expected prerequisites error, got: %v", err)
+	}
+}
+
+func TestDeleteWithMissingCRDReturnsNotFound(t *testing.T) {
+	mgr := newManager()
+	removed, err := mgr.Delete(context.Background(), "anything", "openshift-gitops")
+	if err != nil {
+		t.Fatalf("Delete should not error when CRD missing: %v", err)
+	}
+	if removed {
+		t.Error("Delete should return false when CRD missing")
+	}
+}
+
+func TestDisableAgentModeWithMissingCRDReturnsNotFound(t *testing.T) {
+	mgr := newManager()
+	removed, err := mgr.DisableAgentMode(context.Background(), "anything", "openshift-gitops")
+	if err != nil {
+		t.Fatalf("DisableAgentMode should not error when CRD missing: %v", err)
+	}
+	if removed {
+		t.Error("DisableAgentMode should return false when CRD missing")
 	}
 }

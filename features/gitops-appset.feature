@@ -38,3 +38,28 @@ Feature: GitOps fleet deployment via ApplicationSet
     When I create the same ApplicationSet again
     Then no error occurs
     And the existing ApplicationSet is unchanged
+
+  Scenario: Diagnose GitOps prerequisites when installed
+    Given OpenShift GitOps is installed on the hub
+    When I run "acmlab gitops diagnose --namespace openshift-gitops"
+    Then all prerequisite checks pass
+    And the output shows ApplicationSet CRD is available
+    And the output shows namespace exists
+
+  Scenario: Diagnose GitOps prerequisites when not installed
+    Given OpenShift GitOps is not installed
+    When I run "acmlab gitops diagnose --namespace openshift-gitops"
+    Then the ApplicationSet CRD check fails
+    And the output recommends installing OpenShift GitOps
+
+  Scenario: List ApplicationSets when GitOps is not installed
+    Given OpenShift GitOps is not installed
+    When I run "acmlab gitops list --namespace openshift-gitops"
+    Then the error mentions missing prerequisites
+    And the error suggests running gitops diagnose
+
+  Scenario: Delete ApplicationSet when CRD is missing
+    Given OpenShift GitOps is not installed
+    When I run "acmlab gitops delete my-app --namespace openshift-gitops"
+    Then the output says the ApplicationSet was not found
+    And no error is returned

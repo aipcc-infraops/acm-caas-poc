@@ -690,11 +690,15 @@ func provisionImageSetsCmd() *cobra.Command {
 
 func provisionTemplateCreateCmd() *cobra.Command {
 	var patches []string
+	var namespace string
 	cmd := &cobra.Command{
 		Use:   "template-create <name>",
 		Short: "Create a ClusterDeploymentCustomization template",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if namespace == "" {
+				return fmt.Errorf("the --namespace flag is required (ClusterDeploymentCustomization is a namespaced resource)")
+			}
 			parsed := make([]provisioning.TemplatePatch, 0, len(patches))
 			for _, p := range patches {
 				parts := strings.SplitN(p, ":", 3)
@@ -708,29 +712,34 @@ func provisionTemplateCreateCmd() *cobra.Command {
 				return err
 			}
 			mgr := provisioning.New(c, cfg, logger)
-			if err := mgr.CreateTemplate(context.Background(), args[0], parsed); err != nil {
+			if err := mgr.CreateTemplate(context.Background(), args[0], namespace, parsed); err != nil {
 				return err
 			}
-			fmt.Printf("Template %s created with %d patches\n", args[0], len(parsed))
+			fmt.Printf("Template %s created in namespace %s with %d patches\n", args[0], namespace, len(parsed))
 			return nil
 		},
 	}
 	cmd.Flags().StringSliceVar(&patches, "patch", nil, "install config patches (format: op:path:value)")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace for the ClusterDeploymentCustomization (required)")
 	return cmd
 }
 
 func provisionTemplateGetCmd() *cobra.Command {
-	return &cobra.Command{
+	var namespace string
+	cmd := &cobra.Command{
 		Use:   "template-get <name>",
 		Short: "Get details of a cluster template",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if namespace == "" {
+				return fmt.Errorf("the --namespace flag is required (ClusterDeploymentCustomization is a namespaced resource)")
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := provisioning.New(c, cfg, logger)
-			obj, err := mgr.GetTemplate(context.Background(), args[0])
+			obj, err := mgr.GetTemplate(context.Background(), args[0], namespace)
 			if err != nil {
 				return err
 			}
@@ -739,20 +748,26 @@ func provisionTemplateGetCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace for the ClusterDeploymentCustomization (required)")
+	return cmd
 }
 
 func provisionTemplateListCmd() *cobra.Command {
 	var outputJSON bool
+	var namespace string
 	cmd := &cobra.Command{
 		Use:   "template-list",
 		Short: "List all cluster templates",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if namespace == "" {
+				return fmt.Errorf("the --namespace flag is required (ClusterDeploymentCustomization is a namespaced resource)")
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := provisioning.New(c, cfg, logger)
-			templates, err := mgr.ListTemplates(context.Background())
+			templates, err := mgr.ListTemplates(context.Background(), namespace)
 			if err != nil {
 				return err
 			}
@@ -773,31 +788,38 @@ func provisionTemplateListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace for the ClusterDeploymentCustomization (required)")
 	return cmd
 }
 
 func provisionTemplateRemoveCmd() *cobra.Command {
-	return &cobra.Command{
+	var namespace string
+	cmd := &cobra.Command{
 		Use:   "template-remove <name>",
 		Short: "Remove a cluster template",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if namespace == "" {
+				return fmt.Errorf("the --namespace flag is required (ClusterDeploymentCustomization is a namespaced resource)")
+			}
 			c, err := buildClient()
 			if err != nil {
 				return err
 			}
 			mgr := provisioning.New(c, cfg, logger)
-			if err := mgr.RemoveTemplate(context.Background(), args[0]); err != nil {
+			if err := mgr.RemoveTemplate(context.Background(), args[0], namespace); err != nil {
 				return err
 			}
-			fmt.Printf("Template %s removed\n", args[0])
+			fmt.Printf("Template %s removed from namespace %s\n", args[0], namespace)
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&namespace, "namespace", "", "namespace for the ClusterDeploymentCustomization (required)")
+	return cmd
 }
 
 func provisionTemplateApplyCmd() *cobra.Command {
-	var template string
+	var template, templateNamespace string
 	cmd := &cobra.Command{
 		Use:   "template-apply <cluster>",
 		Short: "Apply a cluster template to a ClusterDeployment",
@@ -811,7 +833,7 @@ func provisionTemplateApplyCmd() *cobra.Command {
 				return err
 			}
 			mgr := provisioning.New(c, cfg, logger)
-			if err := mgr.ApplyTemplate(context.Background(), args[0], template); err != nil {
+			if err := mgr.ApplyTemplate(context.Background(), args[0], template, templateNamespace); err != nil {
 				return err
 			}
 			fmt.Printf("Template %s applied to %s\n", template, args[0])
@@ -819,5 +841,6 @@ func provisionTemplateApplyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&template, "template", "", "template name (required)")
+	cmd.Flags().StringVar(&templateNamespace, "template-namespace", "", "namespace of the template (default: same as cluster)")
 	return cmd
 }
