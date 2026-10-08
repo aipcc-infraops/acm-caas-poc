@@ -670,7 +670,7 @@ func TestCheckLifecycleSupportFullForHiveCluster(t *testing.T) {
 	}
 }
 
-func TestCheckLifecycleSupportFullForKubernetes(t *testing.T) {
+func TestCheckLifecycleSupportUnsupportedForKubernetesWithoutCAPI(t *testing.T) {
 	mci := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "internal.open-cluster-management.io/v1beta1",
@@ -688,7 +688,13 @@ func TestCheckLifecycleSupportFullForKubernetes(t *testing.T) {
 	}
 
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, mci)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+			client.GVRClusterDeployment:     "ClusterDeploymentList",
+		},
+		mci,
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -696,8 +702,8 @@ func TestCheckLifecycleSupportFullForKubernetes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckLifecycleSupport() error = %v", err)
 	}
-	if reason.Support != LifecycleFull {
-		t.Errorf("expected LifecycleFull for Kubernetes (CAPI scale-to-zero), got %v", reason.Support)
+	if reason.Support != LifecycleUnsupported {
+		t.Errorf("expected LifecycleUnsupported for Kubernetes without CAPI MachineDeployments, got %v", reason.Support)
 	}
 	if reason.ClusterType != client.ClusterTypeKubernetes {
 		t.Errorf("expected ClusterTypeKubernetes, got %v", reason.ClusterType)
