@@ -217,19 +217,23 @@ func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name str
 		return nil, fmt.Errorf("checking ClusterDeployment: %w", err)
 	}
 
-	// No ClusterDeployment — check CAPI MachineDeployments and cluster type.
+	// No ClusterDeployment — check CAPI MachineDeployments first, then cluster type.
 	clusterType, typeErr := m.client.GetClusterType(ctx, name)
 	if typeErr != nil {
 		clusterType = client.ClusterTypeUnknown
 	}
 
-	if clusterType == client.ClusterTypeKubernetes {
-		return &LifecycleSupportReason{Support: LifecycleFull, ClusterType: clusterType}, nil
-	}
-
 	mds, mdErr := m.listCAPIMachineDeployments(ctx, name)
 	if mdErr == nil && len(mds) > 0 {
 		return &LifecycleSupportReason{Support: LifecycleFull, ClusterType: clusterType}, nil
+	}
+
+	if clusterType == client.ClusterTypeKubernetes {
+		return &LifecycleSupportReason{
+			Support:     LifecycleUnsupported,
+			ClusterType: clusterType,
+			Alternative: "No CAPI MachineDeployments found. Use 'acmlab scaling set' if the cluster has a MachineDeployment.",
+		}, nil
 	}
 
 	return &LifecycleSupportReason{Support: LifecycleUnsupported, ClusterType: clusterType}, nil
@@ -393,7 +397,8 @@ func (m *Manager) getCAPIPowerStateStatus(ctx context.Context, name string) (Pow
 			continue
 		}
 		readyReplicas, _, _ := unstructured.NestedInt64(md.Object, "status", "readyReplicas")
-		if readyReplicas > 0 {
+		availableReplicas, _, _ := unstructured.NestedInt64(md.Object, "status", "availableReplicas")
+		if readyReplicas >= specReplicas && availableReplicas >= specReplicas {
 			return PowerStateRunning, nil
 		}
 		return PowerStateUnknown, nil
