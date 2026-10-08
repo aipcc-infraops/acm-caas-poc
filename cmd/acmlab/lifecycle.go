@@ -41,10 +41,11 @@ func lifecycleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "lifecycle",
 		Short: "Manage cluster lifecycle (hibernate/resume)",
-		Long: `Manage cluster power state via Hive ClusterDeployment.
+		Long: `Manage cluster power state via Hive ClusterDeployment or CAPI MachineDeployment.
 
-Only works with Hive-provisioned clusters. Imported clusters do not support
-lifecycle operations.`,
+Works with Hive-provisioned and CAPI-provisioned clusters. For CAPI clusters,
+hibernate scales MachineDeployment replicas to zero and resume restores them.
+Imported clusters without Hive or CAPI resources do not support lifecycle operations.`,
 	}
 	cmd.AddCommand(hibernateCmd(), resumeCmd(), lifecycleStatusCmd(), lifecycleDiagnoseCmd(), lifecycleListCmd(), lifecycleCuratorApplyCmd(), lifecycleCuratorStatusCmd(), lifecycleCuratorRemoveCmd(), lifecycleCuratorListCmd())
 	return cmd
@@ -519,8 +520,13 @@ Outputs actionable suggestions when problems are found.`,
 				if report.Platform != "" {
 					fmt.Printf("Platform: %s\n", report.Platform)
 				}
-				fmt.Printf("Hive Power (spec):   %s\n", report.HivePowerSpec)
-				fmt.Printf("Hive Power (status): %s\n", report.HivePowerStatus)
+				if report.Platform == "CAPI" {
+					fmt.Printf("Lifecycle State (desired): %s\n", report.HivePowerSpec)
+					fmt.Printf("Lifecycle State (actual):  %s\n", report.HivePowerStatus)
+				} else {
+					fmt.Printf("Hive Power (spec):   %s\n", report.HivePowerSpec)
+					fmt.Printf("Hive Power (status): %s\n", report.HivePowerStatus)
+				}
 				fmt.Printf("ACM Available: %s\n", report.ACMAvailable)
 				fmt.Printf("ACM Joined:    %s\n", report.ACMJoined)
 				fmt.Println()

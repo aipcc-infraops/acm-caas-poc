@@ -9,6 +9,118 @@ import (
 	"github.com/pablofelix/acm-caas-poc/internal/client"
 )
 
+type ComplianceDiagnoseCheck struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type ComplianceDiagnoseResult struct {
+	Cluster string                    `json:"cluster"`
+	Healthy bool                      `json:"healthy"`
+	Checks  []ComplianceDiagnoseCheck `json:"checks"`
+}
+
+func (r *ComplianceDiagnoseResult) addCheck(name, status, message string) {
+	r.Checks = append(r.Checks, ComplianceDiagnoseCheck{Name: name, Status: status, Message: message})
+	if status == "fail" {
+		r.Healthy = false
+	}
+}
+
+func (m *Manager) DiagnoseCompliance(ctx context.Context, cluster string) (*ComplianceDiagnoseResult, error) {
+	m.logger.Info("security.DiagnoseCompliance", "cluster", cluster)
+
+	result := &ComplianceDiagnoseResult{
+		Cluster: cluster,
+		Healthy: true,
+	}
+
+	opName := complianceOperatorPolicyName(cluster)
+	opObj, err := m.client.Get(ctx, client.GVROperatorPolicy, DefaultNamespace, opName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			result.addCheck("operator-policy", "fail",
+				"OperatorPolicy not found. Deploy with: acmlab security deploy-compliance --cluster "+cluster)
+			return result, nil
+		}
+		return nil, fmt.Errorf("getting operator policy: %w", err)
+	}
+	result.addCheck("operator-policy", "pass", "OperatorPolicy "+opName+" exists")
+
+	opCompliant := policyComplianceStatus(opObj.Object)
+	switch opCompliant {
+	case "Compliant":
+		result.addCheck("operator-compliant", "pass", "Compliance Operator subscription is Compliant")
+	case "NonCompliant":
+		result.addCheck("operator-compliant", "fail",
+			"Compliance Operator subscription is NonCompliant — operator may not be installed or healthy")
+	default:
+		result.addCheck("operator-compliant", "warn",
+			"Compliance Operator compliance status: "+opCompliant+" — still reconciling")
+	}
+
+	healthObj, err := m.client.Get(ctx, client.GVRPolicy, DefaultNamespace, opName+"-health")
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			result.addCheck("health-policy", "warn",
+				"Health policy not found. Operator health cannot be verified from the hub.")
+		} else {
+			return nil, fmt.Errorf("getting health policy: %w", err)
+		}
+	} else {
+		healthCompliant := policyComplianceStatus(healthObj.Object)
+		switch healthCompliant {
+		case "Compliant":
+			result.addCheck("health-policy", "pass",
+				"Compliance Operator deployment is healthy (readyReplicas >= 1)")
+		case "NonCompliant":
+			result.addCheck("health-policy", "fail",
+				"Compliance Operator deployment is not healthy — check pods in openshift-compliance on the spoke")
+		default:
+			result.addCheck("health-policy", "warn",
+				"Health policy compliance: "+healthCompliant+" — still evaluating")
+		}
+	}
+
+	scanName := complianceScanPolicyName(cluster)
+	scanObj, err := m.client.Get(ctx, client.GVRPolicy, DefaultNamespace, scanName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			result.addCheck("scan-policy", "warn",
+				"No compliance scan policy found. Create with: acmlab security scan --cluster "+cluster)
+		} else {
+			return nil, fmt.Errorf("getting scan policy: %w", err)
+		}
+	} else {
+		scanCompliant := policyComplianceStatus(scanObj.Object)
+		switch scanCompliant {
+		case "Compliant":
+			result.addCheck("scan-policy", "pass", "Compliance scan policy is Compliant — ScanSettingBinding delivered")
+		case "NonCompliant":
+			result.addCheck("scan-policy", "fail",
+				"Compliance scan policy is NonCompliant — Profile or ScanSetting may be missing on the spoke. "+
+					"If Profiles are empty, ProfileBundles may not have finished generating content yet.")
+		default:
+			result.addCheck("scan-policy", "warn", "Scan policy compliance: "+scanCompliant+" — still evaluating")
+		}
+	}
+
+	return result, nil
+}
+
+func policyComplianceStatus(obj map[string]interface{}) string {
+	status, _ := obj["status"].(map[string]interface{})
+	if status == nil {
+		return "Unknown"
+	}
+	compliant, _ := status["compliant"].(string)
+	if compliant == "" {
+		return "Unknown"
+	}
+	return compliant
+}
+
 type ComplianceScanOpts struct {
 	Cluster    string
 	Profile    string

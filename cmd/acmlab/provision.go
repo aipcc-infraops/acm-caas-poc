@@ -151,7 +151,7 @@ After the cluster has been destroyed, use --infra-id, --platform, and --region i
 func provisionCreateCmd() *cobra.Command {
 	var platform, region, baseDomain, imageSet, workerType, masterType, sshKeyFile, sshPrivateKeyFile, pullSecretFile, manifestsDir string
 	var clusterType, kubernetesVersion, infraProvider, releaseImage, sshKeyName string
-	var clusterNetworkCIDR, serviceNetworkCIDR string
+	var clusterNetworkCIDR, serviceNetworkCIDR, machineNetworkCIDR string
 	var clusterNetworkHostPrefix int64
 	var workers, masters int64
 	cmd := &cobra.Command{
@@ -232,6 +232,7 @@ func provisionCreateCmd() *cobra.Command {
 				ClusterNetworkCIDR:       clusterNetworkCIDR,
 				ClusterNetworkHostPrefix: clusterNetworkHostPrefix,
 				ServiceNetworkCIDR:       serviceNetworkCIDR,
+				MachineNetworkCIDR:       machineNetworkCIDR,
 			}
 
 			if pullSecretFile != "" {
@@ -306,6 +307,7 @@ func provisionCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&clusterNetworkCIDR, "cluster-network-cidr", "", "pod network CIDR (default: 10.128.0.0/14)")
 	cmd.Flags().Int64Var(&clusterNetworkHostPrefix, "cluster-network-host-prefix", 0, "per-node host prefix length (default: 23)")
 	cmd.Flags().StringVar(&serviceNetworkCIDR, "service-network-cidr", "", "service network CIDR (default: 172.30.0.0/16)")
+	cmd.Flags().StringVar(&machineNetworkCIDR, "machine-network-cidr", "", "node/machine network CIDR (optional, used for Submariner non-overlapping topology)")
 	return cmd
 }
 

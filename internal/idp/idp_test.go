@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -813,5 +814,131 @@ func TestEnforceSSOCustomNamespace(t *testing.T) {
 	_, err := c.Get(context.Background(), client.GVRPolicy, "my-namespace", "sso-enforcement")
 	if err != nil {
 		t.Fatalf("SSO policy not created in custom namespace: %v", err)
+	}
+}
+
+func TestIsManifestWorkApplied(t *testing.T) {
+	tests := []struct {
+		name string
+		obj  map[string]interface{}
+		want bool
+	}{
+		{
+			"applied",
+			map[string]interface{}{
+				"status": map[string]interface{}{
+					"conditions": []interface{}{
+						map[string]interface{}{"type": "Applied", "status": "True"},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"not-applied",
+			map[string]interface{}{
+				"status": map[string]interface{}{
+					"conditions": []interface{}{
+						map[string]interface{}{"type": "Applied", "status": "False"},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"no-status",
+			map[string]interface{}{},
+			false,
+		},
+		{
+			"no-conditions",
+			map[string]interface{}{
+				"status": map[string]interface{}{},
+			},
+			false,
+		},
+		{
+			"other-condition",
+			map[string]interface{}{
+				"status": map[string]interface{}{
+					"conditions": []interface{}{
+						map[string]interface{}{"type": "Available", "status": "True"},
+					},
+				},
+			},
+			false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isManifestWorkApplied(tt.obj)
+			if got != tt.want {
+				t.Errorf("isManifestWorkApplied() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWaitForAppliedAlreadyApplied(t *testing.T) {
+	mw := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "work.open-cluster-management.io/v1",
+			"kind":       "ManifestWork",
+			"metadata": map[string]interface{}{
+				"name":      "idp-test-idp",
+				"namespace": "spoke1",
+			},
+			"status": map[string]interface{}{
+				"conditions": []interface{}{
+					map[string]interface{}{"type": "Applied", "status": "True"},
+				},
+			},
+		},
+	}
+	mgr, _ := newManager(mw)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := mgr.WaitForApplied(ctx, "test-idp", "spoke1", 10*time.Second)
+	if err != nil {
+		t.Fatalf("WaitForApplied failed for already-applied ManifestWork: %v", err)
+	}
+}
+
+func TestWaitForAppliedTimeout(t *testing.T) {
+	mw := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "work.open-cluster-management.io/v1",
+			"kind":       "ManifestWork",
+			"metadata": map[string]interface{}{
+				"name":      "idp-pending-idp",
+				"namespace": "spoke1",
+			},
+		},
+	}
+	mgr, _ := newManager(mw)
+	err := mgr.WaitForApplied(context.Background(), "pending-idp", "spoke1", 1*time.Second)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected timeout error, got: %v", err)
+	}
+}
+
+func TestWaitForAppliedContextCancelled(t *testing.T) {
+	mgr, _ := newManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := mgr.WaitForApplied(ctx, "cancelled", "spoke1", 30*time.Second)
+	if err == nil {
+		t.Fatal("expected context cancelled error")
+	}
+}
+
+func TestWaitForAppliedNotFoundInitially(t *testing.T) {
+	mgr, _ := newManager()
+	err := mgr.WaitForApplied(context.Background(), "missing", "spoke1", 1*time.Second)
+	if err == nil {
+		t.Fatal("expected timeout error for missing ManifestWork")
 	}
 }
