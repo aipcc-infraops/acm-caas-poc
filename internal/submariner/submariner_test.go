@@ -409,6 +409,26 @@ func TestParseClusterStatusAvailableFalse(t *testing.T) {
 	}
 }
 
+func TestParseClusterStatusInferConnectionsWhenConditionAbsent(t *testing.T) {
+	obj := map[string]interface{}{
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Available", "status": "True"},
+				map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "True"},
+				map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
+				map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
+			},
+		},
+	}
+	cs := parseClusterStatus("spoke1", obj)
+	if cs.Connections != 1 {
+		t.Errorf("expected Connections=1 when addon healthy and no ConnectionDegraded condition, got %d", cs.Connections)
+	}
+	if cs.ConnectionDegraded {
+		t.Error("expected ConnectionDegraded=false")
+	}
+}
+
 func TestStatusIncludesConnectionDegraded(t *testing.T) {
 	c1 := managedCluster("spoke1", "prod-set")
 	addon := addOnWithStatus("spoke1", []interface{}{
