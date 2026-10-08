@@ -345,6 +345,51 @@ func TestGenerateInstallConfig_CustomCIDRs_AWS(t *testing.T) {
 	}
 }
 
+func TestGenerateInstallConfig_MachineNetworkCIDR(t *testing.T) {
+	opts := ClusterOpts{
+		Name:                     "subm-test",
+		Platform:                 "ibmcloud",
+		BaseDomain:               "example.com",
+		Region:                   "us-south",
+		MasterType:               "bx2-4x16",
+		WorkerType:               "bx2-4x16",
+		MasterReplicas:           3,
+		WorkerReplicas:           1,
+		SSHKey:                   "ssh-rsa AAAA",
+		ClusterNetworkCIDR:       "10.136.0.0/14",
+		ServiceNetworkCIDR:       "172.32.0.0/16",
+		MachineNetworkCIDR:       "10.242.0.0/16",
+	}
+	cfg := generateInstallConfig(opts)
+	if !strings.Contains(cfg, "machineNetwork:") {
+		t.Error("expected machineNetwork block when MachineNetworkCIDR is set")
+	}
+	if !strings.Contains(cfg, "cidr: 10.242.0.0/16") {
+		t.Error("expected machine network CIDR 10.242.0.0/16")
+	}
+}
+
+func TestGenerateInstallConfig_NoMachineNetwork(t *testing.T) {
+	opts := ClusterOpts{
+		Name:                     "test",
+		Platform:                 "aws",
+		BaseDomain:               "example.com",
+		Region:                   "us-east-1",
+		MasterType:               "m5.xlarge",
+		WorkerType:               "m5.large",
+		MasterReplicas:           3,
+		WorkerReplicas:           2,
+		SSHKey:                   "ssh-rsa AAAA",
+		ClusterNetworkCIDR:       DefaultClusterNetworkCIDR,
+		ClusterNetworkHostPrefix: DefaultClusterNetworkHostPrefix,
+		ServiceNetworkCIDR:       DefaultServiceNetworkCIDR,
+	}
+	cfg := generateInstallConfig(opts)
+	if strings.Contains(cfg, "machineNetwork") {
+		t.Error("machineNetwork should not appear when MachineNetworkCIDR is empty")
+	}
+}
+
 func TestBuildNamespace(t *testing.T) {
 	ns := buildNamespace("test-ns")
 	if ns.GetName() != "test-ns" {

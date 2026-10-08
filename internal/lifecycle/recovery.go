@@ -9,6 +9,7 @@ import (
 
 	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes"
@@ -29,6 +30,16 @@ type RecoveryResult struct {
 // Kubelet client certs rotate every ~24h in OpenShift; if the cluster was
 // powered off during rotation, the certs expire and must be approved manually.
 func (m *Manager) PostResumeRecovery(ctx context.Context, namespace, name string) (*RecoveryResult, error) {
+	_, cdErr := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
+	if cdErr != nil {
+		if apierrors.IsNotFound(cdErr) {
+			return &RecoveryResult{
+				Message: "Skipped: CAPI cluster (certificate recovery requires ClusterDeployment)",
+			}, nil
+		}
+		return nil, fmt.Errorf("checking ClusterDeployment: %w", cdErr)
+	}
+
 	spokeConfig, err := m.getSpokeRESTConfig(ctx, namespace, name)
 	if err != nil {
 		return nil, fmt.Errorf("getting spoke kubeconfig: %w", err)

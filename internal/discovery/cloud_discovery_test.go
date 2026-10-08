@@ -183,18 +183,33 @@ func TestScanClustersMarkManaged(t *testing.T) {
 	}
 }
 
-func TestScanClustersMissingCLISkipsProvider(t *testing.T) {
+func TestScanClustersMissingCLIReturnsError(t *testing.T) {
 	mgr := newManager()
 	mgr.cmdRunner = func(name string, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("command not found")
 	}
 
-	clusters, err := mgr.ScanClusters(context.Background(), ScanOpts{Provider: "aws"})
-	if err != nil {
-		t.Fatalf("expected no error when CLI missing, got: %v", err)
+	_, err := mgr.ScanClusters(context.Background(), ScanOpts{Provider: "aws"})
+	if err == nil {
+		t.Fatal("expected error when provider CLI is missing")
 	}
-	if len(clusters) != 0 {
-		t.Errorf("expected 0 clusters when CLI missing, got %d", len(clusters))
+	if !strings.Contains(err.Error(), "install") {
+		t.Errorf("expected actionable install message, got: %v", err)
+	}
+}
+
+func TestScanClustersAllProvidersFail(t *testing.T) {
+	mgr := newManager()
+	mgr.cmdRunner = func(name string, args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("command not found")
+	}
+
+	_, err := mgr.ScanClusters(context.Background(), ScanOpts{})
+	if err == nil {
+		t.Fatal("expected error when all provider CLIs missing")
+	}
+	if !strings.Contains(err.Error(), "all provider scans failed") {
+		t.Errorf("expected combined error message, got: %v", err)
 	}
 }
 

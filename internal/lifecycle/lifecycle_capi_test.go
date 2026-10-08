@@ -230,7 +230,7 @@ func TestGetPowerStateCAPINone(t *testing.T) {
 	}
 }
 
-func TestCheckLifecycleSupportCAPIKubernetes(t *testing.T) {
+func TestCheckLifecycleSupportKubernetesNoMachineDeployments(t *testing.T) {
 	mci := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "internal.open-cluster-management.io/v1beta1",
@@ -248,7 +248,51 @@ func TestCheckLifecycleSupportCAPIKubernetes(t *testing.T) {
 	}
 
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, mci)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+			client.GVRClusterDeployment:     "ClusterDeploymentList",
+		},
+		mci,
+	)
+	c := &client.Client{Dynamic: fakeDynamic}
+	m := New(c, config.Config{}, discardLogger)
+
+	reason, err := m.CheckLifecycleSupport(context.Background(), "k8s-cluster", "k8s-cluster")
+	if err != nil {
+		t.Fatalf("CheckLifecycleSupport() error = %v", err)
+	}
+	if reason.Support != LifecycleUnsupported {
+		t.Errorf("expected LifecycleUnsupported for Kubernetes without MachineDeployments, got %v", reason.Support)
+	}
+}
+
+func TestCheckLifecycleSupportKubernetesWithMachineDeployments(t *testing.T) {
+	mci := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "internal.open-cluster-management.io/v1beta1",
+			"kind":       "ManagedClusterInfo",
+			"metadata": map[string]interface{}{
+				"name":      "k8s-cluster",
+				"namespace": "k8s-cluster",
+			},
+			"status": map[string]interface{}{
+				"distributionInfo": map[string]interface{}{
+					"type": "kubernetes",
+				},
+			},
+		},
+	}
+	md := capiMachineDeployment("k8s-cluster", "k8s-cluster-workers", 1, nil)
+
+	scheme := runtime.NewScheme()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+			client.GVRClusterDeployment:     "ClusterDeploymentList",
+		},
+		mci, md,
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -257,7 +301,7 @@ func TestCheckLifecycleSupportCAPIKubernetes(t *testing.T) {
 		t.Fatalf("CheckLifecycleSupport() error = %v", err)
 	}
 	if reason.Support != LifecycleFull {
-		t.Errorf("expected LifecycleFull for Kubernetes, got %v", reason.Support)
+		t.Errorf("expected LifecycleFull for Kubernetes with MachineDeployments, got %v", reason.Support)
 	}
 }
 
@@ -338,6 +382,11 @@ func TestCheckLifecycleSupportOCPWithoutCAPI(t *testing.T) {
 
 func TestGetPowerStateStatusCAPIFallback(t *testing.T) {
 	md := capiMachineDeployment("capi-cluster", "capi-cluster-workers", 3, nil)
+	md.Object["status"] = map[string]interface{}{
+		"replicas":          int64(3),
+		"readyReplicas":     int64(3),
+		"availableReplicas": int64(3),
+	}
 	c := fakeCAPIClient(md)
 	m := New(c, config.Config{}, discardLogger)
 
@@ -364,8 +413,32 @@ func TestGetPowerStateStatusCAPIHibernated(t *testing.T) {
 	}
 }
 
+func TestGetPowerStateStatusCAPIPartialConvergence(t *testing.T) {
+	md := capiMachineDeployment("capi-cluster", "capi-cluster-workers", 2, nil)
+	md.Object["status"] = map[string]interface{}{
+		"replicas":          int64(1),
+		"readyReplicas":     int64(1),
+		"availableReplicas": int64(1),
+	}
+	c := fakeCAPIClient(md)
+	m := New(c, config.Config{}, discardLogger)
+
+	state, err := m.GetPowerStateStatus(context.Background(), "capi-cluster", "capi-cluster")
+	if err != nil {
+		t.Fatalf("GetPowerStateStatus() error = %v", err)
+	}
+	if state != PowerStateUnknown {
+		t.Errorf("expected Unknown when readyReplicas < spec.replicas, got %s", state)
+	}
+}
+
 func TestDiagnoseCAPICluster(t *testing.T) {
 	md := capiMachineDeployment("capi-cluster", "capi-cluster-workers", 3, nil)
+	md.Object["status"] = map[string]interface{}{
+		"replicas":          int64(3),
+		"readyReplicas":     int64(3),
+		"availableReplicas": int64(3),
+	}
 	mc := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "cluster.open-cluster-management.io/v1",
@@ -458,6 +531,46 @@ func TestDiagnoseNoCAPINoHive(t *testing.T) {
 	_, err := m.Diagnose(context.Background(), "missing", "missing")
 	if err == nil {
 		t.Fatal("expected error for cluster with no ClusterDeployment or CAPI MachineDeployments")
+	}
+}
+
+func TestCAPIFullLifecycleCycle(t *testing.T) {
+	md := capiMachineDeployment("capi-aws-test", "capi-aws-test-workers", 1, nil)
+	c := fakeCAPIClient(md)
+	m := New(c, config.Config{}, discardLogger)
+	ctx := context.Background()
+
+	state, err := m.GetPowerState(ctx, "capi-aws-test", "capi-aws-test")
+	if err != nil {
+		t.Fatalf("GetPowerState() before hibernate error = %v", err)
+	}
+	if state != PowerStateRunning {
+		t.Errorf("expected Running before hibernate, got %s", state)
+	}
+
+	if err := m.Hibernate(ctx, "capi-aws-test", "capi-aws-test"); err != nil {
+		t.Fatalf("Hibernate() error = %v", err)
+	}
+
+	state, err = m.GetPowerState(ctx, "capi-aws-test", "capi-aws-test")
+	if err != nil {
+		t.Fatalf("GetPowerState() after hibernate error = %v", err)
+	}
+	if state != PowerStateHibernating {
+		t.Errorf("expected Hibernating after hibernate, got %s", state)
+	}
+
+	if err := m.Resume(ctx, "capi-aws-test", "capi-aws-test"); err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+
+	got, err := c.Get(ctx, client.GVRCAPIMachineDeployment, "capi-aws-test", "capi-aws-test-workers")
+	if err != nil {
+		t.Fatalf("Get MachineDeployment error = %v", err)
+	}
+	replicas, _, _ := unstructured.NestedInt64(got.Object, "spec", "replicas")
+	if replicas != 1 {
+		t.Errorf("expected replicas=1 after resume, got %d", replicas)
 	}
 }
 

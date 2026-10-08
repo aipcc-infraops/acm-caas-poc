@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -40,6 +41,7 @@ func idpConfigureCmd() *cobra.Command {
 		bindDN        string
 		bindPassword  string
 		insecure      bool
+		wait          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "configure <name>",
@@ -86,8 +88,17 @@ func idpConfigureCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("IdP %s (%s) configured on cluster %s\n", args[0], idpType, cluster)
-			fmt.Println("Note: the authentication operator will roll out new oauth-server pods.")
-			fmt.Println("Wait ~60 seconds before attempting login.")
+			if wait {
+				fmt.Println("Waiting for ManifestWork to be applied...")
+				if err := mgr.WaitForApplied(context.Background(), args[0], cluster, 2*time.Minute); err != nil {
+					return err
+				}
+				fmt.Println("ManifestWork applied. The authentication operator will now roll out new oauth-server pods.")
+				fmt.Println("Allow ~60 additional seconds for the OAuth rollout before attempting login.")
+			} else {
+				fmt.Println("Note: the authentication operator will roll out new oauth-server pods.")
+				fmt.Println("Wait ~60 seconds before attempting login, or use --wait.")
+			}
 			return nil
 		},
 	}
@@ -102,6 +113,7 @@ func idpConfigureCmd() *cobra.Command {
 	cmd.Flags().StringVar(&bindDN, "bind-dn", "", "LDAP bind DN")
 	cmd.Flags().StringVar(&bindPassword, "bind-password", "", "LDAP bind password")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "LDAP insecure connection")
+	cmd.Flags().BoolVar(&wait, "wait", false, "wait for ManifestWork to be applied before returning")
 	return cmd
 }
 
@@ -232,6 +244,7 @@ func idpConfigureUniqueCmd() *cobra.Command {
 	var (
 		cluster   string
 		adminUser string
+		wait      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "configure-unique",
@@ -252,16 +265,26 @@ func idpConfigureUniqueCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			idpName := "emergency-" + cluster
 			fmt.Printf("Unique emergency IdP deployed to cluster %s\n", cluster)
 			fmt.Printf("  User:     %s\n", adminUser)
 			fmt.Printf("  Password: %s\n", password)
 			fmt.Println("  SENSITIVE: save this password securely — it will not be shown again.")
-			fmt.Println("Note: wait ~60 seconds for the authentication rollout before login.")
+			if wait {
+				fmt.Println("Waiting for ManifestWork to be applied...")
+				if err := mgr.WaitForApplied(context.Background(), idpName, cluster, 2*time.Minute); err != nil {
+					return err
+				}
+				fmt.Println("ManifestWork applied. Allow ~60 seconds for OAuth rollout before login.")
+			} else {
+				fmt.Println("Note: wait ~60 seconds for the authentication rollout before login, or use --wait.")
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&cluster, "cluster", "", "target cluster (required)")
 	cmd.Flags().StringVar(&adminUser, "admin-user", "cluster-admin", "admin username")
+	cmd.Flags().BoolVar(&wait, "wait", false, "wait for ManifestWork to be applied before returning")
 	return cmd
 }
 

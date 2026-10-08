@@ -145,7 +145,7 @@ func (m *Manager) GetPowerStateStatus(ctx context.Context, namespace, name strin
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return m.getCAPIPowerState(ctx, name)
+			return m.getCAPIPowerStateStatus(ctx, name)
 		}
 		return "", fmt.Errorf("getting ClusterDeployment: %w", err)
 	}
@@ -217,20 +217,23 @@ func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name str
 		return nil, fmt.Errorf("checking ClusterDeployment: %w", err)
 	}
 
-	// No ClusterDeployment — check cluster type for a useful message.
+	// No ClusterDeployment — check CAPI MachineDeployments first, then cluster type.
 	clusterType, typeErr := m.client.GetClusterType(ctx, name)
 	if typeErr != nil {
-		// Can't determine type — treat as unsupported but don't mask the real error.
-		return &LifecycleSupportReason{Support: LifecycleUnsupported, ClusterType: client.ClusterTypeUnknown}, nil
-	}
-
-	if clusterType == client.ClusterTypeKubernetes {
-		return &LifecycleSupportReason{Support: LifecycleFull, ClusterType: clusterType}, nil
+		clusterType = client.ClusterTypeUnknown
 	}
 
 	mds, mdErr := m.listCAPIMachineDeployments(ctx, name)
 	if mdErr == nil && len(mds) > 0 {
 		return &LifecycleSupportReason{Support: LifecycleFull, ClusterType: clusterType}, nil
+	}
+
+	if clusterType == client.ClusterTypeKubernetes {
+		return &LifecycleSupportReason{
+			Support:     LifecycleUnsupported,
+			ClusterType: clusterType,
+			Alternative: "No CAPI MachineDeployments found. Use 'acmlab scaling set' if the cluster has a MachineDeployment.",
+		}, nil
 	}
 
 	return &LifecycleSupportReason{Support: LifecycleUnsupported, ClusterType: clusterType}, nil
@@ -249,22 +252,36 @@ func (m *Manager) ClusterSupportsLifecycle(ctx context.Context, namespace, name 
 
 func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, error) {
 	m.logger.Info("lifecycle.ListClustersWithLifecycle")
+	seen := map[string]bool{}
+	var names []string
+
 	cds, err := m.client.List(ctx, client.GVRClusterDeployment, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("listing ClusterDeployments: %w", err)
 	}
-
-	var names []string
 	for _, item := range cds.Items {
-		name := item.GetName()
-		namespace := item.GetNamespace()
-		names = append(names, fmt.Sprintf("%s/%s", namespace, name))
+		key := fmt.Sprintf("%s/%s", item.GetNamespace(), item.GetName())
+		names = append(names, key)
+		seen[key] = true
 	}
+
+	mds, err := m.client.List(ctx, client.GVRCAPIMachineDeployment, "", "")
+	if err == nil {
+		for _, item := range mds.Items {
+			ns := item.GetNamespace()
+			key := fmt.Sprintf("%s/%s", ns, ns)
+			if !seen[key] {
+				names = append(names, key+" (CAPI)")
+				seen[key] = true
+			}
+		}
+	}
+
 	return names, nil
 }
 
 const preHibernateAnnotation = "acmlab.redhat.com/pre-hibernate-replicas"
-const defaultCAPIReplicas = 2
+const defaultCAPIReplicas = 1
 
 func (m *Manager) HibernateCAPI(ctx context.Context, name string) error {
 	m.logger.Info("lifecycle.HibernateCAPI", "cluster", name)
@@ -365,6 +382,36 @@ func (m *Manager) getCAPIPowerState(ctx context.Context, name string) (PowerStat
 	return PowerStateHibernating, nil
 }
 
+func (m *Manager) getCAPIPowerStateStatus(ctx context.Context, name string) (PowerState, error) {
+	mds, err := m.listCAPIMachineDeployments(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if len(mds) == 0 {
+		return "", fmt.Errorf("no ClusterDeployment or CAPI MachineDeployment found for cluster %s", name)
+	}
+
+	for _, md := range mds {
+		specReplicas, _, _ := unstructured.NestedInt64(md.Object, "spec", "replicas")
+		if specReplicas == 0 {
+			continue
+		}
+		readyReplicas, _, _ := unstructured.NestedInt64(md.Object, "status", "readyReplicas")
+		availableReplicas, _, _ := unstructured.NestedInt64(md.Object, "status", "availableReplicas")
+		if readyReplicas >= specReplicas && availableReplicas >= specReplicas {
+			return PowerStateRunning, nil
+		}
+		return PowerStateUnknown, nil
+	}
+	for _, md := range mds {
+		statusReplicas, _, _ := unstructured.NestedInt64(md.Object, "status", "replicas")
+		if statusReplicas > 0 {
+			return PowerStateUnknown, nil
+		}
+	}
+	return PowerStateHibernating, nil
+}
+
 func (m *Manager) listCAPIMachineDeployments(ctx context.Context, clusterName string) ([]unstructured.Unstructured, error) {
 	list, err := m.client.List(ctx, client.GVRCAPIMachineDeployment, clusterName, "")
 	if err != nil {
@@ -440,9 +487,10 @@ func (m *Manager) diagnoseCAPI(ctx context.Context, name string, report *Diagnos
 
 	report.Platform = "CAPI"
 
-	state, _ := m.getCAPIPowerState(ctx, name)
-	report.HivePowerSpec = state
-	report.HivePowerStatus = state
+	specState, _ := m.getCAPIPowerState(ctx, name)
+	statusState, _ := m.getCAPIPowerStateStatus(ctx, name)
+	report.HivePowerSpec = specState
+	report.HivePowerStatus = statusState
 
 	totalReplicas := int64(0)
 	for _, md := range mds {
@@ -482,7 +530,7 @@ func (m *Manager) diagnoseCAPI(ctx context.Context, name string, report *Diagnos
 		available, joined := extractMCConditions(mc)
 		report.ACMAvailable = available
 		report.ACMJoined = joined
-		report.Checks = append(report.Checks, checkACMHealth(state, available, joined)...)
+		report.Checks = append(report.Checks, checkACMHealth(specState, available, joined)...)
 	}
 
 	report.Suggestions = deriveSuggestions(report.Checks)

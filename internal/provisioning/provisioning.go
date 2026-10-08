@@ -36,6 +36,7 @@ type ClusterOpts struct {
 	ClusterNetworkCIDR       string
 	ClusterNetworkHostPrefix int64
 	ServiceNetworkCIDR       string
+	MachineNetworkCIDR       string
 }
 
 type ClusterInfo struct {

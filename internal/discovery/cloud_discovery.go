@@ -87,11 +87,16 @@ func (m *Manager) ScanClusters(ctx context.Context, opts ScanOpts) ([]CloudClust
 	}
 
 	var all []CloudCluster
+	var scanErrors []string
 
 	if opts.Provider == "" || opts.Provider == "aws" {
 		clusters, err := scanAWS(runner, opts.Region)
 		if err != nil {
+			if opts.Provider == "aws" {
+				return nil, fmt.Errorf("AWS scan failed: %w — install aws or rosa CLI and ensure it is in PATH", err)
+			}
 			m.logger.Warn("AWS scan skipped", "error", err)
+			scanErrors = append(scanErrors, "aws: "+err.Error())
 		} else {
 			all = append(all, clusters...)
 		}
@@ -100,7 +105,11 @@ func (m *Manager) ScanClusters(ctx context.Context, opts ScanOpts) ([]CloudClust
 	if opts.Provider == "" || opts.Provider == "ibmcloud" {
 		clusters, err := scanIBMCloud(runner, opts.Region)
 		if err != nil {
+			if opts.Provider == "ibmcloud" {
+				return nil, fmt.Errorf("IBM Cloud scan failed: %w — install ibmcloud CLI and ensure it is in PATH", err)
+			}
 			m.logger.Warn("IBM Cloud scan skipped", "error", err)
+			scanErrors = append(scanErrors, "ibmcloud: "+err.Error())
 		} else {
 			all = append(all, clusters...)
 		}
@@ -108,6 +117,10 @@ func (m *Manager) ScanClusters(ctx context.Context, opts ScanOpts) ([]CloudClust
 
 	if opts.Provider != "" && opts.Provider != "aws" && opts.Provider != "ibmcloud" {
 		return nil, fmt.Errorf("unsupported provider %q (valid: aws, ibmcloud)", opts.Provider)
+	}
+
+	if opts.Provider == "" && len(scanErrors) > 0 && len(all) == 0 {
+		return nil, fmt.Errorf("all provider scans failed (install provider CLIs): %s", strings.Join(scanErrors, "; "))
 	}
 
 	managed, err := m.listManagedNames(ctx)

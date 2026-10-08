@@ -29,6 +29,7 @@ func securityCmd() *cobra.Command {
 		securityScanStatusCmd(),
 		securityComplianceReportCmd(),
 		securityRemoveComplianceCmd(),
+		securityDiagnoseComplianceCmd(),
 	)
 	return cmd
 }
@@ -498,5 +499,56 @@ func securityRemoveComplianceCmd() *cobra.Command {
 			return nil
 		},
 	}
+	return cmd
+}
+
+func securityDiagnoseComplianceCmd() *cobra.Command {
+	var outputJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "diagnose-compliance <cluster>",
+		Short: "Diagnose compliance scanning health for a cluster",
+		Long:  "Check Compliance Operator deployment, health policy, and scan status for a cluster. Reports actionable messages when Profiles or ProfileBundles are missing.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := security.New(c, cfg, logger)
+			result, err := mgr.DiagnoseCompliance(context.Background(), args[0])
+			if err != nil {
+				return err
+			}
+			if outputJSON {
+				data, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(data))
+				return nil
+			}
+			fmt.Printf("Cluster: %s\n", result.Cluster)
+			if result.Healthy {
+				fmt.Println("Status:  Healthy")
+			} else {
+				fmt.Println("Status:  Unhealthy")
+			}
+			fmt.Println()
+			for _, check := range result.Checks {
+				icon := "?"
+				switch check.Status {
+				case "pass":
+					icon = "OK"
+				case "fail":
+					icon = "FAIL"
+				case "warn":
+					icon = "WARN"
+				case "skip":
+					icon = "SKIP"
+				}
+				fmt.Printf("  [%-4s] %s: %s\n", icon, check.Name, check.Message)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }

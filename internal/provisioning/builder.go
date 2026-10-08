@@ -128,11 +128,18 @@ networking:
     hostPrefix: %d
   serviceNetwork:
   - %s
-%spullSecret: ""
+%s%spullSecret: ""
 sshKey: %s
 `, opts.Name, opts.BaseDomain, platformBlock, opts.MasterReplicas, controlPlanePlatform,
 		opts.WorkerReplicas, computePlatform, opts.ClusterNetworkCIDR, opts.ClusterNetworkHostPrefix,
-		opts.ServiceNetworkCIDR, credentialsMode, opts.SSHKey)
+		opts.ServiceNetworkCIDR, machineNetworkBlock(opts.MachineNetworkCIDR), credentialsMode, opts.SSHKey)
+}
+
+func machineNetworkBlock(cidr string) string {
+	if cidr == "" {
+		return ""
+	}
+	return fmt.Sprintf("  machineNetwork:\n  - cidr: %s\n", cidr)
 }
 
 func buildClusterDeployment(opts ClusterOpts) *unstructured.Unstructured {
