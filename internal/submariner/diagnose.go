@@ -47,6 +47,7 @@ func (m *Manager) Diagnose(ctx context.Context, clusterSet string) (*DiagnoseRes
 
 	m.checkClusterSetMembers(clusters, result)
 	m.checkDefaultClusterSet(clusterSet, result)
+	m.checkBrokerCR(ctx, clusterSet, result)
 
 	for _, name := range clusters {
 		m.checkClusterAddOn(ctx, name, result)
@@ -54,6 +55,9 @@ func (m *Manager) Diagnose(ctx context.Context, clusterSet string) (*DiagnoseRes
 	}
 
 	m.checkGlobalnetRecommendation(ctx, clusters, result)
+	m.checkIBMCloudUDP(ctx, clusters, result)
+	m.checkEndpoints(ctx, clusterSet, result)
+	m.checkFirewallPorts(ctx, clusters, result)
 
 	return result, nil
 }
@@ -233,6 +237,140 @@ func (m *Manager) checkGlobalnetRecommendation(ctx context.Context, clusters []s
 	if !hasGlobalnet {
 		result.addCheck("globalnet", "warn",
 			"Globalnet is not enabled. If clusters have overlapping Pod/Service CIDRs, re-enable with 'acmlab submariner enable <set> --globalnet' or reprovision clusters with non-overlapping CIDRs.")
+	}
+}
+
+func (m *Manager) checkBrokerCR(ctx context.Context, clusterSet string, result *DiagnoseResult) {
+	brokerNS := clusterSet + "-broker"
+	_, err := m.client.Get(ctx, client.GVRSubmarinerBroker, brokerNS, "submariner-broker")
+	if err != nil {
+		result.addCheck("broker-cr", "fail",
+			fmt.Sprintf("Broker CR (submariner-broker) not found in namespace %s. The ACM add-on controller requires this object. Run 'acmlab submariner repair %s' or re-enable Submariner.", brokerNS, clusterSet))
+		return
+	}
+	result.addCheck("broker-cr", "pass",
+		fmt.Sprintf("Broker CR exists in %s.", brokerNS))
+}
+
+func (m *Manager) checkIBMCloudUDP(ctx context.Context, clusters []string, result *DiagnoseResult) {
+	for _, cluster := range clusters {
+		cfg, err := m.client.Get(ctx, client.GVRSubmarinerConfig, cluster, "submariner")
+		if err != nil {
+			continue
+		}
+		lbEnabled, _, _ := unstructured.NestedBool(cfg.Object, "spec", "loadBalancerEnable")
+		if !lbEnabled {
+			continue
+		}
+		cd, err := m.client.Get(ctx, client.GVRClusterDeployment, cluster, cluster)
+		if err != nil {
+			continue
+		}
+		_, hasIBM, _ := unstructured.NestedMap(cd.Object, "spec", "platform", "ibmcloud")
+		if hasIBM {
+			result.addCheck(fmt.Sprintf("config/%s/ibm-udp", cluster), "warn",
+				fmt.Sprintf("LoadBalancer is enabled on %s (IBM Cloud). IBM Cloud VPC load balancers do not support UDP — Submariner gateway connections may fail. Consider using --force-udp-encaps without --load-balancer.", cluster))
+		}
+	}
+}
+
+type endpointInfo struct {
+	ClusterID         string
+	PublicIP          string
+	PrivateIP         string
+	NATEnabled        bool
+	Backend           string
+	UDPPort           string
+	NATTDiscoveryPort string
+}
+
+func parseEndpoint(obj map[string]interface{}) endpointInfo {
+	spec, _ := obj["spec"].(map[string]interface{})
+	backendCfg, _ := spec["backend_config"].(map[string]interface{})
+	clusterID, _ := spec["cluster_id"].(string)
+	publicIP, _ := spec["public_ip"].(string)
+	privateIP, _ := spec["private_ip"].(string)
+	natEnabled, _ := spec["nat_enabled"].(bool)
+	backend, _ := spec["backend"].(string)
+	udpPort, _ := backendCfg["udp-port"].(string)
+	nattPort, _ := backendCfg["natt-discovery-port"].(string)
+	return endpointInfo{
+		ClusterID:         clusterID,
+		PublicIP:          publicIP,
+		PrivateIP:         privateIP,
+		NATEnabled:        natEnabled,
+		Backend:           backend,
+		UDPPort:           udpPort,
+		NATTDiscoveryPort: nattPort,
+	}
+}
+
+func (m *Manager) checkEndpoints(ctx context.Context, clusterSet string, result *DiagnoseResult) {
+	hasConnectionFail := false
+	for _, ch := range result.Checks {
+		if strings.Contains(ch.Name, "/connections") && ch.Status == "fail" {
+			hasConnectionFail = true
+			break
+		}
+	}
+	if !hasConnectionFail {
+		return
+	}
+
+	brokerNS := clusterSet + "-broker"
+	list, err := m.client.List(ctx, client.GVRSubmarinerEndpoint, brokerNS, "")
+	if err != nil {
+		result.addCheck("endpoints", "warn",
+			fmt.Sprintf("Cannot read Submariner endpoints from %s — broker namespace may not be accessible.", brokerNS))
+		return
+	}
+
+	if len(list.Items) == 0 {
+		result.addCheck("endpoints", "fail",
+			fmt.Sprintf("No gateway endpoints found in broker namespace %s. Gateways have not registered — check addon status.", brokerNS))
+		return
+	}
+
+	for _, ep := range list.Items {
+		info := parseEndpoint(ep.Object)
+		result.addCheck(fmt.Sprintf("endpoint/%s", info.ClusterID), "warn",
+			fmt.Sprintf("Gateway %s: publicIP=%s privateIP=%s NAT=%v backend=%s ports=%s/%s — "+
+				"verify inbound UDP %s and %s are open on the gateway node's cloud firewall.",
+				info.ClusterID, info.PublicIP, info.PrivateIP, info.NATEnabled, info.Backend,
+				info.UDPPort, info.NATTDiscoveryPort, info.UDPPort, info.NATTDiscoveryPort))
+	}
+
+	if len(list.Items) < 2 {
+		result.addCheck("endpoints/count", "warn",
+			fmt.Sprintf("Only %d gateway endpoint(s) registered — need at least 2 for cross-cluster connectivity.", len(list.Items)))
+	}
+}
+
+func (m *Manager) checkFirewallPorts(ctx context.Context, clusters []string, result *DiagnoseResult) {
+	hasConnectionFail := false
+	for _, ch := range result.Checks {
+		if strings.Contains(ch.Name, "/connections") && ch.Status == "fail" {
+			hasConnectionFail = true
+			break
+		}
+	}
+	if !hasConnectionFail {
+		return
+	}
+
+	for _, cluster := range clusters {
+		cd, err := m.client.Get(ctx, client.GVRClusterDeployment, cluster, cluster)
+		if err != nil {
+			continue
+		}
+		_, hasIBM, _ := unstructured.NestedMap(cd.Object, "spec", "platform", "ibmcloud")
+		if hasIBM {
+			result.addCheck(fmt.Sprintf("firewall/%s", cluster), "fail",
+				fmt.Sprintf("IBM Cloud VPC security groups on %s must allow inbound: "+
+					"UDP 4500 (IPSec NAT-T), UDP 4490 (NAT discovery), UDP 500 (IKE). "+
+					"Open ports: ibmcloud is security-group-rule-add <sg-id> inbound --protocol udp --port-min 4500 --port-max 4500 --remote 0.0.0.0/0 "+
+					"(repeat for 4490 and 500). Re-enable with --force-udp-encaps if not already set.", cluster))
+		}
 	}
 }
 

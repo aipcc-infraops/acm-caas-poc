@@ -25,15 +25,18 @@ func submarinerCmd() *cobra.Command {
 		submarinerDiagnoseCmd(),
 		submarinerTestConnectivityCmd(),
 		submarinerCreateTestSetCmd(),
+		submarinerRepairCmd(),
 	)
 	return cmd
 }
 
 func submarinerEnableCmd() *cobra.Command {
 	var (
-		wait       bool
-		timeout    time.Duration
-		globalnet  bool
+		wait           bool
+		timeout        time.Duration
+		globalnet      bool
+		forceUDPEncaps bool
+		loadBalancer   bool
 	)
 
 	cmd := &cobra.Command{
@@ -47,7 +50,11 @@ func submarinerEnableCmd() *cobra.Command {
 			}
 			mgr := submariner.New(c, cfg, logger)
 
-			opts := submariner.EnableOpts{Globalnet: globalnet}
+			opts := submariner.EnableOpts{
+				Globalnet:      globalnet,
+				ForceUDPEncaps: forceUDPEncaps,
+				LoadBalancer:   loadBalancer,
+			}
 			if globalnet {
 				fmt.Printf("Enabling Submariner with Globalnet for ClusterSet %s...\n", args[0])
 			} else {
@@ -83,6 +90,8 @@ func submarinerEnableCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&wait, "wait", false, "Wait for Submariner to become fully connected")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Timeout when waiting for readiness")
 	cmd.Flags().BoolVar(&globalnet, "globalnet", false, "Enable Globalnet for overlapping Pod/Service CIDRs")
+	cmd.Flags().BoolVar(&forceUDPEncaps, "force-udp-encaps", false, "Force UDP encapsulation for NAT traversal")
+	cmd.Flags().BoolVar(&loadBalancer, "load-balancer", false, "Enable LoadBalancer for gateway (not supported on IBM Cloud UDP)")
 	return cmd
 }
 
@@ -222,6 +231,8 @@ func submarinerDiagnoseCmd() *cobra.Command {
 					icon = "[FAIL]"
 				case "warn":
 					icon = "[WARN]"
+				case "info":
+					icon = "[INFO]"
 				default:
 					icon = "[skip]"
 				}
@@ -332,6 +343,60 @@ func submarinerTestConnectivityCmd() *cobra.Command {
 	cmd.Flags().StringVar(&clientImage, "client-image", "", "container image for client pod (overrides --image)")
 	cmd.Flags().StringVar(&kubeconfigA, "kubeconfig-a", "", "kubeconfig path for cluster A")
 	cmd.Flags().StringVar(&kubeconfigB, "kubeconfig-b", "", "kubeconfig path for cluster B")
+	return cmd
+}
+
+func submarinerRepairCmd() *cobra.Command {
+	var (
+		jsonFlag bool
+		dryRun   bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "repair <cluster-set>",
+		Short: "Detect and repair stuck Submariner state for a ClusterSet",
+		Long:  "Detects stuck addon finalizers, missing Broker CR, and duplicate ManagedClusterSet finalizers. Use --dry-run to preview without changes.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := buildClient()
+			if err != nil {
+				return err
+			}
+			mgr := submariner.New(c, cfg, logger)
+			result, err := mgr.Repair(context.Background(), args[0], dryRun)
+			if err != nil {
+				return err
+			}
+			if jsonFlag {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(result)
+			}
+			if len(result.Actions) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No issues found.")
+				return nil
+			}
+			for _, a := range result.Actions {
+				var icon string
+				switch a.Status {
+				case "fixed":
+					icon = "[FIXED]"
+				case "ok":
+					icon = "[ok]"
+				case "would-fix":
+					icon = "[DRY-RUN]"
+				case "failed":
+					icon = "[FAILED]"
+				default:
+					icon = "[" + a.Status + "]"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "  %-12s %-30s %s\n", icon, a.Name, a.Message)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonFlag, "json", false, "JSON output")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview repairs without making changes")
 	return cmd
 }
 

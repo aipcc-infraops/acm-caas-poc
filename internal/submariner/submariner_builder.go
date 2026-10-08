@@ -26,6 +26,8 @@ func buildSubmarinerAddOn(cluster string) *unstructured.Unstructured {
 type SubmarinerConfigOpts struct {
 	GlobalCIDR        string
 	CredentialsSecret string
+	ForceUDPEncaps    bool
+	LoadBalancer      bool
 }
 
 func buildSubmarinerConfig(cluster string, opts SubmarinerConfigOpts) *unstructured.Unstructured {
@@ -35,6 +37,7 @@ func buildSubmarinerConfig(cluster string, opts SubmarinerConfigOpts) *unstructu
 	}
 	spec := map[string]interface{}{
 		"IPSecNATTPort":     int64(4500),
+		"NATTDiscoveryPort": int64(4490),
 		"NATTEnable":        true,
 		"cableDriver":       "libreswan",
 		"gatewayConfig":     map[string]interface{}{"gateways": int64(1)},
@@ -42,6 +45,12 @@ func buildSubmarinerConfig(cluster string, opts SubmarinerConfigOpts) *unstructu
 	}
 	if opts.GlobalCIDR != "" {
 		spec["globalCIDR"] = opts.GlobalCIDR
+	}
+	if opts.ForceUDPEncaps {
+		spec["forceUDPEncaps"] = true
+	}
+	if opts.LoadBalancer {
+		spec["loadBalancerEnable"] = true
 	}
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -94,15 +103,35 @@ func parseClusterStatus(cluster string, obj map[string]interface{}) ClusterStatu
 			if cs.ConnectionDegraded {
 				cs.Reason, _ = cond["reason"].(string)
 				cs.Message, _ = cond["message"].(string)
-			}
-		case "SubmarinerConnectionsEstablished":
-			cs.AgentReady = true
-			if condStatus == "True" {
+			} else {
 				cs.Connections = 1
 			}
 		}
 	}
 	return cs
+}
+
+func buildBrokerCR(namespace string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "submariner.io/v1alpha1",
+			"kind":       "Broker",
+			"metadata": map[string]interface{}{
+				"name":      "submariner-broker",
+				"namespace": namespace,
+				"labels": map[string]interface{}{
+					"cluster.open-cluster-management.io/backup": "submariner",
+					"acmlab.redhat.com/managed":                 "true",
+				},
+			},
+			"spec": map[string]interface{}{
+				"components": []interface{}{
+					"service-discovery",
+					"connectivity",
+				},
+			},
+		},
+	}
 }
 
 func groupByClusterSet(clusters []map[string]interface{}) []SubmarinerInfo {

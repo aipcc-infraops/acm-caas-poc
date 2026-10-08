@@ -73,6 +73,7 @@ type suiteContext struct {
 	capiList               []provisioning.CAPIClusterInfo
 	vmDetail               *virtualization.VMDetail
 	vmList                 []virtualization.VMInfo
+	templating             *templatingState
 }
 
 func TestFeatures(t *testing.T) {
@@ -123,6 +124,7 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 		s.capiList = nil
 		s.vmDetail = nil
 		s.vmList = nil
+		s.templating = nil
 		return ctx, nil
 	})
 
@@ -169,6 +171,9 @@ func InitializeScenario(sc *godog.ScenarioContext) {
 
 	// VM lifecycle steps
 	registerVMSteps(sc, s)
+
+	// Cluster templating steps (UC-53)
+	registerTemplatingSteps(sc, s)
 }
 
 func (s *suiteContext) theACMHubIsReachable(ctx context.Context) error {
