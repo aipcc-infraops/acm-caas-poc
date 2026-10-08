@@ -314,7 +314,13 @@ func TestListClustersWithLifecycleReturnsAllClusterDeployments(t *testing.T) {
 	}
 
 	scheme := runtime.NewScheme()
-	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cd1, cd2)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRClusterDeployment:     "ClusterDeploymentList",
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+		cd1, cd2,
+	)
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
@@ -325,7 +331,6 @@ func TestListClustersWithLifecycleReturnsAllClusterDeployments(t *testing.T) {
 	if len(names) != 2 {
 		t.Errorf("ListClustersWithLifecycle() returned %d clusters, want 2", len(names))
 	}
-	// Check that both clusters are present (order doesn't matter)
 	found := make(map[string]bool)
 	for _, name := range names {
 		found[name] = true
@@ -750,6 +755,28 @@ func TestCheckLifecycleSupportUnsupportedWhenTypeCheckFails(t *testing.T) {
 	}
 	if reason.Support != LifecycleUnsupported {
 		t.Errorf("expected LifecycleUnsupported, got %v", reason.Support)
+	}
+}
+
+func TestCheckLifecycleSupportCAPIWhenTypeCheckFails(t *testing.T) {
+	md := capiMachineDeployment("capi-cluster", "capi-cluster-workers", 1, nil)
+	scheme := runtime.NewScheme()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+			client.GVRClusterDeployment:     "ClusterDeploymentList",
+		},
+		md,
+	)
+	c := &client.Client{Dynamic: fakeDynamic}
+	m := New(c, config.Config{}, discardLogger)
+
+	reason, err := m.CheckLifecycleSupport(context.Background(), "capi-cluster", "capi-cluster")
+	if err != nil {
+		t.Fatalf("CheckLifecycleSupport() error = %v", err)
+	}
+	if reason.Support != LifecycleFull {
+		t.Errorf("expected LifecycleFull for CAPI cluster without ManagedClusterInfo, got %v", reason.Support)
 	}
 }
 
@@ -1182,7 +1209,8 @@ func TestListClustersWithLifecycleEmpty(t *testing.T) {
 	scheme := runtime.NewScheme()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			client.GVRClusterDeployment: "ClusterDeploymentList",
+			client.GVRClusterDeployment:     "ClusterDeploymentList",
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
 		},
 	)
 	c := &client.Client{Dynamic: fakeDynamic}
@@ -1194,6 +1222,50 @@ func TestListClustersWithLifecycleEmpty(t *testing.T) {
 	}
 	if len(names) != 0 {
 		t.Errorf("expected 0 clusters, got %d", len(names))
+	}
+}
+
+func TestListClustersWithLifecycleIncludesCAPI(t *testing.T) {
+	cd := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "hive.openshift.io/v1",
+			"kind":       "ClusterDeployment",
+			"metadata": map[string]interface{}{
+				"name":      "hive-cluster",
+				"namespace": "hive-cluster",
+			},
+		},
+	}
+	md := capiMachineDeployment("capi-cluster", "capi-cluster-workers", 1, nil)
+
+	scheme := runtime.NewScheme()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			client.GVRClusterDeployment:     "ClusterDeploymentList",
+			client.GVRCAPIMachineDeployment: "MachineDeploymentList",
+		},
+		cd, md,
+	)
+	c := &client.Client{Dynamic: fakeDynamic}
+	m := New(c, config.Config{}, discardLogger)
+
+	names, err := m.ListClustersWithLifecycle(context.Background())
+	if err != nil {
+		t.Fatalf("ListClustersWithLifecycle() error = %v", err)
+	}
+	if len(names) != 2 {
+		t.Fatalf("expected 2 clusters, got %d: %v", len(names), names)
+	}
+
+	found := map[string]bool{}
+	for _, n := range names {
+		found[n] = true
+	}
+	if !found["hive-cluster/hive-cluster"] {
+		t.Error("expected hive-cluster/hive-cluster in list")
+	}
+	if !found["capi-cluster/capi-cluster (CAPI)"] {
+		t.Errorf("expected capi-cluster/capi-cluster (CAPI) in list, got %v", names)
 	}
 }
 

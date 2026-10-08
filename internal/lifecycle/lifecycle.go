@@ -217,11 +217,10 @@ func (m *Manager) CheckLifecycleSupport(ctx context.Context, namespace, name str
 		return nil, fmt.Errorf("checking ClusterDeployment: %w", err)
 	}
 
-	// No ClusterDeployment — check cluster type for a useful message.
+	// No ClusterDeployment — check CAPI MachineDeployments and cluster type.
 	clusterType, typeErr := m.client.GetClusterType(ctx, name)
 	if typeErr != nil {
-		// Can't determine type — treat as unsupported but don't mask the real error.
-		return &LifecycleSupportReason{Support: LifecycleUnsupported, ClusterType: client.ClusterTypeUnknown}, nil
+		clusterType = client.ClusterTypeUnknown
 	}
 
 	if clusterType == client.ClusterTypeKubernetes {
@@ -249,17 +248,31 @@ func (m *Manager) ClusterSupportsLifecycle(ctx context.Context, namespace, name 
 
 func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, error) {
 	m.logger.Info("lifecycle.ListClustersWithLifecycle")
+	seen := map[string]bool{}
+	var names []string
+
 	cds, err := m.client.List(ctx, client.GVRClusterDeployment, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("listing ClusterDeployments: %w", err)
 	}
-
-	var names []string
 	for _, item := range cds.Items {
-		name := item.GetName()
-		namespace := item.GetNamespace()
-		names = append(names, fmt.Sprintf("%s/%s", namespace, name))
+		key := fmt.Sprintf("%s/%s", item.GetNamespace(), item.GetName())
+		names = append(names, key)
+		seen[key] = true
 	}
+
+	mds, err := m.client.List(ctx, client.GVRCAPIMachineDeployment, "", "")
+	if err == nil {
+		for _, item := range mds.Items {
+			ns := item.GetNamespace()
+			key := fmt.Sprintf("%s/%s", ns, ns)
+			if !seen[key] {
+				names = append(names, key+" (CAPI)")
+				seen[key] = true
+			}
+		}
+	}
+
 	return names, nil
 }
 
