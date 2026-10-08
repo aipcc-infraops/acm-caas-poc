@@ -81,6 +81,7 @@ func parseClusterStatus(cluster string, obj map[string]interface{}) ClusterStatu
 		return cs
 	}
 
+	connectionConditionSeen := false
 	for _, c := range conditions {
 		cond, ok := c.(map[string]interface{})
 		if !ok {
@@ -99,6 +100,7 @@ func parseClusterStatus(cluster string, obj map[string]interface{}) ClusterStatu
 		case "SubmarinerAgentDegraded":
 			cs.AgentReady = condStatus != "True"
 		case "SubmarinerConnectionDegraded":
+			connectionConditionSeen = true
 			cs.ConnectionDegraded = condStatus == "True"
 			if cs.ConnectionDegraded {
 				cs.Reason, _ = cond["reason"].(string)
@@ -108,6 +110,11 @@ func parseClusterStatus(cluster string, obj map[string]interface{}) ClusterStatu
 			}
 		}
 	}
+
+	if !connectionConditionSeen && cs.AddonAvailable && cs.GatewayReady && cs.AgentReady {
+		cs.Connections = 1
+	}
+
 	return cs
 }
 
