@@ -461,6 +461,46 @@ func TestDiagnoseNoCAPINoHive(t *testing.T) {
 	}
 }
 
+func TestCAPIFullLifecycleCycle(t *testing.T) {
+	md := capiMachineDeployment("capi-aws-test", "capi-aws-test-workers", 1, nil)
+	c := fakeCAPIClient(md)
+	m := New(c, config.Config{}, discardLogger)
+	ctx := context.Background()
+
+	state, err := m.GetPowerState(ctx, "capi-aws-test", "capi-aws-test")
+	if err != nil {
+		t.Fatalf("GetPowerState() before hibernate error = %v", err)
+	}
+	if state != PowerStateRunning {
+		t.Errorf("expected Running before hibernate, got %s", state)
+	}
+
+	if err := m.Hibernate(ctx, "capi-aws-test", "capi-aws-test"); err != nil {
+		t.Fatalf("Hibernate() error = %v", err)
+	}
+
+	state, err = m.GetPowerState(ctx, "capi-aws-test", "capi-aws-test")
+	if err != nil {
+		t.Fatalf("GetPowerState() after hibernate error = %v", err)
+	}
+	if state != PowerStateHibernating {
+		t.Errorf("expected Hibernating after hibernate, got %s", state)
+	}
+
+	if err := m.Resume(ctx, "capi-aws-test", "capi-aws-test"); err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+
+	got, err := c.Get(ctx, client.GVRCAPIMachineDeployment, "capi-aws-test", "capi-aws-test-workers")
+	if err != nil {
+		t.Fatalf("Get MachineDeployment error = %v", err)
+	}
+	replicas, _, _ := unstructured.NestedInt64(got.Object, "spec", "replicas")
+	if replicas != 1 {
+		t.Errorf("expected replicas=1 after resume, got %d", replicas)
+	}
+}
+
 func TestResumeCAPIInvalidAnnotation(t *testing.T) {
 	md := capiMachineDeployment("k8s-cluster", "k8s-cluster-workers", 0, map[string]interface{}{
 		preHibernateAnnotation: "not-a-number",
