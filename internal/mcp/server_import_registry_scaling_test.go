@@ -440,9 +440,12 @@ func TestLifecycleRecoverCertsNotFound(t *testing.T) {
 	resp := callTool(t, c, "acm_lifecycle_recover_certs", map[string]interface{}{
 		"name": "nonexistent",
 	})
-	_, isErr := extractToolResultPair(t, resp)
-	if !isErr {
-		t.Error("expected error for nonexistent cluster")
+	text, isErr := extractToolResultPair(t, resp)
+	if isErr {
+		t.Error("expected skip result for CAPI cluster, got error")
+	}
+	if !strings.Contains(text, "Skipped") {
+		t.Errorf("expected Skipped message, got %q", text)
 	}
 }
 

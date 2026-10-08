@@ -338,6 +338,11 @@ func TestCheckLifecycleSupportOCPWithoutCAPI(t *testing.T) {
 
 func TestGetPowerStateStatusCAPIFallback(t *testing.T) {
 	md := capiMachineDeployment("capi-cluster", "capi-cluster-workers", 3, nil)
+	md.Object["status"] = map[string]interface{}{
+		"replicas":          int64(3),
+		"readyReplicas":     int64(3),
+		"availableReplicas": int64(3),
+	}
 	c := fakeCAPIClient(md)
 	m := New(c, config.Config{}, discardLogger)
 
@@ -366,6 +371,11 @@ func TestGetPowerStateStatusCAPIHibernated(t *testing.T) {
 
 func TestDiagnoseCAPICluster(t *testing.T) {
 	md := capiMachineDeployment("capi-cluster", "capi-cluster-workers", 3, nil)
+	md.Object["status"] = map[string]interface{}{
+		"replicas":          int64(3),
+		"readyReplicas":     int64(3),
+		"availableReplicas": int64(3),
+	}
 	mc := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "cluster.open-cluster-management.io/v1",

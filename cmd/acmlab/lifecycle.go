@@ -520,8 +520,13 @@ Outputs actionable suggestions when problems are found.`,
 				if report.Platform != "" {
 					fmt.Printf("Platform: %s\n", report.Platform)
 				}
-				fmt.Printf("Hive Power (spec):   %s\n", report.HivePowerSpec)
-				fmt.Printf("Hive Power (status): %s\n", report.HivePowerStatus)
+				if report.Platform == "CAPI" {
+					fmt.Printf("Lifecycle State (desired): %s\n", report.HivePowerSpec)
+					fmt.Printf("Lifecycle State (actual):  %s\n", report.HivePowerStatus)
+				} else {
+					fmt.Printf("Hive Power (spec):   %s\n", report.HivePowerSpec)
+					fmt.Printf("Hive Power (status): %s\n", report.HivePowerStatus)
+				}
 				fmt.Printf("ACM Available: %s\n", report.ACMAvailable)
 				fmt.Printf("ACM Joined:    %s\n", report.ACMJoined)
 				fmt.Println()
