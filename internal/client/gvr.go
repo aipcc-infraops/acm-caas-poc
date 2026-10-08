@@ -114,6 +114,12 @@ var (
 	GVRSubmarinerConfig = schema.GroupVersionResource{
 		Group: "submarineraddon.open-cluster-management.io", Version: "v1alpha1", Resource: "submarinerconfigs",
 	}
+	GVRSubmarinerBroker = schema.GroupVersionResource{
+		Group: "submariner.io", Version: "v1alpha1", Resource: "brokers",
+	}
+	GVRSubmarinerEndpoint = schema.GroupVersionResource{
+		Group: "submariner.io", Version: "v1", Resource: "endpoints",
+	}
 	GVRHostedCluster = schema.GroupVersionResource{
 		Group: "hypershift.openshift.io", Version: "v1beta1", Resource: "hostedclusters",
 	}

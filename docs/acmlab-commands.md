@@ -689,7 +689,7 @@ Options:
 
 #### `acmlab lifecycle hibernate <cluster-name>`
 
-Hibernates a Hive-provisioned cluster by setting `spec.powerState` to `Hibernating`. Idempotent: if already hibernating, does nothing.
+Hibernates a cluster. For Hive-provisioned clusters, sets `spec.powerState` to `Hibernating`. For CAPI clusters (e.g., clusters provisioned via Cluster API without a ClusterDeployment), scales all MachineDeployments to zero replicas and saves the original count in an annotation. Idempotent: if already hibernating, does nothing.
 
 Options:
 - `--namespace`, `-n`: cluster namespace (defaults to cluster name)
@@ -706,7 +706,7 @@ Cluster spoke2/spoke2 is hibernating
 
 #### `acmlab lifecycle resume <cluster-name>`
 
-Resumes a hibernated cluster by setting `spec.powerState` to `Running`. Idempotent.
+Resumes a hibernated cluster. For Hive clusters, sets `spec.powerState` to `Running`. For CAPI clusters, restores MachineDeployment replicas from the saved annotation (defaults to 2 if no annotation). Idempotent.
 
 When used with `--wait`, after the cluster reaches Running state, automatically connects to the spoke cluster and approves any expired kubelet certificates. OpenShift kubelet client certs rotate every ~24h: if the cluster was hibernated during a rotation window, the certs expire and nodes cannot start pods until the CSRs are approved. This recovery step handles that automatically.
 
@@ -732,7 +732,7 @@ Approved 20 expired kubelet certificate(s)
 
 #### `acmlab lifecycle status <cluster-name>`
 
-Shows cluster power state: both desired (spec) and actual (status). Indicates when a transition is in progress.
+Shows cluster power state: both desired (spec) and actual (status). Indicates when a transition is in progress. For CAPI clusters, infers state from MachineDeployment replicas (all zero = Hibernating, any > 0 = Running).
 
 ```
 $ acmlab lifecycle status spoke2
@@ -745,7 +745,7 @@ Note: Power state transition in progress
 
 #### `acmlab lifecycle diagnose <cluster-name>`
 
-Runs diagnostic checks that cross-reference Hive ClusterDeployment state with ACM ManagedCluster conditions. Detects inconsistencies like a cluster that Hive reports as Running but ACM shows as unavailable (klusterlet issue). Outputs actionable suggestions when problems are found.
+Runs diagnostic checks for a cluster. For Hive clusters, cross-references ClusterDeployment state with ACM ManagedCluster conditions. For CAPI clusters, reports MachineDeployment replica state and ACM health. Detects inconsistencies like a cluster that is Running but ACM shows as unavailable (klusterlet issue). Outputs actionable suggestions when problems are found.
 
 Options:
 - `--namespace`, `-n`: cluster namespace (defaults to cluster name)
@@ -773,7 +773,7 @@ Issues detected. Review suggestions above.
 
 #### `acmlab lifecycle list`
 
-Lists all clusters that support lifecycle operations (Hive-provisioned). Imported clusters are excluded.
+Lists all clusters that support lifecycle operations (Hive-provisioned or CAPI with MachineDeployments). Imported clusters without Hive or CAPI are excluded.
 
 ```
 $ acmlab lifecycle list
@@ -1015,8 +1015,14 @@ Enables Submariner on a ManagedClusterSet by deploying the Submariner addon and 
 
 Options:
 - `--globalnet`: enable Globalnet for overlapping Pod/Service CIDRs (auto-assigns 242.{i}.0.0/16 per cluster)
+- `--force-udp-encaps`: force UDP encapsulation for NAT traversal (sets `forceUDPEncaps: true` in SubmarinerConfig)
+- `--load-balancer`: enable LoadBalancer for gateway (not supported on IBM Cloud UDP)
 - `--wait`: block until all connections are established
-- `--timeout`: maximum wait duration (default: 5m, requires `--wait`)
+- `--timeout`: maximum wait duration (default: 10m, requires `--wait`)
+
+Enable also ensures the Broker CR (`submariner-broker`) exists in the `<clusterset>-broker` namespace. This is required by the ACM add-on controller.
+
+**IBM Cloud auto-detection**: When Enable detects an IBM Cloud cluster (via ClusterDeployment platform), it automatically sets `forceUDPEncaps: true` in the SubmarinerConfig. IBM Cloud VPC does not support ESP (protocol 50) natively, so all IPSec traffic must use UDP encapsulation (NAT-T on port 4500). This auto-detection is skipped if `--load-balancer` is explicitly set. The SubmarinerConfig also includes `NATTDiscoveryPort: 4490` for explicit NAT discovery configuration.
 
 ```
 $ acmlab submariner enable prod-set --globalnet --wait --timeout 10m
@@ -1029,7 +1035,7 @@ All connections established.
 
 #### `acmlab submariner disable <clusterset>`
 
-Disables Submariner on a ManagedClusterSet by removing addons and SubmarinerConfigs.
+Disables Submariner on a ManagedClusterSet by removing addons and SubmarinerConfigs. Waits up to 60s for addon cleanup. If cleanup times out, returns an error listing the stuck clusters and suggests running `acmlab submariner repair`.
 
 #### `acmlab submariner status <clusterset>`
 
@@ -1040,20 +1046,34 @@ Options:
 
 #### `acmlab submariner diagnose <clusterset>`
 
-Runs connectivity diagnostics: checks addon health, SubmarinerConfig presence, gateway conditions, connection status, and recommends Globalnet if overlapping CIDRs detected.
+Runs connectivity diagnostics: checks addon health, SubmarinerConfig presence, Broker CR existence, gateway conditions, connection status, IBM Cloud UDP warnings, and recommends Globalnet if overlapping CIDRs detected.
 
 Options:
 - `--json`: output as JSON
 
+Checks performed:
+- Cluster set membership (at least 2 clusters, no local-cluster)
+- Broker CR presence in `<clusterset>-broker` namespace
+- Addon conditions (Available, Gateway, Agent, Broker, Manifest, Connections)
+- SubmarinerConfig and credentials secret existence
+- IBM Cloud UDP LoadBalancer incompatibility warning
+- Globalnet recommendation when connections fail
+- **Gateway endpoint inspection** (when connections fail): reads Submariner endpoint objects from the broker namespace and reports each gateway's public/private IP, NAT status, backend, and UDP/NAT-T ports
+- **IBM Cloud firewall port check** (when connections fail): detects IBM Cloud clusters and reports the specific VPC security group rules required (UDP 4500, 4490, 500) with `ibmcloud` CLI commands
+
+#### `acmlab submariner repair <clusterset>`
+
+Detects and repairs stuck Submariner state: stuck addon finalizers, missing Broker CR, and duplicate ManagedClusterSet finalizers.
+
+Options:
+- `--dry-run`: preview repairs without making changes
+- `--json`: output as JSON
+
 ```
-$ acmlab submariner diagnose prod-set
-=== Submariner Diagnostics for prod-set ===
-Checks:
-  ✓ Addon installed on all clusters
-  ✓ SubmarinerConfig present on all clusters
-  ✓ Gateway nodes healthy
-  ⚠ Overlapping Pod CIDRs detected — consider enabling Globalnet
-Connections: 2/2 established
+$ acmlab submariner repair stuck-set
+  [FIXED]      stuck-addon/spoke1             Removed stuck finalizers from ManagedClusterAddOn/submariner on spoke1
+  [FIXED]      broker-cr                      Created Broker CR in stuck-set-broker
+  [ok]         duplicate-finalizers/stuck-set  No duplicate finalizers
 ```
 
 #### `acmlab submariner test-connectivity <cluster-a> <cluster-b>`

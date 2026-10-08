@@ -19,10 +19,15 @@ import (
 var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 var subGVRKinds = map[schema.GroupVersionResource]string{
-	client.GVRManagedCluster:      "ManagedClusterList",
-	client.GVRManagedClusterAddOn: "ManagedClusterAddOnList",
-	client.GVRSubmarinerConfig:    "SubmarinerConfigList",
-	client.GVRNamespace:           "NamespaceList",
+	client.GVRManagedCluster:       "ManagedClusterList",
+	client.GVRManagedClusterAddOn:  "ManagedClusterAddOnList",
+	client.GVRSubmarinerConfig:     "SubmarinerConfigList",
+	client.GVRNamespace:            "NamespaceList",
+	client.GVRSubmarinerBroker:     "BrokerList",
+	client.GVRManagedClusterSet:    "ManagedClusterSetList",
+	client.GVRClusterDeployment:    "ClusterDeploymentList",
+	client.GVRSecret:               "SecretList",
+	client.GVRSubmarinerEndpoint:   "EndpointList",
 }
 
 func fakeClient(objs ...runtime.Object) *client.Client {
@@ -91,7 +96,6 @@ func healthyAddon(cluster string) *unstructured.Unstructured {
 		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
 		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
 		map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "False"},
-		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "True"},
 	})
 }
 
@@ -166,8 +170,8 @@ func TestStatusConnected(t *testing.T) {
 			"status": "False",
 		},
 		map[string]interface{}{
-			"type":   "SubmarinerConnectionsEstablished",
-			"status": "True",
+			"type":   "SubmarinerConnectionDegraded",
+			"status": "False",
 		},
 	})
 	mgr := newTestManager(c1, addon)
@@ -265,7 +269,7 @@ func TestParseClusterStatusHealthy(t *testing.T) {
 			"conditions": []interface{}{
 				map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
 				map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
-				map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "True"},
+				map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "False"},
 			},
 		},
 	}
@@ -273,8 +277,8 @@ func TestParseClusterStatusHealthy(t *testing.T) {
 	if !cs.GatewayReady {
 		t.Error("expected GatewayReady")
 	}
-	if !cs.AgentReady {
-		t.Error("expected AgentReady")
+	if cs.ConnectionDegraded {
+		t.Error("expected ConnectionDegraded=false")
 	}
 	if cs.Connections != 1 {
 		t.Error("expected 1 connection")
@@ -440,7 +444,7 @@ func TestStatusDisconnectedWhenZeroConnections(t *testing.T) {
 	addon := addOnWithStatus("spoke1", []interface{}{
 		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
 		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
-		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "False"},
+		map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "True", "reason": "ConnectionsNotEstablished", "message": "connections degraded"},
 	})
 	mgr := newTestManager(c1, addon)
 
@@ -449,7 +453,7 @@ func TestStatusDisconnectedWhenZeroConnections(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 	if status.Connected {
-		t.Error("expected Connected=false when 0 connections")
+		t.Error("expected Connected=false when connections degraded")
 	}
 }
 
@@ -525,7 +529,7 @@ func TestWaitForReadyAlreadyConnected(t *testing.T) {
 		map[string]interface{}{"type": "SubmarinerBrokerConfigApplied", "status": "True"},
 		map[string]interface{}{"type": "SubmarinerGatewayNodesLabeled", "status": "True"},
 		map[string]interface{}{"type": "SubmarinerAgentDegraded", "status": "False"},
-		map[string]interface{}{"type": "SubmarinerConnectionsEstablished", "status": "True"},
+		map[string]interface{}{"type": "SubmarinerConnectionDegraded", "status": "False"},
 	})
 	mgr := newTestManager(c1, addon)
 
@@ -578,5 +582,198 @@ func TestBuildSubmarinerConfigNoGlobalnet(t *testing.T) {
 	_, exists, _ := unstructured.NestedString(cfg.Object, "spec", "globalCIDR")
 	if exists {
 		t.Error("expected no globalCIDR in spec without opts")
+	}
+}
+
+func TestBuildSubmarinerConfigForceUDPEncaps(t *testing.T) {
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{ForceUDPEncaps: true})
+	val, found, _ := unstructured.NestedBool(cfg.Object, "spec", "forceUDPEncaps")
+	if !found || !val {
+		t.Error("expected forceUDPEncaps=true")
+	}
+}
+
+func TestBuildSubmarinerConfigLoadBalancer(t *testing.T) {
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{LoadBalancer: true})
+	val, found, _ := unstructured.NestedBool(cfg.Object, "spec", "loadBalancerEnable")
+	if !found || !val {
+		t.Error("expected loadBalancerEnable=true")
+	}
+}
+
+func TestBuildSubmarinerConfigNoExtraFields(t *testing.T) {
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
+	_, found, _ := unstructured.NestedBool(cfg.Object, "spec", "forceUDPEncaps")
+	if found {
+		t.Error("forceUDPEncaps should not be present when disabled")
+	}
+	_, found, _ = unstructured.NestedBool(cfg.Object, "spec", "loadBalancerEnable")
+	if found {
+		t.Error("loadBalancerEnable should not be present when disabled")
+	}
+}
+
+func TestBuildBrokerCR(t *testing.T) {
+	broker := buildBrokerCR("test-broker")
+	name, _, _ := unstructured.NestedString(broker.Object, "metadata", "name")
+	if name != "submariner-broker" {
+		t.Errorf("expected name=submariner-broker, got %s", name)
+	}
+	ns, _, _ := unstructured.NestedString(broker.Object, "metadata", "namespace")
+	if ns != "test-broker" {
+		t.Errorf("expected namespace=test-broker, got %s", ns)
+	}
+	components, _, _ := unstructured.NestedStringSlice(broker.Object, "spec", "components")
+	if len(components) != 2 || components[0] != "service-discovery" || components[1] != "connectivity" {
+		t.Errorf("expected [service-discovery, connectivity], got %v", components)
+	}
+}
+
+func TestEnableCreatesBrokerCR(t *testing.T) {
+	c1 := managedCluster("spoke1", "broker-test")
+	c2 := managedCluster("spoke2", "broker-test")
+	mgr := newTestManager(c1, c2)
+
+	err := mgr.Enable(context.Background(), "broker-test", EnableOpts{})
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	_, err = mgr.client.Get(context.Background(), client.GVRSubmarinerBroker, "broker-test-broker", "submariner-broker")
+	if err != nil {
+		t.Fatalf("Broker CR not created: %v", err)
+	}
+}
+
+func TestBuildSubmarinerConfigNATTDiscoveryPort(t *testing.T) {
+	cfg := buildSubmarinerConfig("spoke1", SubmarinerConfigOpts{})
+	port, _, _ := unstructured.NestedFieldNoCopy(cfg.Object, "spec", "NATTDiscoveryPort")
+	if port != int64(4490) {
+		t.Errorf("expected NATTDiscoveryPort=4490, got %v", port)
+	}
+}
+
+func TestDetectPlatformIBMCloud(t *testing.T) {
+	c1 := managedCluster("ibm1", "ibm-set")
+	cd := testClusterDeploymentIBM("ibm1")
+	mgr := newTestManager(c1, cd)
+
+	platform := mgr.detectPlatform(context.Background(), "ibm1")
+	if platform != "ibmcloud" {
+		t.Errorf("expected ibmcloud, got %q", platform)
+	}
+}
+
+func TestDetectPlatformUnknown(t *testing.T) {
+	c1 := managedCluster("spoke1", "test-set")
+	mgr := newTestManager(c1)
+
+	platform := mgr.detectPlatform(context.Background(), "spoke1")
+	if platform != "" {
+		t.Errorf("expected empty platform, got %q", platform)
+	}
+}
+
+func TestEnableIBMCloudAutoForceUDPEncaps(t *testing.T) {
+	c1 := managedCluster("ibm1", "ibm-set")
+	cd := testClusterDeploymentIBM("ibm1")
+	mgr := newTestManager(c1, cd)
+
+	err := mgr.Enable(context.Background(), "ibm-set", EnableOpts{})
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	cfg, err := mgr.client.Get(context.Background(), client.GVRSubmarinerConfig, "ibm1", "submariner")
+	if err != nil {
+		t.Fatalf("config not found: %v", err)
+	}
+	udp, _, _ := unstructured.NestedBool(cfg.Object, "spec", "forceUDPEncaps")
+	if !udp {
+		t.Error("expected forceUDPEncaps=true auto-set for IBM Cloud")
+	}
+}
+
+func TestEnableIBMCloudNoAutoWhenLoadBalancer(t *testing.T) {
+	c1 := managedCluster("ibm1", "ibm-set2")
+	cd := testClusterDeploymentIBM("ibm1")
+	mgr := newTestManager(c1, cd)
+
+	err := mgr.Enable(context.Background(), "ibm-set2", EnableOpts{LoadBalancer: true})
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	cfg, err := mgr.client.Get(context.Background(), client.GVRSubmarinerConfig, "ibm1", "submariner")
+	if err != nil {
+		t.Fatalf("config not found: %v", err)
+	}
+	udp, found, _ := unstructured.NestedBool(cfg.Object, "spec", "forceUDPEncaps")
+	if found && udp {
+		t.Error("expected forceUDPEncaps NOT auto-set when LoadBalancer explicitly requested")
+	}
+}
+
+func TestParseEndpoint(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"cluster_id":  "cluster-a",
+			"public_ip":   "1.2.3.4",
+			"private_ip":  "10.0.0.1",
+			"nat_enabled": true,
+			"backend":     "libreswan",
+			"backend_config": map[string]interface{}{
+				"udp-port":            "4500",
+				"natt-discovery-port": "4490",
+			},
+		},
+	}
+	info := parseEndpoint(obj)
+	if info.ClusterID != "cluster-a" {
+		t.Errorf("expected cluster-a, got %s", info.ClusterID)
+	}
+	if info.PublicIP != "1.2.3.4" {
+		t.Errorf("expected 1.2.3.4, got %s", info.PublicIP)
+	}
+	if info.PrivateIP != "10.0.0.1" {
+		t.Errorf("expected 10.0.0.1, got %s", info.PrivateIP)
+	}
+	if !info.NATEnabled {
+		t.Error("expected NATEnabled=true")
+	}
+	if info.Backend != "libreswan" {
+		t.Errorf("expected libreswan, got %s", info.Backend)
+	}
+	if info.UDPPort != "4500" {
+		t.Errorf("expected 4500, got %s", info.UDPPort)
+	}
+	if info.NATTDiscoveryPort != "4490" {
+		t.Errorf("expected 4490, got %s", info.NATTDiscoveryPort)
+	}
+}
+
+func TestEnableForceUDPEncapsAndLoadBalancer(t *testing.T) {
+	c1 := managedCluster("spoke1", "flags-set")
+	mgr := newTestManager(c1)
+
+	err := mgr.Enable(context.Background(), "flags-set", EnableOpts{
+		ForceUDPEncaps: true,
+		LoadBalancer:   true,
+	})
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	cfg, err := mgr.client.Get(context.Background(), client.GVRSubmarinerConfig, "spoke1", "submariner")
+	if err != nil {
+		t.Fatalf("config not found: %v", err)
+	}
+	udp, _, _ := unstructured.NestedBool(cfg.Object, "spec", "forceUDPEncaps")
+	if !udp {
+		t.Error("expected forceUDPEncaps=true in SubmarinerConfig")
+	}
+	lb, _, _ := unstructured.NestedBool(cfg.Object, "spec", "loadBalancerEnable")
+	if !lb {
+		t.Error("expected loadBalancerEnable=true in SubmarinerConfig")
 	}
 }
