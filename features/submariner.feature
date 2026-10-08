@@ -188,3 +188,115 @@ Feature: UC-26 Multi-cluster networking via Submariner
     When I run "acmlab submariner diagnose prod-set"
     Then a check "config/spoke1/credentials" reports "fail"
     And the message explains the add-on controller needs cloud credentials
+
+  Scenario: Enable creates Broker CR in broker namespace
+    Given a ManagedClusterSet "prod-set" with clusters "spoke1" and "spoke2"
+    When I enable Submariner for ClusterSet "prod-set"
+    Then a Broker CR "submariner-broker" exists in namespace "prod-set-broker"
+    And the Broker CR has components "service-discovery" and "connectivity"
+
+  Scenario: Create test set creates Broker CR
+    When I run "acmlab submariner create-test-set uc26-test --clusters spoke1,spoke2 --confirm"
+    Then a ManagedClusterSet "uc26-test" is created
+    And a Broker CR "submariner-broker" exists in namespace "uc26-test-broker"
+
+  Scenario: Diagnose detects missing Broker CR
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And no Broker CR exists in namespace "prod-set-broker"
+    When I run "acmlab submariner diagnose prod-set"
+    Then a check "broker-cr" reports "fail"
+    And the message suggests running "acmlab submariner repair"
+
+  Scenario: Diagnose warns about IBM Cloud UDP LoadBalancer
+    Given Submariner is enabled for ClusterSet "ibm-set"
+    And the SubmarinerConfig on "ibm1" has loadBalancerEnable=true
+    And the ClusterDeployment on "ibm1" uses platform "ibmcloud"
+    When I run "acmlab submariner diagnose ibm-set"
+    Then a check "config/ibm1/ibm-udp" reports "warn"
+    And the message warns about IBM Cloud UDP LoadBalancer rejection
+
+  Scenario: Enable with force-udp-encaps
+    Given a ManagedClusterSet "nat-set" with clusters "spoke1" and "spoke2"
+    When I run "acmlab submariner enable nat-set --force-udp-encaps"
+    Then each SubmarinerConfig includes forceUDPEncaps=true
+
+  Scenario: Enable with load-balancer
+    Given a ManagedClusterSet "lb-set" with clusters "spoke1" and "spoke2"
+    When I run "acmlab submariner enable lb-set --load-balancer"
+    Then each SubmarinerConfig includes loadBalancerEnable=true
+
+  Scenario: Repair detects and fixes stuck addon finalizers
+    Given Submariner was disabled for ClusterSet "stuck-set"
+    And ManagedClusterAddOn/submariner on "spoke1" has a deletionTimestamp with stuck finalizers
+    When I run "acmlab submariner repair stuck-set"
+    Then the stuck finalizers are removed from the addon
+    And the action status is "fixed"
+
+  Scenario: Repair detects and creates missing Broker CR
+    Given no Broker CR exists in namespace "missing-broker-broker"
+    When I run "acmlab submariner repair missing-broker"
+    Then a Broker CR "submariner-broker" is created in namespace "missing-broker-broker"
+    And the action status is "fixed"
+
+  Scenario: Repair detects duplicate ManagedClusterSet finalizers
+    Given ManagedClusterSet "dup-set" has duplicate "submariner-cleanup" finalizers
+    When I run "acmlab submariner repair dup-set"
+    Then the duplicate finalizers are deduplicated
+    And the action status is "fixed"
+
+  Scenario: Repair dry-run previews without changes
+    Given ManagedClusterAddOn/submariner on "spoke1" has stuck finalizers
+    When I run "acmlab submariner repair stuck-set --dry-run"
+    Then the action status is "would-fix"
+    And the addon finalizers are not modified
+
+  Scenario: Disable reports stuck clusters in error message
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And the ManagedClusterAddOn resources have stuck finalizers
+    When I disable Submariner for ClusterSet "prod-set"
+    Then the error message lists the stuck clusters
+    And the message suggests running "acmlab submariner repair"
+
+  Scenario: Enable auto-detects IBM Cloud and sets forceUDPEncaps
+    Given a ManagedClusterSet "ibm-set" with IBM Cloud clusters "ibm1" and "ibm2"
+    When I run "acmlab submariner enable ibm-set"
+    Then each SubmarinerConfig includes forceUDPEncaps=true
+    And the log includes "IBM Cloud detected"
+
+  Scenario: Enable does not auto-set forceUDPEncaps when load-balancer requested
+    Given a ManagedClusterSet "ibm-set" with IBM Cloud clusters "ibm1" and "ibm2"
+    When I run "acmlab submariner enable ibm-set --load-balancer"
+    Then each SubmarinerConfig includes loadBalancerEnable=true
+    And forceUDPEncaps is not auto-set
+
+  Scenario: SubmarinerConfig includes NATTDiscoveryPort
+    When I enable Submariner for ClusterSet "prod-set"
+    Then each SubmarinerConfig includes NATTDiscoveryPort=4490
+
+  Scenario: Diagnose shows gateway endpoints when connections fail
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And connections are degraded with reason "ConnectionsNotEstablished"
+    And gateway endpoints exist in the broker namespace
+    When I run "acmlab submariner diagnose prod-set"
+    Then a check "endpoint/spoke1" reports gateway IP and port information
+    And a check "endpoint/spoke2" reports gateway IP and port information
+
+  Scenario: Diagnose hides endpoints when connections are healthy
+    Given Submariner is enabled for ClusterSet "prod-set"
+    And all connections are healthy
+    When I run "acmlab submariner diagnose prod-set"
+    Then no "endpoint/*" checks appear in the output
+
+  Scenario: Diagnose shows IBM Cloud firewall requirements on connection failure
+    Given Submariner is enabled for ClusterSet "ibm-set"
+    And connections are degraded on IBM Cloud clusters
+    When I run "acmlab submariner diagnose ibm-set"
+    Then a check "firewall/ibm1" reports "fail"
+    And the message includes UDP ports 4500, 4490, and 500
+    And the message includes ibmcloud CLI command for security group rules
+
+  Scenario: Diagnose no firewall check when connections are healthy
+    Given Submariner is enabled for ClusterSet "ibm-set"
+    And all connections are healthy on IBM Cloud clusters
+    When I run "acmlab submariner diagnose ibm-set"
+    Then no "firewall/*" checks appear in the output

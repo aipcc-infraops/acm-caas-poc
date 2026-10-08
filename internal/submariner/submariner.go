@@ -49,7 +49,9 @@ func New(c *client.Client, cfg config.Config, logger *slog.Logger) *Manager {
 }
 
 type EnableOpts struct {
-	Globalnet bool
+	Globalnet      bool
+	ForceUDPEncaps bool
+	LoadBalancer   bool
 }
 
 func (m *Manager) Enable(ctx context.Context, clusterSet string, opts EnableOpts) error {
@@ -63,6 +65,10 @@ func (m *Manager) Enable(ctx context.Context, clusterSet string, opts EnableOpts
 		return fmt.Errorf("no clusters found in ClusterSet %q", clusterSet)
 	}
 
+	if err := m.ensureBrokerCR(ctx, clusterSet); err != nil {
+		m.logger.Info("submariner.Enable", "broker_cr", err.Error())
+	}
+
 	for i, name := range clusters {
 		credsSecret, err := m.lookupCredentialsSecret(ctx, name)
 		if err != nil {
@@ -74,10 +80,21 @@ func (m *Manager) Enable(ctx context.Context, clusterSet string, opts EnableOpts
 			return fmt.Errorf("creating submariner addon for %s: %w", name, err)
 		}
 
-		cfgOpts := SubmarinerConfigOpts{CredentialsSecret: credsSecret}
+		cfgOpts := SubmarinerConfigOpts{
+			CredentialsSecret: credsSecret,
+			ForceUDPEncaps:    opts.ForceUDPEncaps,
+			LoadBalancer:      opts.LoadBalancer,
+		}
 		if opts.Globalnet {
 			cfgOpts.GlobalCIDR = defaultGlobalCIDR(i)
 		}
+
+		platform := m.detectPlatform(ctx, name)
+		if platform == "ibmcloud" && !opts.ForceUDPEncaps && !opts.LoadBalancer {
+			cfgOpts.ForceUDPEncaps = true
+			m.logger.Info("submariner.Enable", "cluster", name, "auto_config", "forceUDPEncaps=true (IBM Cloud detected)")
+		}
+
 		cfg := buildSubmarinerConfig(name, cfgOpts)
 		if err := m.createOrUpdateSubmarinerConfig(ctx, name, cfg); err != nil {
 			return fmt.Errorf("creating/updating submariner config for %s: %w", name, err)
@@ -95,6 +112,30 @@ func (m *Manager) Enable(ctx context.Context, clusterSet string, opts EnableOpts
 	return nil
 }
 
+func (m *Manager) ensureBrokerCR(ctx context.Context, clusterSet string) error {
+	brokerNS := clusterSet + "-broker"
+	nsObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": brokerNS,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed": "true",
+				},
+			},
+		},
+	}
+	if err := m.client.CreateIfNotExists(ctx, client.GVRNamespace, "", nsObj); err != nil {
+		return fmt.Errorf("ensuring broker namespace %s: %w", brokerNS, err)
+	}
+	broker := buildBrokerCR(brokerNS)
+	if err := m.client.CreateIfNotExists(ctx, client.GVRSubmarinerBroker, brokerNS, broker); err != nil {
+		return fmt.Errorf("ensuring Broker CR in %s: %w", brokerNS, err)
+	}
+	return nil
+}
+
 func (m *Manager) createOrUpdateSubmarinerConfig(ctx context.Context, namespace string, desired *unstructured.Unstructured) error {
 	existing, err := m.client.Get(ctx, client.GVRSubmarinerConfig, namespace, "submariner")
 	if err != nil {
@@ -103,6 +144,19 @@ func (m *Manager) createOrUpdateSubmarinerConfig(ctx context.Context, namespace 
 	desired.SetResourceVersion(existing.GetResourceVersion())
 	_, err = m.client.Update(ctx, client.GVRSubmarinerConfig, namespace, desired)
 	return err
+}
+
+func (m *Manager) detectPlatform(ctx context.Context, cluster string) string {
+	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, cluster, cluster)
+	if err != nil {
+		return ""
+	}
+	for _, p := range []string{"ibmcloud", "aws", "gcp", "azure", "openstack", "vsphere"} {
+		if _, found, _ := unstructured.NestedMap(cd.Object, "spec", "platform", p); found {
+			return p
+		}
+	}
+	return ""
 }
 
 func (m *Manager) lookupCredentialsSecret(ctx context.Context, cluster string) (string, error) {
@@ -204,7 +258,8 @@ func (m *Manager) Disable(ctx context.Context, clusterSet string) error {
 	}
 
 	if !m.waitForAddonCleanup(ctx, clusters) {
-		return fmt.Errorf("Submariner resources deleted but addon cleanup timed out after 60s — wait before re-enabling to avoid stale state")
+		stuckClusters := m.listStuckAddons(ctx, clusters)
+		return fmt.Errorf("Submariner resources deleted but addon cleanup timed out after 60s on %v — run 'acmlab submariner repair %s' or wait before re-enabling", stuckClusters, clusterSet)
 	}
 	return nil
 }
@@ -231,6 +286,21 @@ func (m *Manager) waitForAddonCleanup(ctx context.Context, clusters []string) bo
 	}
 	m.logger.Info("submariner.waitForAddonCleanup", "result", "timed out waiting for addon removal")
 	return false
+}
+
+func (m *Manager) listStuckAddons(ctx context.Context, clusters []string) []string {
+	var stuck []string
+	for _, name := range clusters {
+		addon, err := m.client.Get(ctx, client.GVRManagedClusterAddOn, name, "submariner")
+		if err != nil {
+			continue
+		}
+		ts, _, _ := unstructured.NestedString(addon.Object, "metadata", "deletionTimestamp")
+		if ts != "" {
+			stuck = append(stuck, name)
+		}
+	}
+	return stuck
 }
 
 func (m *Manager) Status(ctx context.Context, clusterSet string) (*SubmarinerStatus, error) {

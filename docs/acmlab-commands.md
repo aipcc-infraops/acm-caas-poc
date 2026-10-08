@@ -1015,8 +1015,14 @@ Enables Submariner on a ManagedClusterSet by deploying the Submariner addon and 
 
 Options:
 - `--globalnet`: enable Globalnet for overlapping Pod/Service CIDRs (auto-assigns 242.{i}.0.0/16 per cluster)
+- `--force-udp-encaps`: force UDP encapsulation for NAT traversal (sets `forceUDPEncaps: true` in SubmarinerConfig)
+- `--load-balancer`: enable LoadBalancer for gateway (not supported on IBM Cloud UDP)
 - `--wait`: block until all connections are established
-- `--timeout`: maximum wait duration (default: 5m, requires `--wait`)
+- `--timeout`: maximum wait duration (default: 10m, requires `--wait`)
+
+Enable also ensures the Broker CR (`submariner-broker`) exists in the `<clusterset>-broker` namespace. This is required by the ACM add-on controller.
+
+**IBM Cloud auto-detection**: When Enable detects an IBM Cloud cluster (via ClusterDeployment platform), it automatically sets `forceUDPEncaps: true` in the SubmarinerConfig. IBM Cloud VPC does not support ESP (protocol 50) natively, so all IPSec traffic must use UDP encapsulation (NAT-T on port 4500). This auto-detection is skipped if `--load-balancer` is explicitly set. The SubmarinerConfig also includes `NATTDiscoveryPort: 4490` for explicit NAT discovery configuration.
 
 ```
 $ acmlab submariner enable prod-set --globalnet --wait --timeout 10m
@@ -1029,7 +1035,7 @@ All connections established.
 
 #### `acmlab submariner disable <clusterset>`
 
-Disables Submariner on a ManagedClusterSet by removing addons and SubmarinerConfigs.
+Disables Submariner on a ManagedClusterSet by removing addons and SubmarinerConfigs. Waits up to 60s for addon cleanup. If cleanup times out, returns an error listing the stuck clusters and suggests running `acmlab submariner repair`.
 
 #### `acmlab submariner status <clusterset>`
 
@@ -1040,20 +1046,34 @@ Options:
 
 #### `acmlab submariner diagnose <clusterset>`
 
-Runs connectivity diagnostics: checks addon health, SubmarinerConfig presence, gateway conditions, connection status, and recommends Globalnet if overlapping CIDRs detected.
+Runs connectivity diagnostics: checks addon health, SubmarinerConfig presence, Broker CR existence, gateway conditions, connection status, IBM Cloud UDP warnings, and recommends Globalnet if overlapping CIDRs detected.
 
 Options:
 - `--json`: output as JSON
 
+Checks performed:
+- Cluster set membership (at least 2 clusters, no local-cluster)
+- Broker CR presence in `<clusterset>-broker` namespace
+- Addon conditions (Available, Gateway, Agent, Broker, Manifest, Connections)
+- SubmarinerConfig and credentials secret existence
+- IBM Cloud UDP LoadBalancer incompatibility warning
+- Globalnet recommendation when connections fail
+- **Gateway endpoint inspection** (when connections fail): reads Submariner endpoint objects from the broker namespace and reports each gateway's public/private IP, NAT status, backend, and UDP/NAT-T ports
+- **IBM Cloud firewall port check** (when connections fail): detects IBM Cloud clusters and reports the specific VPC security group rules required (UDP 4500, 4490, 500) with `ibmcloud` CLI commands
+
+#### `acmlab submariner repair <clusterset>`
+
+Detects and repairs stuck Submariner state: stuck addon finalizers, missing Broker CR, and duplicate ManagedClusterSet finalizers.
+
+Options:
+- `--dry-run`: preview repairs without making changes
+- `--json`: output as JSON
+
 ```
-$ acmlab submariner diagnose prod-set
-=== Submariner Diagnostics for prod-set ===
-Checks:
-  ✓ Addon installed on all clusters
-  ✓ SubmarinerConfig present on all clusters
-  ✓ Gateway nodes healthy
-  ⚠ Overlapping Pod CIDRs detected — consider enabling Globalnet
-Connections: 2/2 established
+$ acmlab submariner repair stuck-set
+  [FIXED]      stuck-addon/spoke1             Removed stuck finalizers from ManagedClusterAddOn/submariner on spoke1
+  [FIXED]      broker-cr                      Created Broker CR in stuck-set-broker
+  [ok]         duplicate-finalizers/stuck-set  No duplicate finalizers
 ```
 
 #### `acmlab submariner test-connectivity <cluster-a> <cluster-b>`
