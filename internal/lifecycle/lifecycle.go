@@ -145,7 +145,7 @@ func (m *Manager) GetPowerStateStatus(ctx context.Context, namespace, name strin
 	cd, err := m.client.Get(ctx, client.GVRClusterDeployment, namespace, name)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return m.getCAPIPowerState(ctx, name)
+			return m.getCAPIPowerStateStatus(ctx, name)
 		}
 		return "", fmt.Errorf("getting ClusterDeployment: %w", err)
 	}
@@ -277,7 +277,7 @@ func (m *Manager) ListClustersWithLifecycle(ctx context.Context) ([]string, erro
 }
 
 const preHibernateAnnotation = "acmlab.redhat.com/pre-hibernate-replicas"
-const defaultCAPIReplicas = 2
+const defaultCAPIReplicas = 1
 
 func (m *Manager) HibernateCAPI(ctx context.Context, name string) error {
 	m.logger.Info("lifecycle.HibernateCAPI", "cluster", name)
@@ -378,6 +378,35 @@ func (m *Manager) getCAPIPowerState(ctx context.Context, name string) (PowerStat
 	return PowerStateHibernating, nil
 }
 
+func (m *Manager) getCAPIPowerStateStatus(ctx context.Context, name string) (PowerState, error) {
+	mds, err := m.listCAPIMachineDeployments(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if len(mds) == 0 {
+		return "", fmt.Errorf("no ClusterDeployment or CAPI MachineDeployment found for cluster %s", name)
+	}
+
+	for _, md := range mds {
+		specReplicas, _, _ := unstructured.NestedInt64(md.Object, "spec", "replicas")
+		if specReplicas == 0 {
+			continue
+		}
+		readyReplicas, _, _ := unstructured.NestedInt64(md.Object, "status", "readyReplicas")
+		if readyReplicas > 0 {
+			return PowerStateRunning, nil
+		}
+		return PowerStateUnknown, nil
+	}
+	for _, md := range mds {
+		statusReplicas, _, _ := unstructured.NestedInt64(md.Object, "status", "replicas")
+		if statusReplicas > 0 {
+			return PowerStateUnknown, nil
+		}
+	}
+	return PowerStateHibernating, nil
+}
+
 func (m *Manager) listCAPIMachineDeployments(ctx context.Context, clusterName string) ([]unstructured.Unstructured, error) {
 	list, err := m.client.List(ctx, client.GVRCAPIMachineDeployment, clusterName, "")
 	if err != nil {
@@ -453,9 +482,10 @@ func (m *Manager) diagnoseCAPI(ctx context.Context, name string, report *Diagnos
 
 	report.Platform = "CAPI"
 
-	state, _ := m.getCAPIPowerState(ctx, name)
-	report.HivePowerSpec = state
-	report.HivePowerStatus = state
+	specState, _ := m.getCAPIPowerState(ctx, name)
+	statusState, _ := m.getCAPIPowerStateStatus(ctx, name)
+	report.HivePowerSpec = specState
+	report.HivePowerStatus = statusState
 
 	totalReplicas := int64(0)
 	for _, md := range mds {
@@ -495,7 +525,7 @@ func (m *Manager) diagnoseCAPI(ctx context.Context, name string, report *Diagnos
 		available, joined := extractMCConditions(mc)
 		report.ACMAvailable = available
 		report.ACMJoined = joined
-		report.Checks = append(report.Checks, checkACMHealth(state, available, joined)...)
+		report.Checks = append(report.Checks, checkACMHealth(specState, available, joined)...)
 	}
 
 	report.Suggestions = deriveSuggestions(report.Checks)

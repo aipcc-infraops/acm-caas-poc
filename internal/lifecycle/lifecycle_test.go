@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1625,9 +1626,12 @@ func TestPostResumeRecoveryMissingCluster(t *testing.T) {
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
-	_, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
-	if err == nil {
-		t.Fatal("expected error for missing cluster")
+	result, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Message, "Skipped") {
+		t.Errorf("expected skip message for CAPI cluster, got %q", result.Message)
 	}
 }
 
@@ -2219,9 +2223,12 @@ func TestPostResumeRecoveryMissingClusterDeployment(t *testing.T) {
 	c := &client.Client{Dynamic: fakeDynamic}
 	m := New(c, config.Config{}, discardLogger)
 
-	_, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
-	if err == nil {
-		t.Fatal("expected error for missing ClusterDeployment")
+	result, err := m.PostResumeRecovery(context.Background(), "spoke1", "spoke1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Message, "Skipped") {
+		t.Errorf("expected skip message for CAPI cluster, got %q", result.Message)
 	}
 }
 

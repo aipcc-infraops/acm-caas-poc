@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -325,6 +326,57 @@ func (m *Manager) EnforceSSO(ctx context.Context, namespace string) error {
 func (m *Manager) CleanupRBAC(ctx context.Context, cluster string) error {
 	m.logger.Info("idp.CleanupRBAC", "cluster", cluster)
 	return m.client.DeleteIfExists(ctx, client.GVRManifestWork, cluster, "idp-oauth-rbac")
+}
+
+func (m *Manager) WaitForApplied(ctx context.Context, idpName, cluster string, timeout time.Duration) error {
+	m.logger.Info("idp.WaitForApplied", "name", idpName, "cluster", cluster, "timeout", timeout)
+	name := manifestWorkName(idpName)
+
+	obj, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
+	if err == nil && isManifestWorkApplied(obj.Object) {
+		return nil
+	}
+
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for IdP ManifestWork %s to be applied on %s", name, cluster)
+		case <-ticker.C:
+			obj, err := m.client.Get(ctx, client.GVRManifestWork, cluster, name)
+			if err != nil {
+				continue
+			}
+			if isManifestWorkApplied(obj.Object) {
+				return nil
+			}
+		}
+	}
+}
+
+func isManifestWorkApplied(obj map[string]interface{}) bool {
+	status, _ := obj["status"].(map[string]interface{})
+	if status == nil {
+		return false
+	}
+	conditions, _ := status["conditions"].([]interface{})
+	for _, raw := range conditions {
+		cond, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		condType, _ := cond["type"].(string)
+		condStatus, _ := cond["status"].(string)
+		if strings.EqualFold(condType, "Applied") && condStatus == "True" {
+			return true
+		}
+	}
+	return false
 }
 
 func manifestWorkName(idpName string) string {

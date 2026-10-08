@@ -734,3 +734,328 @@ func TestDeployComplianceOperatorRollbackOnBindingError(t *testing.T) {
 		t.Error("Placement should have been rolled back")
 	}
 }
+
+func TestDiagnoseComplianceNotDeployed(t *testing.T) {
+	mgr := complianceManager()
+	result, err := mgr.DiagnoseCompliance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DiagnoseCompliance failed: %v", err)
+	}
+	if result.Healthy {
+		t.Error("expected unhealthy when nothing deployed")
+	}
+	if result.Cluster != "spoke1" {
+		t.Errorf("Cluster = %q, want spoke1", result.Cluster)
+	}
+	hasOperatorFail := false
+	for _, c := range result.Checks {
+		if c.Name == "operator-policy" && c.Status == "fail" {
+			hasOperatorFail = true
+		}
+	}
+	if !hasOperatorFail {
+		t.Error("expected operator-policy fail check")
+	}
+	if len(result.Checks) != 1 {
+		t.Errorf("expected 1 check (early return), got %d", len(result.Checks))
+	}
+}
+
+func TestDiagnoseComplianceOperatorDeployed(t *testing.T) {
+	mgr := complianceManager()
+	if err := mgr.DeployComplianceOperator(context.Background(), "spoke1", ""); err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+
+	result, err := mgr.DiagnoseCompliance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DiagnoseCompliance failed: %v", err)
+	}
+	hasOperatorPass := false
+	for _, c := range result.Checks {
+		if c.Name == "operator-policy" && c.Status == "pass" {
+			hasOperatorPass = true
+		}
+	}
+	if !hasOperatorPass {
+		t.Error("expected operator-policy pass check")
+	}
+}
+
+func TestDiagnoseComplianceAllHealthy(t *testing.T) {
+	opName := complianceOperatorPolicyName("spoke1")
+	scanName := complianceScanPolicyName("spoke1")
+
+	opPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1beta1",
+			"kind":       "OperatorPolicy",
+			"metadata": map[string]interface{}{
+				"name":      opName,
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "Compliant",
+			},
+		},
+	}
+
+	healthPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1",
+			"kind":       "Policy",
+			"metadata": map[string]interface{}{
+				"name":      opName + "-health",
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "Compliant",
+			},
+		},
+	}
+
+	scanPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1",
+			"kind":       "Policy",
+			"metadata": map[string]interface{}{
+				"name":      scanName,
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "Compliant",
+			},
+		},
+	}
+
+	mgr := complianceManager(opPolicy, healthPolicy, scanPolicy)
+	result, err := mgr.DiagnoseCompliance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DiagnoseCompliance failed: %v", err)
+	}
+	if !result.Healthy {
+		t.Error("expected healthy when all components are compliant")
+	}
+
+	checks := map[string]string{}
+	for _, c := range result.Checks {
+		checks[c.Name] = c.Status
+	}
+	if checks["operator-policy"] != "pass" {
+		t.Errorf("operator-policy = %q, want pass", checks["operator-policy"])
+	}
+	if checks["operator-compliant"] != "pass" {
+		t.Errorf("operator-compliant = %q, want pass", checks["operator-compliant"])
+	}
+	if checks["health-policy"] != "pass" {
+		t.Errorf("health-policy = %q, want pass", checks["health-policy"])
+	}
+	if checks["scan-policy"] != "pass" {
+		t.Errorf("scan-policy = %q, want pass", checks["scan-policy"])
+	}
+}
+
+func TestDiagnoseComplianceOperatorNotCompliant(t *testing.T) {
+	opName := complianceOperatorPolicyName("spoke1")
+	opPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1beta1",
+			"kind":       "OperatorPolicy",
+			"metadata": map[string]interface{}{
+				"name":      opName,
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "NonCompliant",
+			},
+		},
+	}
+
+	mgr := complianceManager(opPolicy)
+	result, err := mgr.DiagnoseCompliance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DiagnoseCompliance failed: %v", err)
+	}
+	if result.Healthy {
+		t.Error("expected unhealthy when operator not compliant")
+	}
+	hasComplianceFail := false
+	for _, c := range result.Checks {
+		if c.Name == "operator-compliant" && c.Status == "fail" {
+			hasComplianceFail = true
+		}
+	}
+	if !hasComplianceFail {
+		t.Error("expected operator-compliant fail check")
+	}
+}
+
+func TestDiagnoseComplianceHealthNotReady(t *testing.T) {
+	opName := complianceOperatorPolicyName("spoke1")
+	opPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1beta1",
+			"kind":       "OperatorPolicy",
+			"metadata": map[string]interface{}{
+				"name":      opName,
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "Compliant",
+			},
+		},
+	}
+	healthPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1",
+			"kind":       "Policy",
+			"metadata": map[string]interface{}{
+				"name":      opName + "-health",
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "NonCompliant",
+			},
+		},
+	}
+
+	mgr := complianceManager(opPolicy, healthPolicy)
+	result, err := mgr.DiagnoseCompliance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DiagnoseCompliance failed: %v", err)
+	}
+	if result.Healthy {
+		t.Error("expected unhealthy when health policy not compliant")
+	}
+	hasHealthFail := false
+	for _, c := range result.Checks {
+		if c.Name == "health-policy" && c.Status == "fail" {
+			hasHealthFail = true
+		}
+	}
+	if !hasHealthFail {
+		t.Error("expected health-policy fail check")
+	}
+}
+
+func TestDiagnoseComplianceScanNonCompliant(t *testing.T) {
+	opName := complianceOperatorPolicyName("spoke1")
+	scanName := complianceScanPolicyName("spoke1")
+
+	opPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1beta1",
+			"kind":       "OperatorPolicy",
+			"metadata": map[string]interface{}{
+				"name":      opName,
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "Compliant",
+			},
+		},
+	}
+
+	scanPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1",
+			"kind":       "Policy",
+			"metadata": map[string]interface{}{
+				"name":      scanName,
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "NonCompliant",
+			},
+		},
+	}
+
+	mgr := complianceManager(opPolicy, scanPolicy)
+	result, err := mgr.DiagnoseCompliance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DiagnoseCompliance failed: %v", err)
+	}
+	if result.Healthy {
+		t.Error("expected unhealthy when scan is non-compliant")
+	}
+	hasScanFail := false
+	for _, c := range result.Checks {
+		if c.Name == "scan-policy" && c.Status == "fail" {
+			hasScanFail = true
+		}
+	}
+	if !hasScanFail {
+		t.Error("expected scan-policy fail check")
+	}
+}
+
+func TestDiagnoseComplianceNoScanPolicy(t *testing.T) {
+	opName := complianceOperatorPolicyName("spoke1")
+	opPolicy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy.open-cluster-management.io/v1beta1",
+			"kind":       "OperatorPolicy",
+			"metadata": map[string]interface{}{
+				"name":      opName,
+				"namespace": DefaultNamespace,
+			},
+			"status": map[string]interface{}{
+				"compliant": "Compliant",
+			},
+		},
+	}
+
+	mgr := complianceManager(opPolicy)
+	result, err := mgr.DiagnoseCompliance(context.Background(), "spoke1")
+	if err != nil {
+		t.Fatalf("DiagnoseCompliance failed: %v", err)
+	}
+	hasScanWarn := false
+	for _, c := range result.Checks {
+		if c.Name == "scan-policy" && c.Status == "warn" {
+			hasScanWarn = true
+		}
+	}
+	if !hasScanWarn {
+		t.Error("expected scan-policy warn check when no scan created")
+	}
+}
+
+func TestComplianceDiagnoseResultAddCheck(t *testing.T) {
+	r := &ComplianceDiagnoseResult{Healthy: true}
+	r.addCheck("test", "pass", "all good")
+	if !r.Healthy {
+		t.Error("pass should not change healthy to false")
+	}
+	if len(r.Checks) != 1 {
+		t.Fatalf("checks count = %d, want 1", len(r.Checks))
+	}
+	r.addCheck("bad", "fail", "something wrong")
+	if r.Healthy {
+		t.Error("fail should set healthy to false")
+	}
+	if len(r.Checks) != 2 {
+		t.Fatalf("checks count = %d, want 2", len(r.Checks))
+	}
+}
+
+func TestPolicyComplianceStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		obj  map[string]interface{}
+		want string
+	}{
+		{"compliant", map[string]interface{}{"status": map[string]interface{}{"compliant": "Compliant"}}, "Compliant"},
+		{"non-compliant", map[string]interface{}{"status": map[string]interface{}{"compliant": "NonCompliant"}}, "NonCompliant"},
+		{"no-status", map[string]interface{}{}, "Unknown"},
+		{"empty-compliant", map[string]interface{}{"status": map[string]interface{}{}}, "Unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := policyComplianceStatus(tt.obj)
+			if got != tt.want {
+				t.Errorf("policyComplianceStatus() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
