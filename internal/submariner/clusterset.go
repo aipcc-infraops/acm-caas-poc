@@ -45,6 +45,10 @@ func (m *Manager) CreateTestSet(ctx context.Context, opts CreateTestSetOpts) err
 		}
 	}
 
+	if err := m.ensureBrokerCR(ctx, opts.Name); err != nil {
+		m.logger.Info("submariner.CreateTestSet", "broker_cr", err.Error())
+	}
+
 	return nil
 }
 
