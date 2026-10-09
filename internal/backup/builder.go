@@ -18,10 +18,24 @@ func buildBackupSchedule(opts BackupOpts) *unstructured.Unstructured {
 				},
 			},
 			"spec": map[string]interface{}{
-				"veleroSchedule":          opts.Schedule,
-				"veleroTtl":               opts.VeleroTTL,
-				"veleroStorageLocation":   opts.StorageLocation,
+				"veleroSchedule":           opts.Schedule,
+				"veleroTtl":                opts.VeleroTTL,
 				"useManagedServiceAccount": true,
+			},
+		},
+	}
+}
+
+func buildNamespace(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata": map[string]interface{}{
+				"name": name,
+				"labels": map[string]interface{}{
+					"acmlab.redhat.com/managed": "true",
+				},
 			},
 		},
 	}

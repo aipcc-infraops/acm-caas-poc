@@ -151,9 +151,10 @@ func TestEnableWithCustomOpts(t *testing.T) {
 		t.Errorf("ttl = %q, want 168h", ttl)
 	}
 
-	loc, _, _ := unstructured.NestedString(obj.Object, "spec", "veleroStorageLocation")
-	if loc != "s3-bucket" {
-		t.Errorf("storageLocation = %q, want s3-bucket", loc)
+	// veleroStorageLocation removed: field is not present in the installed CRD version.
+	_, hasLoc, _ := unstructured.NestedString(obj.Object, "spec", "veleroStorageLocation")
+	if hasLoc {
+		t.Error("veleroStorageLocation must not be set in spec (unknown field in CRD)")
 	}
 }
 
