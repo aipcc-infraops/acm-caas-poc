@@ -72,6 +72,11 @@ func (m *Manager) Enable(ctx context.Context, opts BackupOpts) error {
 	m.logger.Info("backup.Enable", "namespace", opts.Namespace)
 	m.applyDefaults(&opts)
 
+	ns := buildNamespace(opts.Namespace)
+	if err := m.client.CreateIfNotExists(ctx, client.GVRNamespace, "", ns); err != nil {
+		return fmt.Errorf("ensuring backup namespace %s: %w", opts.Namespace, err)
+	}
+
 	schedule := buildBackupSchedule(opts)
 	if err := m.client.CreateIfNotExists(ctx, client.GVRBackupSchedule, opts.Namespace, schedule); err != nil {
 		return fmt.Errorf("creating BackupSchedule: %w", err)
@@ -156,7 +161,6 @@ func parseBackupStatus(obj map[string]interface{}) *BackupStatus {
 	spec, _ := obj["spec"].(map[string]interface{})
 	if spec != nil {
 		bs.Schedule, _ = spec["veleroSchedule"].(string)
-		bs.StorageLocation, _ = spec["veleroStorageLocation"].(string)
 	}
 
 	status, _ := obj["status"].(map[string]interface{})
