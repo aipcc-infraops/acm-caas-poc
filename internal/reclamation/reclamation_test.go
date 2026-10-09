@@ -46,9 +46,11 @@ func managedClusterWithTTL(name string, ttlHours int, expiry time.Time) *unstruc
 	})
 	obj.SetName(name)
 	obj.SetLabels(map[string]string{
-		"caas/ttl-hours":   "48",
+		"caas/ttl-hours": "48",
+		"caas/owner":     "team-alpha",
+	})
+	obj.SetAnnotations(map[string]string{
 		"caas/expiry-date": expiry.UTC().Format(time.RFC3339),
-		"caas/owner":       "team-alpha",
 	})
 	return obj
 }
@@ -74,7 +76,7 @@ func hiveClusterDeployment(name string) *unstructured.Unstructured {
 	}
 }
 
-func TestSetTTLStampsLabels(t *testing.T) {
+func TestSetTTLStampsLabelsAndAnnotation(t *testing.T) {
 	mc := managedClusterNoTTL("spoke1")
 	m := newTestManager(time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC), mc)
 
@@ -91,8 +93,12 @@ func TestSetTTLStampsLabels(t *testing.T) {
 	if labels["caas/ttl-hours"] != "48" {
 		t.Errorf("ttl-hours = %s, want 48", labels["caas/ttl-hours"])
 	}
-	if labels["caas/expiry-date"] == "" {
-		t.Error("expiry-date label not set")
+	if labels["caas/expiry-date"] != "" {
+		t.Error("expiry-date must not be stored in labels (would fail Kubernetes label validation)")
+	}
+	annotations := obj.GetAnnotations()
+	if annotations["caas/expiry-date"] == "" {
+		t.Error("expiry-date annotation not set")
 	}
 }
 
@@ -110,10 +116,10 @@ func TestSetTTLCalculatesExpiryCorrectly(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 
-	labels := obj.GetLabels()
-	expiry, parseErr := time.Parse(time.RFC3339, labels["caas/expiry-date"])
+	annotations := obj.GetAnnotations()
+	expiry, parseErr := time.Parse(time.RFC3339, annotations["caas/expiry-date"])
 	if parseErr != nil {
-		t.Fatalf("parse expiry: %v", parseErr)
+		t.Fatalf("parse expiry from annotation: %v", parseErr)
 	}
 
 	expected := now.Add(24 * time.Hour)
@@ -213,10 +219,10 @@ func TestExtendTTLAddsHours(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 
-	labels := obj.GetLabels()
-	newExpiry, parseErr := time.Parse(time.RFC3339, labels["caas/expiry-date"])
+	annotations := obj.GetAnnotations()
+	newExpiry, parseErr := time.Parse(time.RFC3339, annotations["caas/expiry-date"])
 	if parseErr != nil {
-		t.Fatalf("parse expiry: %v", parseErr)
+		t.Fatalf("parse expiry from annotation: %v", parseErr)
 	}
 
 	expected := originalExpiry.Add(24 * time.Hour)
@@ -296,11 +302,12 @@ func TestParseClusterTTL(t *testing.T) {
 	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name       string
-		labels     map[string]interface{}
-		wantNil    bool
-		wantExpiry bool
-		wantOwner  string
+		name        string
+		labels      map[string]interface{}
+		annotations map[string]interface{}
+		wantNil     bool
+		wantExpiry  bool
+		wantOwner   string
 	}{
 		{
 			name:    "no TTL label returns nil",
@@ -308,19 +315,22 @@ func TestParseClusterTTL(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:       "valid TTL with expiry in future",
-			labels:     map[string]interface{}{"caas/ttl-hours": "48", "caas/expiry-date": now.Add(24 * time.Hour).Format(time.RFC3339)},
-			wantExpiry: false,
+			name:        "valid TTL with expiry in future",
+			labels:      map[string]interface{}{"caas/ttl-hours": "48"},
+			annotations: map[string]interface{}{"caas/expiry-date": now.Add(24 * time.Hour).Format(time.RFC3339)},
+			wantExpiry:  false,
 		},
 		{
-			name:       "valid TTL with expiry in past",
-			labels:     map[string]interface{}{"caas/ttl-hours": "48", "caas/expiry-date": now.Add(-1 * time.Hour).Format(time.RFC3339)},
-			wantExpiry: true,
+			name:        "valid TTL with expiry in past",
+			labels:      map[string]interface{}{"caas/ttl-hours": "48"},
+			annotations: map[string]interface{}{"caas/expiry-date": now.Add(-1 * time.Hour).Format(time.RFC3339)},
+			wantExpiry:  true,
 		},
 		{
-			name:      "TTL with owner",
-			labels:    map[string]interface{}{"caas/ttl-hours": "36", "caas/expiry-date": now.Add(10 * time.Hour).Format(time.RFC3339), "caas/owner": "team-beta"},
-			wantOwner: "team-beta",
+			name:        "TTL with owner",
+			labels:      map[string]interface{}{"caas/ttl-hours": "36", "caas/owner": "team-beta"},
+			annotations: map[string]interface{}{"caas/expiry-date": now.Add(10 * time.Hour).Format(time.RFC3339)},
+			wantOwner:   "team-beta",
 		},
 		{
 			name:    "invalid TTL hours returns nil",
@@ -335,11 +345,15 @@ func TestParseClusterTTL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			meta := map[string]interface{}{
+				"name":   "test-cluster",
+				"labels": tt.labels,
+			}
+			if tt.annotations != nil {
+				meta["annotations"] = tt.annotations
+			}
 			obj := map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"name":   "test-cluster",
-					"labels": tt.labels,
-				},
+				"metadata": meta,
 			}
 			result := parseClusterTTL(obj, now)
 
@@ -395,8 +409,15 @@ func TestBuildTTLLabelPatch(t *testing.T) {
 	if labels["caas/ttl-hours"] != "48" {
 		t.Errorf("ttl-hours = %v, want 48", labels["caas/ttl-hours"])
 	}
-	if labels["caas/expiry-date"] != "2026-09-19T12:00:00Z" {
-		t.Errorf("expiry-date = %v, want 2026-09-19T12:00:00Z", labels["caas/expiry-date"])
+	if _, hasExpiry := labels["caas/expiry-date"]; hasExpiry {
+		t.Error("caas/expiry-date must not appear in labels (colons are invalid in label values)")
+	}
+	annotations, ok := meta["annotations"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing annotations")
+	}
+	if annotations["caas/expiry-date"] != "2026-09-19T12:00:00Z" {
+		t.Errorf("expiry-date annotation = %v, want 2026-09-19T12:00:00Z", annotations["caas/expiry-date"])
 	}
 }
 

@@ -80,7 +80,7 @@ func policyListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -143,7 +143,7 @@ func policyStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait until compliance status is available")
 	cmd.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "timeout for --wait")
 	return cmd
@@ -201,7 +201,7 @@ Supports three policy types:
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().StringVarP(&remediation, "remediation", "r", "inform", "remediation action: inform or enforce")
 	cmd.Flags().StringVarP(&labels, "labels", "l", "", "cluster label selector (key=value,key2=value2)")
 	cmd.Flags().StringVar(&registries, "registries", "", "allowed registries (comma-separated)")
@@ -239,7 +239,7 @@ func policyRemoveCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	return cmd
 }
 
@@ -266,7 +266,7 @@ func policySetRemediationCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	return cmd
 }
 
@@ -289,7 +289,7 @@ func policyEnableCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	return cmd
 }
 
@@ -312,7 +312,7 @@ func policyDisableCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	return cmd
 }
 
@@ -348,7 +348,7 @@ func policyReportCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -653,7 +653,7 @@ func policyApplySetCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().StringVar(&description, "description", "", "PolicySet description")
 	cmd.Flags().StringSliceVar(&policies, "policies", nil, "policy names to include (required)")
 	cmd.Flags().StringVar(&clusterSet, "cluster-set", "", "scope to a ClusterSet")
@@ -698,7 +698,7 @@ func policyGetSetCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -744,7 +744,7 @@ func policyListSetsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -775,7 +775,7 @@ func policyRemoveSetCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	return cmd
 }
 
@@ -819,7 +819,7 @@ func policyViolationsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -871,7 +871,7 @@ func policyTroubleshootCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: global-set)")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "policy namespace (default: open-cluster-management-global-set)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 	return cmd
 }

@@ -88,17 +88,17 @@ func TestApplyBaselineCreatesResources(t *testing.T) {
 		t.Fatalf("ManifestWork not found: %v", err)
 	}
 
-	_, err = mgr.client.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "gatekeeper-health-spoke1")
+	_, err = mgr.client.Get(context.Background(), client.GVRPolicy, DefaultNamespace, "gk-health-spoke1")
 	if err != nil {
 		t.Fatalf("Health policy not found: %v", err)
 	}
 
-	_, err = mgr.client.Get(context.Background(), client.GVRPlacement, DefaultNamespace, "gatekeeper-health-spoke1-placement")
+	_, err = mgr.client.Get(context.Background(), client.GVRPlacement, DefaultNamespace, "gk-health-spoke1-placement")
 	if err != nil {
 		t.Fatalf("Placement not found: %v", err)
 	}
 
-	_, err = mgr.client.Get(context.Background(), client.GVRPlacementBinding, DefaultNamespace, "gatekeeper-health-spoke1-placement-binding")
+	_, err = mgr.client.Get(context.Background(), client.GVRPlacementBinding, DefaultNamespace, "gk-health-spoke1-placement-binding")
 	if err != nil {
 		t.Fatalf("PlacementBinding not found: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestApplyBaselineWithClusterSet(t *testing.T) {
 		t.Fatalf("ApplyBaseline failed: %v", err)
 	}
 
-	placement, err := mgr.client.Get(context.Background(), client.GVRPlacement, DefaultNamespace, "gatekeeper-health-spoke1-placement")
+	placement, err := mgr.client.Get(context.Background(), client.GVRPlacement, DefaultNamespace, "gk-health-spoke1-placement")
 	if err != nil {
 		t.Fatalf("Placement not found: %v", err)
 	}
@@ -328,8 +328,8 @@ func TestBuildGatekeeperManifestWorkStructure(t *testing.T) {
 
 func TestBuildGatekeeperHealthPolicy(t *testing.T) {
 	pol := buildGatekeeperHealthPolicy("spoke1", "")
-	if pol.GetName() != "gatekeeper-health-spoke1" {
-		t.Errorf("Name = %q, want gatekeeper-health-spoke1", pol.GetName())
+	if pol.GetName() != "gk-health-spoke1" {
+		t.Errorf("Name = %q, want gk-health-spoke1", pol.GetName())
 	}
 	if pol.GetNamespace() != DefaultNamespace {
 		t.Errorf("Namespace = %q, want %s", pol.GetNamespace(), DefaultNamespace)
@@ -338,7 +338,7 @@ func TestBuildGatekeeperHealthPolicy(t *testing.T) {
 
 func TestBuildHealthPlacement(t *testing.T) {
 	p := buildHealthPlacement("spoke1", "team-gpu")
-	if p.GetName() != "gatekeeper-health-spoke1-placement" {
+	if p.GetName() != "gk-health-spoke1-placement" {
 		t.Errorf("Name = %q", p.GetName())
 	}
 	cs, _, _ := unstructured.NestedStringSlice(p.Object, "spec", "clusterSets")
@@ -357,7 +357,7 @@ func TestBuildHealthPlacementNoClusterSet(t *testing.T) {
 
 func TestBuildHealthPlacementBinding(t *testing.T) {
 	b := buildHealthPlacementBinding("spoke1")
-	if b.GetName() != "gatekeeper-health-spoke1-placement-binding" {
+	if b.GetName() != "gk-health-spoke1-placement-binding" {
 		t.Errorf("Name = %q", b.GetName())
 	}
 }
