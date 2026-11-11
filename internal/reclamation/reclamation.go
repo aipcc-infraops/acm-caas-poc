@@ -110,7 +110,7 @@ func (m *Manager) ExtendTTL(ctx context.Context, cluster string, hours int, just
 		return fmt.Errorf("getting ManagedCluster %s: %w", cluster, err)
 	}
 
-	currentExpiry := parseExpiryFromLabels(mc.GetLabels())
+	currentExpiry := parseExpiryFromAnnotations(mc.GetAnnotations())
 	if currentExpiry.IsZero() {
 		return fmt.Errorf("cluster %s has no TTL set", cluster)
 	}
@@ -181,7 +181,8 @@ func parseClusterTTL(obj map[string]interface{}, now time.Time) *ClusterTTL {
 		Owner:    owner,
 	}
 
-	expiryStr, hasExpiry := labels["caas/expiry-date"].(string)
+	annotations, _ := meta["annotations"].(map[string]interface{})
+	expiryStr, hasExpiry := annotations["caas/expiry-date"].(string)
 	if hasExpiry {
 		expiry, parseErr := time.Parse(time.RFC3339, expiryStr)
 		if parseErr == nil {
@@ -193,8 +194,8 @@ func parseClusterTTL(obj map[string]interface{}, now time.Time) *ClusterTTL {
 	return ttl
 }
 
-func parseExpiryFromLabels(labels map[string]string) time.Time {
-	expiryStr, ok := labels["caas/expiry-date"]
+func parseExpiryFromAnnotations(annotations map[string]string) time.Time {
+	expiryStr, ok := annotations["caas/expiry-date"]
 	if !ok {
 		return time.Time{}
 	}
@@ -219,7 +220,9 @@ func buildTTLLabelPatch(ttlHours int, expiry time.Time) map[string]interface{} {
 	return map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"labels": map[string]interface{}{
-				"caas/ttl-hours":   strconv.Itoa(ttlHours),
+				"caas/ttl-hours": strconv.Itoa(ttlHours),
+			},
+			"annotations": map[string]interface{}{
 				"caas/expiry-date": expiry.UTC().Format(time.RFC3339),
 			},
 		},
@@ -229,10 +232,8 @@ func buildTTLLabelPatch(ttlHours int, expiry time.Time) map[string]interface{} {
 func buildExtendPatch(newExpiry time.Time, justification string) map[string]interface{} {
 	return map[string]interface{}{
 		"metadata": map[string]interface{}{
-			"labels": map[string]interface{}{
-				"caas/expiry-date": newExpiry.UTC().Format(time.RFC3339),
-			},
 			"annotations": map[string]interface{}{
+				"caas/expiry-date":          newExpiry.UTC().Format(time.RFC3339),
 				"caas/extend-justification": justification,
 			},
 		},

@@ -296,7 +296,23 @@ func manifestWorkName(cluster string) string {
 }
 
 func healthPolicyName(cluster string) string {
-	return "gatekeeper-health-" + cluster
+	const prefix = "gk-health-"
+	maxLen := 62 - len(DefaultNamespace)
+	name := prefix + cluster
+	if len(name) <= maxLen {
+		return name
+	}
+	// Truncate with a stable hash suffix to stay within the 62-char webhook limit.
+	var h uint32
+	for _, b := range []byte(cluster) {
+		h = h*31 + uint32(b)
+	}
+	suffix := fmt.Sprintf("%08x", h)
+	keep := maxLen - len(prefix) - len(suffix) - 1
+	if keep < 0 {
+		keep = 0
+	}
+	return fmt.Sprintf("%s%s-%s", prefix, cluster[:keep], suffix)
 }
 
 func parseBaselineStatus(cluster string, obj map[string]interface{}) *BaselineStatus {
